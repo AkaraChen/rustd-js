@@ -39,6 +39,11 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
   const fixture = JSON.parse(generated.stdout);
   assert.equal(fixture.package, 'mime');
   assert.ok(fixture.parse.length >= 200, `parse cases ${fixture.parse.length}`);
+  assert.ok(fixture.qpEnc.length >= 50, `qpEnc cases ${fixture.qpEnc.length}`);
+  assert.ok(fixture.qpDec.length >= 25, `qpDec cases ${fixture.qpDec.length}`);
+  assert.ok(fixture.words.length >= 15, `word cases ${fixture.words.length}`);
+  assert.ok(fixture.headers.length >= 25, `header cases ${fixture.headers.length}`);
+  assert.ok(fixture.format.length >= 20, `format cases ${fixture.format.length}`);
   for (const c of fixture.parse) {
     const got = parseNative(c.in);
     assert.equal(got.mediaType, c.mediaType, `mediaType ${c.in}`);
@@ -86,19 +91,32 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
       assert.deepEqual([...got].sort(), [...c.exts].sort(), `exts ${c.ext}`);
     }
   }
+  for (const c of fixture.format) {
+    assert.equal(formatMediaType(c.type, c.params ?? {}), c.formatted, `format ${c.type}`);
+  }
+  for (const c of fixture.headers) {
+    assert.equal(decoder.decodeHeader(c.in), c.out, `header ${JSON.stringify(c.in)}`);
+  }
 });
 
 test('JS generates quoted-printable and media types → Go verifies', () => {
   const generated = go();
   assert.equal(generated.status, 0, generated.stderr);
   const fixture = JSON.parse(generated.stdout);
+  const decoder = new MimeWordDecoder();
   const parse = fixture.parse.map((c) => ({ in: c.in, ...parseNative(c.in) }));
   const qpEnc = [0, 1, 17, 75, 76, 200].map((length, i) => {
     const data = Uint8Array.from({ length }, (_, j) => (j * 31 + i) & 255);
     const encoded = quotedPrintableEncode(data, { binary: true });
     return { id: `js-${length}`, inHex: Buffer.from(data).toString('hex'), outHex: Buffer.from(encoded).toString('hex'), binary: true, mode: 'encode', error: '' };
   });
-  const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [] };
+  const format = fixture.format.map((c) => ({
+    type: c.type,
+    params: c.params ?? {},
+    formatted: formatMediaType(c.type, c.params ?? {}),
+  }));
+  const headers = fixture.headers.map((c) => ({ in: c.in, out: decoder.decodeHeader(c.in) }));
+  const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers };
   const verified = go(['-verify'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
   assert.match(verified.stdout, /Go verified \d+ mime cases/);

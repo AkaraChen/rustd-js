@@ -45,14 +45,27 @@ type ExtCase struct {
 	Exts []string `json:"exts"`
 }
 
+type FormatCase struct {
+	Type      string            `json:"type"`
+	Params    map[string]string `json:"params"`
+	Formatted string            `json:"formatted"`
+}
+
+type HeaderCase struct {
+	In  string `json:"in"`
+	Out string `json:"out"`
+}
+
 type Packet struct {
-	Schema int         `json:"schema"`
-	Package string     `json:"package"`
-	Parse  []ParseCase `json:"parse"`
-	QpEnc  []QpCase    `json:"qpEnc"`
-	QpDec  []QpCase    `json:"qpDec"`
-	Words  []WordCase  `json:"words"`
-	Ext    []ExtCase   `json:"ext"`
+	Schema  int          `json:"schema"`
+	Package string       `json:"package"`
+	Parse   []ParseCase  `json:"parse"`
+	QpEnc   []QpCase     `json:"qpEnc"`
+	QpDec   []QpCase     `json:"qpDec"`
+	Words   []WordCase   `json:"words"`
+	Headers []HeaderCase `json:"headers"`
+	Format  []FormatCase `json:"format"`
+	Ext     []ExtCase    `json:"ext"`
 }
 
 func hexOf(b []byte) string {
@@ -189,6 +202,16 @@ func parseCases() []ParseCase {
 		`text/plain; charset="utf-8"; format=flowed`,
 		`multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW`,
 		`application/x-www-form-urlencoded`,
+		`bogus ;=========`,
+		`application/pdf; x-mac-type="3F3F3F3F"; x-mac-creator="3F3F3F3F" name="a.pdf";`,
+		`bogus/<script>alert</script>`,
+		`bogus/bogus<script>alert</script>`,
+		`attachment; filename=foo,bar.html`,
+		`attachment; ;filename=foo`,
+		`attachment; filename=foo bar.html`,
+		`attachment; filename=foo[1](2).html`,
+		`attachment; filename=foo-ä.html`,
+		`attachment; filename=foo-Ã¤.html`,
 	}
 	for i := 0; i < 80; i++ {
 		inputs = append(inputs, fmt.Sprintf("text/plain; n=%d", i))
@@ -218,15 +241,31 @@ func qpEncCases() []QpCase {
 		[]byte("foo bar"),
 		[]byte("foo bar="),
 		[]byte("foo bar\r"),
+		[]byte("foo bar\r\r"),
 		[]byte("foo bar\n"),
 		[]byte("foo bar\r\n"),
+		[]byte("foo bar\r\r\n"),
 		[]byte("foo bar "),
 		[]byte("foo bar\t"),
+		[]byte("foo bar  "),
+		[]byte("foo bar \n"),
+		[]byte("foo bar \r"),
+		[]byte("foo bar \r\n"),
+		[]byte("foo bar  \n"),
+		[]byte("foo bar  \n "),
 		[]byte("¡Hola Señor!"),
+		[]byte("\t !\"#$%&'()*+,-./ :;<>?@[\\]^_`{|}~"),
 		bytes.Repeat([]byte("a"), 75),
 		bytes.Repeat([]byte("a"), 76),
-		bytes.Repeat([]byte("a"), 73),
 		append(bytes.Repeat([]byte("a"), 72), '='),
+		append(bytes.Repeat([]byte("a"), 73), '='),
+		append(bytes.Repeat([]byte("a"), 74), '='),
+		append(bytes.Repeat([]byte("a"), 75), '='),
+		bytes.Repeat([]byte(" "), 73),
+		bytes.Repeat([]byte(" "), 74),
+		bytes.Repeat([]byte(" "), 75),
+		bytes.Repeat([]byte(" "), 76),
+		bytes.Repeat([]byte(" "), 77),
 		[]byte("foo bar  \n "),
 		[]byte("=\r\n"),
 		bytes.Repeat([]byte("x"), 200),
@@ -278,6 +317,13 @@ func qpDecCases() []QpCase {
 		"foo=",
 		"=",
 		"Now's the time =\nfor all folk to come=\n to the aid of their country.",
+		"foo  \n\nfoo =\n\nfoo=20\n\n",
+		"foo\nbar",
+		"foo\rbar",
+		"foo\r\nbar",
+		"foo=\rbar",
+		"foo=\r\r\r \nbar",
+		"accept UTF-8 right quotation mark: ’",
 	}
 	var out []QpCase
 	for i, in := range inputs {
@@ -312,6 +358,11 @@ func wordCases() []WordCase {
 		{"utf-8", "snowman ☃", "b"},
 		{"iso-8859-1", "café", "b"},
 		{"utf-8", "line\nbreak", "q"},
+		{"utf-8", "\t !\"#$%&'()*+,-./ :;<>?@[\\]^_`{|}~", "q"},
+		{"utf-8", stringsRepeat("é", 10), "q"},
+		{"utf-8", stringsRepeat("é", 11), "q"},
+		{"utf-8", stringsRepeat("à", 30), "q"},
+		{"utf-8", stringsRepeat("ï", 25), "b"},
 	}
 	var out []WordCase
 	for _, s := range specs {
@@ -346,6 +397,98 @@ func mustDecodeHeader(s string) string {
 	return out
 }
 
+func stringsRepeat(s string, n int) string {
+	out := make([]byte, 0, len(s)*n)
+	for i := 0; i < n; i++ {
+		out = append(out, s...)
+	}
+	return string(out)
+}
+
+func headerCases() []HeaderCase {
+	inputs := []string{
+		"=?UTF-8?Q?=C2=A1Hola,_se=C3=B1or!?=",
+		"=?UTF-8?Q?Fran=C3=A7ois-J=C3=A9r=C3=B4me?=",
+		"=?UTF-8?q?ascii?=",
+		"=?utf-8?B?QW5kcsOp?=",
+		"=?ISO-8859-1?Q?Rapha=EBl_Dupont?=",
+		"Jean",
+		"=?utf-8?b?IkFudG9uaW8gSm9zw6kiIDxqb3NlQGV4YW1wbGUub3JnPg==?=",
+		"=?UTF-8?A?Test?=",
+		"=?UTF-8?Q?A=B?=",
+		"=?UTF-8?Q?=A?=",
+		"=?UTF-8?A?A?=",
+		"=?",
+		"=?UTF-8?",
+		"=?UTF-8?=",
+		"=?UTF-8?Q",
+		"=?UTF-8?Q?",
+		"=?UTF-8?Q?=",
+		"=?UTF-8?Q?A",
+		"=?UTF-8?Q?A?",
+		"=?ISO-8859-1?Q?a?=",
+		"=?ISO-8859-1?Q?a?= b",
+		"=?ISO-8859-1?Q?a?= =?ISO-8859-1?Q?b?=",
+		"=?ISO-8859-1?Q?a?=  =?ISO-8859-1?Q?b?=",
+		"=?ISO-8859-1?Q?a?= \r\n\t =?ISO-8859-1?Q?b?=",
+		"=?ISO-8859-1?Q?a_b?=",
+		"=?ISO-8859-1?Q?a?==?ISO-8859-1?Q?b?=",
+		"Hello =?utf-8?q?Fran=C3=A7ois-J=C3=A9r=C3=B4me?= there",
+		"=?utf-8?q?Fran=C3=A7ois-J=C3=A9r=C3=B4me?= =?utf-8?b?Q2Fmw6k=?=",
+		"=?US-ASCII?Q?foo_bar?=",
+		"=?ISO-8859-1?Q?caf=E9?=",
+	}
+	out := make([]HeaderCase, 0, len(inputs))
+	for _, in := range inputs {
+		out = append(out, HeaderCase{In: in, Out: mustDecodeHeader(in)})
+	}
+	return out
+}
+
+func formatCases() []FormatCase {
+	type spec struct {
+		typ    string
+		params map[string]string
+	}
+	specs := []spec{
+		{"noslash", map[string]string{"X": "Y"}},
+		{"foo bar/baz", nil},
+		{"foo/bar baz", nil},
+		{"attachment", map[string]string{"filename": "ĄĄŽŽČČŠŠ"}},
+		{"attachment", map[string]string{"filename": "ÁÁÊÊÇÇÎÎ"}},
+		{"attachment", map[string]string{"filename": "数据统计.png"}},
+		{"foo/BAR", nil},
+		{"foo/BAR", map[string]string{"X": "Y"}},
+		{"foo/BAR", map[string]string{"space": "With space"}},
+		{"foo/BAR", map[string]string{"quote": `With "quote`}},
+		{"foo/BAR", map[string]string{"bslash": `With \backslash`}},
+		{"foo/BAR", map[string]string{"both": `With \backslash and "quote`}},
+		{"foo/BAR", map[string]string{"": "empty attribute"}},
+		{"foo/BAR", map[string]string{"bad attribute": "baz"}},
+		{"foo/BAR", map[string]string{"nonascii": "not an ascii character: ä"}},
+		{"foo/BAR", map[string]string{"ctl": "newline: \n nil: \000"}},
+		{"foo/bar", map[string]string{"a": "av", "b": "bv", "c": "cv"}},
+		{"foo/bar", map[string]string{"0": "'", "9": "'"}},
+		{"foo", map[string]string{"bar": ""}},
+		{"Text/Plain", map[string]string{"charset": "utf-8"}},
+		{"application/x-stuff", map[string]string{"title": "This is ***fun***"}},
+		{"application/x-stuff", map[string]string{"title": "This is fun€"}},
+	}
+	out := make([]FormatCase, 0, len(specs))
+	for _, s := range specs {
+		params := s.params
+		if params == nil {
+			params = map[string]string{}
+		}
+		out = append(out, FormatCase{
+			Type:      s.typ,
+			Params:    params,
+			Formatted: mime.FormatMediaType(s.typ, s.params),
+		})
+	}
+	return out
+}
+
 func extCases() []ExtCase {
 	exts := []string{".txt", ".html", ".HTML", ".json", ".wasm", ".png", ".unknownext", ".tar.gz", ".js"}
 	var out []ExtCase
@@ -376,7 +519,7 @@ func main() {
 		if packet.Schema != 1 || packet.Package != "mime" {
 			fail(fmt.Errorf("invalid packet"))
 		}
-		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words) == 0 {
+		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers) == 0 {
 			fail(fmt.Errorf("empty cases"))
 		}
 		for _, c := range packet.Parse {
@@ -427,10 +570,34 @@ func main() {
 				fail(fmt.Errorf("qp dec mismatch %s got %s/%q want %s/%q", c.ID, hexOf(buf.Bytes()), errText, c.OutHex, c.Error))
 			}
 		}
-		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words))
+		for _, c := range packet.Format {
+			params := c.Params
+			if params == nil {
+				params = map[string]string{}
+			}
+			got := mime.FormatMediaType(c.Type, params)
+			if got != c.Formatted {
+				fail(fmt.Errorf("format mismatch %q: got %q want %q", c.Type, got, c.Formatted))
+			}
+			if c.Formatted != "" {
+				mt, p, err := mime.ParseMediaType(c.Formatted)
+				if err != nil {
+					fail(fmt.Errorf("format parse %q: %v", c.Formatted, err))
+				}
+				if mt != c.Type && mt != "" {
+					_ = p
+				}
+			}
+		}
+		for _, c := range packet.Headers {
+			if mustDecodeHeader(c.In) != c.Out {
+				fail(fmt.Errorf("header mismatch %q", c.In))
+			}
+		}
+		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers))
 		return
 	}
-	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Ext: extCases()}
+	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Headers: headerCases(), Format: formatCases(), Ext: extCases()}
 	var writer io.Writer = os.Stdout
 	if *out != "" {
 		f, err := os.Create(*out)

@@ -10,6 +10,8 @@ test('RFC 2047 encode/decode round-trips mixed header text', () => {
   assert.equal(decoder.decodeHeader(`Hello ${word} there`), 'Hello François-Jérôme there');
   const adjacent = `${word} ${encodeWord('utf-8', 'Café', 'b')}`;
   assert.equal(decoder.decodeHeader(adjacent), 'François-JérômeCafé');
+  assert.equal(decoder.decodeHeader('=?ISO-8859-1?Q?a?= =?ISO-8859-1?Q?b?='), 'ab');
+  assert.equal(decoder.decodeHeader('=?ISO-8859-1?Q?a?==?ISO-8859-1?Q?b?='), decoder.decodeHeader('=?ISO-8859-1?Q?a?= =?ISO-8859-1?Q?b?='));
 });
 
 test('RFC 2047 charsetReader uses TextDecoder for non-default charsets', () => {
