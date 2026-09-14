@@ -5,7 +5,7 @@ import {
   plan9Palette, pngEncode, pngDecode, pngDecodeConfig,
   jpegEncode, jpegDecode, jpegDecodeConfig,
   gifEncode, gifDecode, gifDecodeConfig,
-  draw, ImageDisposedError, ImageTooLargeError,
+  draw, ImageDisposedError, ImageTooLargeError, PngFormatError,
 } from '../index.mjs';
 
 test('rect geometry matches Go empty/intersect basics', () => {
@@ -95,6 +95,10 @@ test('gif encode/decode', () => {
   assert.equal(cfg.height, 8);
   const dec = gifDecode(encoded);
   assert.equal(dec.width, 8);
+});
+
+test('empty PNG encode is PngFormatError', () => {
+  assert.throws(() => pngEncode(Image.nrgba(rect(0, 0, 0, 0))), PngFormatError);
 });
 
 test('draw src copies pixels', () => {

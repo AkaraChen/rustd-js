@@ -154,6 +154,44 @@ func main() {
 		dumps = append(dumps, dumpPNGFile(filepath.Join(pngDir, extra), extra))
 	}
 
+	one := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	one.SetNRGBA(0, 0, color.NRGBA{R: 10, G: 20, B: 30, A: 255})
+	mono := image.NewGray(image.Rect(0, 0, 2, 2))
+	mono.SetGray(0, 0, color.Gray{Y: 128})
+	mono.SetGray(1, 1, color.Gray{Y: 255})
+	clear := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	for _, bound := range []struct {
+		name string
+		img  image.Image
+	}{
+		{"bound-1x1.png", one},
+		{"bound-gray-2x2.png", mono},
+		{"bound-transparent-2x2.png", clear},
+	} {
+		var pbuf bytes.Buffer
+		if err := png.Encode(&pbuf, bound.img); err != nil {
+			panic(err)
+		}
+		raw := pbuf.Bytes()
+		cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+		if err != nil {
+			panic(err)
+		}
+		dec, err := png.Decode(bytes.NewReader(raw))
+		if err != nil {
+			panic(err)
+		}
+		dumps = append(dumps, dump{
+			Name:       bound.name,
+			Kind:       "png",
+			Width:      cfg.Width,
+			Height:     cfg.Height,
+			ColorModel: modelName(cfg.ColorModel),
+			Pix:        pixdump(dec),
+			BytesHex:   hex(raw),
+		})
+	}
+
 	nrgba := sampleNRGBA()
 	for _, q := range []int{1, 50, 75, 100} {
 		var jpegBuf bytes.Buffer

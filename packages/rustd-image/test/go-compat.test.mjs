@@ -4,8 +4,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  pngDecode, pngDecodeConfig, jpegDecodeConfig, gifDecode, gifDecodeAll, gifDecodeConfig,
-  plan9Palette, webSafePalette, nrgba, draw, drawMask, quantize, Image, rect,
+  pngDecode, pngDecodeConfig, pngEncode, jpegDecodeConfig, gifDecode, gifDecodeAll, gifDecodeConfig,
+  plan9Palette, webSafePalette, nrgba, draw, drawMask, quantize, Image, rect, PngFormatError,
 } from '../index.mjs';
 
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -180,6 +180,50 @@ test('FloydSteinberg and Src quantize pixdump/indices match Go', () => {
   const src9 = quantize(plan9Palette(), src);
   assert.equal(pixdump(src9), extra.quantSrcPlan9);
   assert.equal(Buffer.from(src9.pix()).toString('hex'), extra.quantSrcPlan9Pix);
+});
+
+test('0×0 / 1×0 / 0×1 PNG encode matches Go FormatError', () => {
+  for (const [w, h] of [[0, 0], [1, 0], [0, 1]]) {
+    const img = Image.nrgba(rect(0, 0, w, h));
+    assert.equal(img.width, w);
+    assert.equal(img.height, h);
+    assert.equal(img.pix().length, 0);
+    assert.throws(() => pngEncode(img), PngFormatError);
+  }
+});
+
+test('1×1 / gray / fully-transparent PNG DecodeConfig+pixdump match Go', () => {
+  const { fixtures } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const names = ['bound-1x1.png', 'bound-gray-2x2.png', 'bound-transparent-2x2.png'];
+  for (const name of names) {
+    const f = fixtures.find((row) => row.name === name);
+    assert.ok(f, `missing Go fixture ${name}`);
+    const buf = hexToBytes(f.bytesHex);
+    const cfg = pngDecodeConfig(buf);
+    assert.equal(cfg.width, f.width, name);
+    assert.equal(cfg.height, f.height, name);
+    assert.equal(cfg.colorModel, f.colorModel, name);
+    const img = pngDecode(buf);
+    assert.equal(pixdump(img), f.pix, `${name} pixdump`);
+    img.dispose();
+  }
+});
+
+test('every truncated prefix of the Go 1×1 PNG throws PngFormatError', () => {
+  const { fixtures } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const f = fixtures.find((row) => row.name === 'bound-1x1.png');
+  assert.ok(f);
+  const buf = hexToBytes(f.bytesHex);
+  assert.ok(buf.length >= 33, 'PNG with IHDR should be longer than 33 bytes');
+  for (let n = 0; n < buf.length; n++) {
+    const prefix = buf.subarray(0, n);
+    assert.throws(
+      () => pngDecode(prefix),
+      PngFormatError,
+      `pngDecode prefix length ${n}/${buf.length} must be PngFormatError`,
+    );
+  }
+  pngDecode(buf);
 });
 
 test('Plan9 and WebSafe Index match Go on 1024 random NRGBA colors', () => {

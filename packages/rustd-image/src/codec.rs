@@ -30,10 +30,54 @@ fn map_png_enc(err: png::EncodingError) -> ImageError {
     ImageError::new("PngFormatError", err.to_string())
 }
 
+const PNG_SIG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+
+fn png_format_err(msg: impl Into<String>) -> ImageError {
+    ImageError::new("PngFormatError", msg)
+}
+
+/// Go's `png.Decode` refuses every truncated prefix (usually `unexpected EOF`).
+/// The `png` crate can succeed once IDAT is complete even if IEND is missing;
+/// issue #19 §4.7 requires `PngFormatError` on every strict prefix.
+fn png_require_iend(buf: &[u8]) -> Result<(), ImageError> {
+    if buf.len() < 8 || &buf[..8] != PNG_SIG {
+        return Err(png_format_err("png: invalid format: not a PNG file"));
+    }
+    let mut i = 8usize;
+    loop {
+        if i.checked_add(8).map(|n| n > buf.len()).unwrap_or(true) {
+            return Err(png_format_err("png: unexpected EOF"));
+        }
+        let len = u32::from_be_bytes(buf[i..i + 4].try_into().unwrap()) as usize;
+        let typ = &buf[i + 4..i + 8];
+        let chunk_end = i
+            .checked_add(12)
+            .and_then(|n| n.checked_add(len))
+            .ok_or_else(|| png_format_err("png: invalid format: chunk too large"))?;
+        if chunk_end > buf.len() {
+            return Err(png_format_err("png: unexpected EOF"));
+        }
+        if typ == b"IEND" {
+            return Ok(());
+        }
+        i = chunk_end;
+    }
+}
+
+fn png_reject_empty(width: u32, height: u32) -> Result<(), ImageError> {
+    if width == 0 || height == 0 {
+        return Err(png_format_err(format!(
+            "png: invalid format: non-positive dimension: {width}x{height}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn png_decode_config(buf: &[u8]) -> Result<Config, ImageError> {
     let decoder = png::Decoder::new(Cursor::new(buf));
     let reader = decoder.read_info().map_err(map_png)?;
     let info = reader.info();
+    png_reject_empty(info.width, info.height)?;
     Ok(Config {
         width: info.width,
         height: info.height,
@@ -140,9 +184,11 @@ fn put_nrgba64(pix: &mut [u8], i: usize, r: u16, g: u16, b: u16, a: u16) {
 }
 
 pub fn png_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageError> {
+    png_require_iend(buf)?;
     let decoder = png::Decoder::new(Cursor::new(buf));
     let mut reader = decoder.read_info().map_err(map_png)?;
     let info = reader.info().clone();
+    png_reject_empty(info.width, info.height)?;
     too_large(info.width, info.height, max_pixels)?;
     let mut frame = vec![
         0;
@@ -393,7 +439,9 @@ pub fn png_encode(img: &Image, level: i32) -> Result<Vec<u8>, ImageError> {
     let w = img.width() as u32;
     let h = img.height() as u32;
     if w == 0 || h == 0 {
-        return Err(ImageError::new("PngFormatError", "png: empty image"));
+        return Err(png_format_err(format!(
+            "png: invalid format: invalid image size: {w}x{h}"
+        )));
     }
     let mut rgba = vec![0u8; (w as usize) * (h as usize) * 4];
     for y in 0..img.height() {

@@ -40,6 +40,10 @@ allocate a pixel buffer.
   views are deferred until dispose can detach the buffer without UAF.
 - PNG encode always emits 8-bit RGBA. Go's encoder chooses a colour type; Go
   also does not promise byte-identical PNG output.
+- Truncated PNG `pngDecode` always throws `PngFormatError` (every prefix of a
+  valid file). Go's `png.Decode` usually returns `unexpected EOF` (`io.ErrUnexpectedEOF`)
+  rather than `png.FormatError`; the JS error class is the issue #19 mapping.
+  `pngDecodeConfig` still succeeds once IHDR is complete, matching Go.
 - JPEG colour JPEGs are stored as `ycbcr` 4:4:4 after `jpeg-decoder` RGB output
   is converted with Go's `RGBToYCbCr`/`YCbCrToRGB`. DecodeConfig matches Go
   (`gray` / `ycbcr` / `cmyk` from SOF).
@@ -54,14 +58,15 @@ allocate a pixel buffer.
 
 ## Size
 
-Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **879,992 bytes** / 3,000,000.
+Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **882,232 bytes** / 3,000,000.
 
-Go `image/png` testdata + pngsuite + generated JPEG/GIF fixtures: **43** files. PNG
+Go `image/png` testdata + pngsuite + generated JPEG/GIF/boundary fixtures: **46** files. PNG
 `DecodeConfig` fields and RGBA64 pixdumps match Go, including 1/2/4/8/16-bit,
-Adam7, and tRNS. JPEG is config-only (IDCT is not pixel-identical). GIF
+Adam7, tRNS, 1×1, gray, and fully-transparent. Every truncated prefix of the Go
+1×1 PNG throws `PngFormatError`. JPEG is config-only (IDCT is not pixel-identical). GIF
 `DecodeAll` matches loop/delay/disposal/pixdump on the two-frame fixture.
 
 ```text
 $ ls -l packages/rustd-image/*.node
--rwxrwxr-x 1 akrc akrc 879992 Sep 14 16:38 packages/rustd-image/rustd-image.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 882232 Sep 14 17:09 packages/rustd-image/rustd-image.linux-x64-gnu.node
 ```
