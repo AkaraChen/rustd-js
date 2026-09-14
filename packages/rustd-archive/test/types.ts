@@ -2,7 +2,9 @@ import { tarCreate, tarExtract, zipCreate, zipExtract, TarFormatError, ZipReader
 const bytes: Uint8Array = tarCreate([{ name: 'a.txt', data: new Uint8Array([1]) }]);
 const entries = tarExtract(bytes);
 const zip = zipCreate([{ name: 'a.txt', data: new Uint8Array([1]), method: 8 }]);
-zipExtract(zip);
+const zipEntries = zipExtract(zip);
+const zipMethod: 0 | 8 = zipEntries[0]!.method;
+void zipMethod;
 const err: TarFormatError = new TarFormatError('archive/tar: invalid tar header');
 const offset: number = err.offset;
 const reader = new ZipReader();
