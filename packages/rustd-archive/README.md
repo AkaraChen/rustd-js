@@ -51,6 +51,12 @@ do not need `close()`.
 - Non-UTF-8 zip names keep the raw bytes on `rawName` and set `nonUtf8`. The
   `name` string is a lossy UTF-8 view and must not be treated as round-trippable.
 - Filesystem helpers such as `extractTo` belong in `rustd-fs`, not this package.
+- PAX `atime` / `ctime` stay on `entry.pax` as strings. They are not `Date`
+  fields; the public TS shape only has `mtime` (issue #2). Invalid `atime` /
+  `ctime` / `mtime` values still throw `TarFormatError`, matching Go `ErrHeader`.
+- Sub-second `mtime` is written as PAX `mtime` so Go `ModTime` matches JS
+  `Date.getTime()` at millisecond precision (`UnixMilli`). Nanoseconds beyond
+  that are not a `Date` field.
 
 ## Errors
 
