@@ -20,6 +20,8 @@ importers:
 
   packages/_template: {}
 
+  packages/rustd-crypto: {}
+
 packages:
 
   '@emnapi/core@1.11.2':

@@ -1,0 +1,66 @@
+{
+  "date": "2026-09-14",
+  "node": "v24.20.0",
+  "go": "1.25.0",
+  "platform": "linux-x64",
+  "cpu": "AMD EPYC 9645 96-Core Processor",
+  "method": "One sequential pass, 128 MiB per operation, 64 KiB chunks; shared host, not an isolated benchmark.",
+  "rows": [
+    {
+      "algorithm": "md5",
+      "nativeHashMiBs": 382,
+      "goHashMiBs": 484,
+      "nativeHmacMiBs": 399,
+      "goHmacMiBs": 560
+    },
+    {
+      "algorithm": "sha1",
+      "nativeHashMiBs": 1268,
+      "goHashMiBs": 1367,
+      "nativeHmacMiBs": 1282,
+      "goHmacMiBs": 1387
+    },
+    {
+      "algorithm": "sha224",
+      "nativeHashMiBs": 1170,
+      "goHashMiBs": 1189,
+      "nativeHmacMiBs": 1035,
+      "goHmacMiBs": 1252
+    },
+    {
+      "algorithm": "sha256",
+      "nativeHashMiBs": 1186,
+      "goHashMiBs": 1231,
+      "nativeHmacMiBs": 1165,
+      "goHmacMiBs": 957
+    },
+    {
+      "algorithm": "sha384",
+      "nativeHashMiBs": 424,
+      "goHashMiBs": 421,
+      "nativeHmacMiBs": 381,
+      "goHmacMiBs": 423
+    },
+    {
+      "algorithm": "sha512",
+      "nativeHashMiBs": 404,
+      "goHashMiBs": 419,
+      "nativeHmacMiBs": 378,
+      "goHmacMiBs": 398
+    },
+    {
+      "algorithm": "sha512-224",
+      "nativeHashMiBs": 332,
+      "goHashMiBs": 493,
+      "nativeHmacMiBs": 360,
+      "goHmacMiBs": 429
+    },
+    {
+      "algorithm": "sha512-256",
+      "nativeHashMiBs": 409,
+      "goHashMiBs": 420,
+      "nativeHmacMiBs": 416,
+      "goHmacMiBs": 538
+    }
+  ]
+}
