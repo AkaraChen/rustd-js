@@ -235,6 +235,130 @@ func tests() []parseTest {
 	return out
 }
 
+type parseSeed struct {
+	Pattern    string
+	PatternHex string
+	Flags      syntax.Flags
+}
+
+// remainderSeeds is issue #30 §4.1 remainder: POSIX/Perl dual-mode, named
+// captures, extra \p, word boundaries, TestString, and 40+ illegal samples
+// copied from Go 1.24.13 parse_test.go. Huge ErrLarge/ErrNestingDepth
+// patterns stay in the errors package (checkpoint 7).
+func remainderSeeds() []parseSeed {
+	perl := syntax.Perl
+	posix := syntax.POSIX
+	testFlags := syntax.MatchNL | syntax.PerlX | syntax.UnicodeGroups
+	var out []parseSeed
+	add := func(p string, f syntax.Flags) {
+		out = append(out, parseSeed{Pattern: p, Flags: f})
+	}
+	addHex := func(h string, f syntax.Flags) {
+		out = append(out, parseSeed{PatternHex: h, Flags: f})
+	}
+
+	add(`(?i)[^[:lower:]]`, testFlags)
+	add(`(?i)[[:^lower:]]`, testFlags)
+	add("[a\n]", syntax.MatchNL)
+	add("[a\n]", 0)
+
+	for _, p := range []string{
+		`x(?i:ab*c|d?e)1`,
+		`x(?i:ab*cd?e)1`,
+		`0(?i:ab*c|d?e)1`,
+		`0(?i:ab*cd?e)1`,
+		`x(?i:ab*c|d?e)`,
+		`x(?i:ab*cd?e)`,
+		`0(?i:ab*c|d?e)`,
+		`0(?i:ab*cd?e)`,
+		`(?i:ab*c|d?e)1`,
+		`(?i:ab*cd?e)1`,
+		`(?i:ab)[123](?i:cd)`,
+		`(?i:ab*c|d?e)`,
+		`[Aa][Bb]`,
+		`[Aa][Bb]*[Cc]`,
+		`A(?:[Bb][Cc]|[Dd])[Zz]`,
+		`[Aa](?:[Bb][Cc]|[Dd])Z`,
+	} {
+		add(p, perl)
+	}
+
+	for _, p := range []string{
+		`[[:alnum:]]`, `[[:alpha:]]`, `[[:ascii:]]`, `[[:blank:]]`, `[[:cntrl:]]`,
+		`[[:digit:]]`, `[[:graph:]]`, `[[:print:]]`, `[[:punct:]]`, `[[:space:]]`,
+		`[[:upper:]]`, `[[:xdigit:]]`, `[[:^digit:]]`, `[^[:digit:]]`,
+	} {
+		add(p, testFlags)
+		add(p, posix)
+	}
+
+	for _, p := range []string{
+		`\b`, `\B`, `a\b`, `\ba`, `a\bb`, `\bword\b`, `a\B`, `\Bfoo\B`, `^\b$`, `\A\b\z`,
+	} {
+		add(p, perl)
+		add(p, posix)
+	}
+
+	for _, p := range []string{
+		`\p{Greek}`, `\P{Greek}`, `\p{^Greek}`, `[\p{Greek}]`, `\p{Nd}`, `\p{Lm}`,
+		`\p{Hiragana}`, `\p{Cyrillic}`, `\p{Katakana}`, `\pM`,
+	} {
+		add(p, testFlags)
+	}
+
+	for _, p := range []string{
+		`a`, `ab`, `abc`, `a|b`, `(a)`, `a*`, `[a-z]`, `^`, `$`, `.`, `[[:lower:]]`,
+		`[ace]`, `a{2}`, `a{2,3}`, `(ab)*`, `abc|def`, `[a]`, `-`, `{`, `}`, `a.b`,
+		`(a|b)`, `ab|cd`, `a(b)c`, `[[:digit:]]`, `[^a]`, `[a-c]`, `a{2,}`, `abc`,
+		`[α-ε☺]`, `a*{`,
+	} {
+		add(p, perl)
+		add(p, posix)
+	}
+
+	for _, p := range []string{
+		`(`, `)`, `(a`, `a)`, `(a))`, `(a|b|`, `a|b|)`, `(a|b|))`, `(a|b`, `a|b)`,
+		`(a|b))`, `[a-z`, `([a-z)`, `[a-z)`, `([a-z]))`, `x{1001}`, `x{9876543210}`,
+		`x{2,1}`, `x{1,9876543210}`, `(?P<name>a`, `(?P<name>`, `(?P<name`,
+		`(?P<x y>a)`, `(?P<>a)`, `(?<name>a`, `(?<name>`, `(?<name`, `(?<x y>a)`,
+		`(?<>a)`, `[a-Z]`, `(?i)[a-Z]`, `\Q\E*`, `a{100000}`, `a{100000,}`,
+		`((((((((((x{2}){2}){2}){2}){2}){2}){2}){2}){2}){2})`,
+		`\c`, `(?z)`, `a++`, `*`, `+`, `?`, `{2}`,
+	} {
+		add(p, perl)
+		add(p, posix)
+	}
+	for _, h := range []string{"ff", "5bff5d", "5b5cff5d", "5cff"} {
+		addHex(h, perl)
+		addHex(h, posix)
+	}
+
+	for _, p := range []string{
+		`[a-b-c]`, `\Qabc\E`, `\Q*+?{[\E`, `\Q\\E`, `\Q\\\E`, `\Q\\\\E`, `\Q\\\\\E`,
+		`(?:a)`, `(?P<name>a)`,
+	} {
+		add(p, perl)
+		add(p, posix)
+	}
+	for _, p := range []string{
+		`a++`, `a**`, `a?*`, `a+*`, `a{1}*`, `.{1}{2}.{3}`,
+	} {
+		add(p, perl)
+		add(p, posix)
+	}
+
+	add(`(?P<foo>ab)`, perl)
+	add(`(?<bar>x+)`, perl)
+	add(`(?P<foo>ab)`, posix)
+	add(`(?P<name>a)(?P<name>b)`, perl)
+	add(`a{1}{2}`, posix)
+	add(`\d`, posix)
+	add(`\w`, posix)
+	add(`\s`, posix)
+	add(`\p{Greek}`, posix)
+	return out
+}
+
 func simplifyTests() []struct{ Regexp, Simple string } {
 	return []struct{ Regexp, Simple string }{
 		{`a`, `a`},
@@ -436,23 +560,45 @@ func dumpRegexp(b *strings.Builder, re *syntax.Regexp) {
 	b.WriteByte('}')
 }
 
+func emitParseCase(id int, seed parseSeed) Case {
+	c := Case{ID: fmt.Sprintf("c%d", id), Pattern: seed.Pattern, Flags: uint16(seed.Flags)}
+	pat := seed.Pattern
+	if seed.PatternHex != "" {
+		raw, err := hex.DecodeString(seed.PatternHex)
+		if err != nil {
+			fail(fmt.Errorf("%s: patternHex: %w", c.ID, err))
+		}
+		pat = string(raw)
+		c.PatternHex = seed.PatternHex
+		c.Pattern = ""
+	}
+	re, err := syntax.Parse(pat, seed.Flags)
+	if err != nil {
+		if se, ok := err.(*syntax.Error); ok {
+			c.Error = string(se.Code)
+			if utf8Valid(se.Expr) {
+				c.Expr = se.Expr
+			} else {
+				c.ExprHex = hex.EncodeToString([]byte(se.Expr))
+			}
+		} else {
+			c.Error = err.Error()
+		}
+		return c
+	}
+	c.Dump = dump(re)
+	c.Printed = re.String()
+	return c
+}
+
 func generate() Packet {
 	var cases []Case
 	for i, tt := range tests() {
-		re, err := syntax.Parse(tt.Regexp, tt.Flags)
-		c := Case{ID: fmt.Sprintf("c%d", i), Pattern: tt.Regexp, Flags: uint16(tt.Flags)}
-		if err != nil {
-			if se, ok := err.(*syntax.Error); ok {
-				c.Error = string(se.Code)
-				c.Expr = se.Expr
-			} else {
-				c.Error = err.Error()
-			}
-		} else {
-			c.Dump = dump(re)
-			c.Printed = re.String()
-		}
-		cases = append(cases, c)
+		cases = append(cases, emitParseCase(i, parseSeed{Pattern: tt.Regexp, Flags: tt.Flags}))
+	}
+	base := len(cases)
+	for i, seed := range remainderSeeds() {
+		cases = append(cases, emitParseCase(base+i, seed))
 	}
 	return Packet{Schema: 1, Package: "regexsyntax", Cases: cases}
 }
@@ -887,10 +1033,17 @@ func verify(packet Packet) {
 	simplify := packet.Package == "regexsyntax-simplify"
 	compilePkg := packet.Package == "regexsyntax-compile"
 	for _, c := range packet.Cases {
-		re, err := syntax.Parse(c.Pattern, syntax.Flags(c.Flags))
+		pat, perr := parsePattern(c)
+		if perr != nil {
+			fail(perr)
+		}
+		re, err := syntax.Parse(pat, syntax.Flags(c.Flags))
 		if c.Error != "" {
 			if err == nil {
 				fail(fmt.Errorf("%s: expected error", c.ID))
+			}
+			if se, ok := err.(*syntax.Error); ok && string(se.Code) != c.Error {
+				fail(fmt.Errorf("%s: code want %q got %q", c.ID, c.Error, se.Code))
 			}
 			continue
 		}
