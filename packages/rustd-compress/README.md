@@ -25,6 +25,12 @@ clears codec state.
 - Unknown `order` values throw `LzwConfigError` with `lzw: unknown order`.
 - Go has no bzip2 compressor; this package does not add one.
 - Go may over-read a non-`io.ByteReader` source. Chunked JS writes do not.
+- `Bzip2Decompressor.write` pumps the decoder immediately. After the first
+  decompressed byte the extra pending copy is dropped, so a large single stream
+  does not keep the whole input. Small/concat streams still finish via
+  `decompress_all` on `end()` because the vendor decoder over-reads past the
+  member footer (no leftover `BZh`). `LzwDecompressor` still buffers until
+  `end()`.
 - `read()` always copies into a fresh `Uint8Array`. Go fills a caller buffer.
 - Error classes are thrown (not `(value, error)`). `Bzip2FormatError` keeps the
   `bzip2 data invalid: …` prefix for structural failures (`bad magic value`,
@@ -44,9 +50,9 @@ clears codec state.
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **435,176 bytes** (issue cap 1.5 MB).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **437,976 bytes** (issue cap 1.5 MB).
 
 ```text
 $ ls -l packages/rustd-compress/*.node
--rwxrwxr-x 1 akrc akrc 435176 Sep 14 17:13 packages/rustd-compress/rustd-compress.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 437976 Sep 14 18:11 packages/rustd-compress/rustd-compress.linux-x64-gnu.node
 ```

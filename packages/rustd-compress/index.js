@@ -114,6 +114,8 @@ class Bzip2Decompressor {
   }
   end() { native(() => this._handle.end()); }
   reset() { native(() => this._handle.reset()); }
+  /** Unconsumed write queue after pump; not part of the public .d.ts surface. */
+  bufferedInputBytes() { return native(() => this._handle.debugInputLen()); }
 }
 
 class LzwDecompressor {
