@@ -168,7 +168,7 @@ index f887b1c,f706121..0000000
   packages:
 ```
 
-  Cause: mime branch merge-base is `0da14ff` (pre-log). After `rustd-log` landed, both sides add a different `importers` entry. Worker should rebase onto `origin/main` and re-push. LoopX note on `todo_fcf7f621ffd8`.
+  Cause: mime branch merge-base is `0da14ff` (pre-log). After `rustd-log` landed, both sides add a different `importers` entry. Worker should rebase onto `origin/main` and re-push. LoopX `todo update --note` on `todo_fcf7f621ffd8` was refused (`agent_id=grok-integrator` cannot update a todo `claimed_by=grok-bulk-3`).
 
 - `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20). Skipped, branch not modified.
 - `pkg/rustd-std-*` — `rejected-by-owner` (issue #29). No current unmerged branch.
