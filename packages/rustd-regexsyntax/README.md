@@ -52,6 +52,17 @@ matches Go `syntax.Perl`. `OP` values match Go's `Op` iota (NoMatch starts at 1)
   for invalid UTF-8 bytes in Go; JS `string` values are always valid UTF-8, so
   that code is exported but not reachable through `syntaxParse`.
 
+## Parse throughput (issue #30 §4.5)
+
+Same-machine 10k mixed `syntax.Parse` (2026-09-14, Node v24.20.0, Go 1.24.13, linux-x64, AMD EPYC 9645). One sequential pass after one warmup pass. Corpus: 70% cycled Go parse fixtures (invalid UTF-8 byte cases skipped), 30% generated Perl/POSIX patterns. Native numbers include napi-rs plus JS `SyntaxRegexp` tree materialization, not just the parser. Not an isolated benchmark; no hard line.
+
+| runtime | ok / error | wall | parses / s |
+| --- | ---: | ---: | ---: |
+| rustd-regexsyntax `syntaxParse` | 8182 / 1818 | 763.677 ms | 13,095 |
+| Go `regexp/syntax.Parse` | 8182 / 1818 | 59.795 ms | 167,238 |
+
+Native is about **12.8× slower** than Go on this corpus (honest; the package value is Go-shaped trees, not parse speed). Reproduce: `nice -n 10 node packages/rustd-regexsyntax/test/bench-parse.mjs`.
+
 ## Size
 
 Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **567,552 bytes** (issue cap 2 MB for this package).

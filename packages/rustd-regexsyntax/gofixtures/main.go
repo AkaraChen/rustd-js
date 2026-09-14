@@ -11,6 +11,7 @@ import (
 	"regexp/syntax"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -1162,11 +1163,64 @@ func verify(packet Packet) {
 	fmt.Printf("Go verified %d %s cases\n", len(packet.Cases), packet.Package)
 }
 
+type benchCase struct {
+	Pattern string `json:"pattern"`
+	Flags   uint16 `json:"flags"`
+}
+
+type benchPacket struct {
+	Schema int         `json:"schema"`
+	Cases  []benchCase `json:"cases"`
+}
+
+func benchParse(raw []byte) {
+	var packet benchPacket
+	if err := json.Unmarshal(raw, &packet); err != nil {
+		fail(err)
+	}
+	for _, c := range packet.Cases {
+		_, _ = syntax.Parse(c.Pattern, syntax.Flags(c.Flags))
+	}
+	start := time.Now()
+	ok, failN := 0, 0
+	for _, c := range packet.Cases {
+		if _, err := syntax.Parse(c.Pattern, syntax.Flags(c.Flags)); err != nil {
+			failN++
+		} else {
+			ok++
+		}
+	}
+	elapsed := time.Since(start)
+	ms := float64(elapsed.Nanoseconds()) / 1e6
+	out := map[string]any{
+		"count":        len(packet.Cases),
+		"ok":           ok,
+		"errors":       failN,
+		"ms":           ms,
+		"parsesPerSec": 0.0,
+	}
+	if elapsed > 0 {
+		out["parsesPerSec"] = float64(len(packet.Cases)) / elapsed.Seconds()
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		fail(err)
+	}
+}
+
 func main() {
 	pkg := flag.String("pkg", "regexsyntax", "package name")
 	out := flag.String("out", "", "output JSON file")
 	verifyFlag := flag.Bool("verify", false, "verify stdin packet")
+	benchParseFlag := flag.Bool("bench-parse", false, "time syntax.Parse on stdin JSON cases")
 	flag.Parse()
+	if *benchParseFlag {
+		raw, err := io.ReadAll(io.LimitReader(os.Stdin, 32<<20))
+		if err != nil {
+			fail(err)
+		}
+		benchParse(raw)
+		return
+	}
 	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" && *pkg != "regexsyntax-emptyop" && *pkg != "regexsyntax-errors" && *pkg != "regexsyntax-match" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
