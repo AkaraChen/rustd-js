@@ -1,10 +1,10 @@
 mod lzw_go;
 
 use bzip2_rs::decoder::{Decoder, ReadState, WriteState};
-use lzw_go::GoEncoder;
+use lzw_go::{decode_all as lzw_go_decode, GoEncoder};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use weezl::{decode, BitOrder, LzwStatus};
+use weezl::BitOrder;
 
 fn fail(kind: &str, loc: u64, message: impl AsRef<str>) -> Error {
     Error::new(
@@ -53,6 +53,12 @@ fn bzip_err(offset: u64, err: impl std::fmt::Display) -> Error {
 
 fn lzw_fmt(bit_offset: u64, message: impl AsRef<str>) -> Error {
     fail("LzwFormatError", bit_offset, message.as_ref())
+}
+
+fn lzw_decode_all(order: BitOrder, lit_width: u8, data: &[u8]) -> Result<Vec<u8>> {
+    lzw_go_decode(order, lit_width, data).map_err(|err| {
+        lzw_fmt((data.len() as u64).saturating_mul(8), err.message())
+    })
 }
 
 fn bit_order(order: &str) -> Result<BitOrder> {
@@ -212,12 +218,7 @@ fn lzw_encode_all(order: BitOrder, lit_width: u8, data: &[u8]) -> Result<Vec<u8>
     Ok(encoder.finish())
 }
 
-fn lzw_decode_all(order: BitOrder, lit_width: u8, data: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = decode::Decoder::new(order, lit_width);
-    decoder
-        .decode(data)
-        .map_err(|err| lzw_fmt((data.len() as u64).saturating_mul(8), format!("lzw: {err}")))
-}
+
 
 #[napi]
 pub fn bzip2_decompress(data: Uint8Array) -> Result<Uint8Array> {
@@ -338,11 +339,10 @@ impl NativeBzip2Decompressor {
 pub struct NativeLzwDecompressor {
     order: BitOrder,
     lit_width: u8,
-    decoder: decode::Decoder,
+    compressed: Vec<u8>,
     output: Vec<u8>,
-    bits: u64,
+    emitted: usize,
     ended: bool,
-    done: bool,
 }
 
 #[napi]
@@ -354,73 +354,43 @@ impl NativeLzwDecompressor {
         Ok(Self {
             order,
             lit_width: width,
-            decoder: decode::Decoder::new(order, width),
+            compressed: Vec::new(),
             output: Vec::new(),
-            bits: 0,
+            emitted: 0,
             ended: false,
-            done: false,
         })
-    }
-
-    fn decode_chunk(&mut self, chunk: &[u8]) -> Result<()> {
-        if self.done {
-            return Ok(());
-        }
-        let mut rest = chunk;
-        let mut out = vec![0u8; 16 * 1024];
-        while !rest.is_empty() || self.ended {
-            let result = self.decoder.decode_bytes(rest, &mut out);
-            self.bits += (result.consumed_in as u64).saturating_mul(8);
-            rest = &rest[result.consumed_in..];
-            self.output.extend_from_slice(&out[..result.consumed_out]);
-            match result.status {
-                Ok(LzwStatus::Ok) => {
-                    if result.consumed_in == 0 && result.consumed_out == 0 {
-                        if self.ended {
-                            return Err(lzw_fmt(self.bits, "lzw: unexpected EOF"));
-                        }
-                        break;
-                    }
-                }
-                Ok(LzwStatus::NoProgress) => {
-                    if self.ended {
-                        return Err(lzw_fmt(self.bits, "lzw: unexpected EOF"));
-                    }
-                    break;
-                }
-                Ok(LzwStatus::Done) => {
-                    self.done = true;
-                    break;
-                }
-                Err(err) => return Err(lzw_fmt(self.bits, format!("lzw: {err}"))),
-            }
-            if rest.is_empty() && !self.ended {
-                break;
-            }
-        }
-        Ok(())
     }
 
     #[napi]
     pub fn write(&mut self, chunk: Uint8Array) -> Result<()> {
         if self.ended {
-            return Err(lzw_fmt(self.bits, "lzw: write after end"));
+            return Err(lzw_fmt(
+                (self.compressed.len() as u64).saturating_mul(8),
+                "lzw: write after end",
+            ));
         }
-        self.decode_chunk(chunk.as_ref())
+        self.compressed.extend_from_slice(chunk.as_ref());
+        Ok(())
     }
 
     #[napi]
     pub fn read(&mut self, max_bytes: Option<u32>) -> Uint8Array {
-        take_out(&mut self.output, max_bytes)
+        let out = take_out(&mut self.output, max_bytes);
+        self.emitted += out.len();
+        out
     }
 
     #[napi]
     pub fn end(&mut self) -> Result<()> {
         self.ended = true;
-        self.decode_chunk(&[])?;
-        if !self.done {
-            return Err(lzw_fmt(self.bits, "lzw: unexpected EOF"));
+        let full = lzw_decode_all(self.order, self.lit_width, &self.compressed)?;
+        if self.emitted > full.len() {
+            return Err(lzw_fmt(
+                (self.compressed.len() as u64).saturating_mul(8),
+                "unexpected EOF",
+            ));
         }
+        self.output = full[self.emitted..].to_vec();
         Ok(())
     }
 
@@ -429,11 +399,10 @@ impl NativeLzwDecompressor {
         *self = Self {
             order: self.order,
             lit_width: self.lit_width,
-            decoder: decode::Decoder::new(self.order, self.lit_width),
+            compressed: Vec::new(),
             output: Vec::new(),
-            bits: 0,
+            emitted: 0,
             ended: false,
-            done: false,
         };
     }
 }

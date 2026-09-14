@@ -24,6 +24,15 @@ type LzwCase struct {
 	CompressedHex string `json:"compressedHex"`
 }
 
+type LzwErrorCase struct {
+	ID             string `json:"id"`
+	Order          string `json:"order"`
+	LitWidth       int    `json:"litWidth"`
+	CompressedHex  string `json:"compressedHex"`
+	Error          string `json:"error,omitempty"`
+	PlainHex       string `json:"plainHex,omitempty"` // present on success, including empty output
+}
+
 type BzipCase struct {
 	ID            string `json:"id"`
 	CompressedB64 string `json:"compressedB64"`
@@ -32,10 +41,11 @@ type BzipCase struct {
 }
 
 type Packet struct {
-	Schema  int        `json:"schema"`
-	Package string     `json:"package"`
-	Lzw     []LzwCase  `json:"lzw,omitempty"`
-	Bzip    []BzipCase `json:"bzip,omitempty"`
+	Schema    int            `json:"schema"`
+	Package   string         `json:"package"`
+	Lzw       []LzwCase      `json:"lzw,omitempty"`
+	LzwErrors []LzwErrorCase `json:"lzwErrors,omitempty"`
+	Bzip      []BzipCase     `json:"bzip,omitempty"`
 }
 
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
@@ -86,6 +96,48 @@ func pattern(n, seed int, litWidth int) []byte {
 		data[i] = byte((i*31+seed)&int(max)) & max
 	}
 	return data
+}
+
+func lzwErrorOf(data []byte, order string, litWidth int) LzwErrorCase {
+	plain, err := lzwDecompress(data, order, litWidth)
+	c := LzwErrorCase{
+		Order:         order,
+		LitWidth:      litWidth,
+		CompressedHex: hex.EncodeToString(data),
+	}
+	if err != nil {
+		c.Error = err.Error()
+	} else {
+		c.PlainHex = hex.EncodeToString(plain)
+	}
+	return c
+}
+
+func generateLzwErrors() []LzwErrorCase {
+	var out []LzwErrorCase
+	for _, order := range []string{"lsb", "msb"} {
+		src := pattern(16, 1, 8)
+		compressed, err := lzwCompress(src, order, 8)
+		if err != nil {
+			fail(err)
+		}
+		empty := lzwErrorOf(nil, order, 8)
+		empty.ID = fmt.Sprintf("%s-8-empty", order)
+		out = append(out, empty)
+		for i := 0; i <= len(compressed); i++ {
+			c := lzwErrorOf(compressed[:i], order, 8)
+			c.ID = fmt.Sprintf("%s-8-16-trunc-%d", order, i)
+			out = append(out, c)
+		}
+		for i := 0; i < len(compressed); i++ {
+			flip := bytes.Clone(compressed)
+			flip[i] ^= 0xff
+			c := lzwErrorOf(flip, order, 8)
+			c.ID = fmt.Sprintf("%s-8-16-flip-%d", order, i)
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func generateLzw() []LzwCase {
@@ -275,6 +327,35 @@ func verifyLzw(p Packet) {
 	fmt.Printf("Go verified %d lzw cases\n", len(p.Lzw))
 }
 
+func verifyLzwErrors(p Packet) {
+	if len(p.LzwErrors) == 0 {
+		fail(fmt.Errorf("empty lzw error cases"))
+	}
+	for _, c := range p.LzwErrors {
+		data, err := hex.DecodeString(c.CompressedHex)
+		if err != nil {
+			fail(err)
+		}
+		plain, err := lzwDecompress(data, c.Order, c.LitWidth)
+		if c.Error != "" {
+			if err == nil {
+				fail(fmt.Errorf("%s: expected error %q", c.ID, c.Error))
+			}
+			if err.Error() != c.Error {
+				fail(fmt.Errorf("%s: expected %q got %q", c.ID, c.Error, err.Error()))
+			}
+			continue
+		}
+		if err != nil {
+			fail(fmt.Errorf("%s: %w", c.ID, err))
+		}
+		if hex.EncodeToString(plain) != c.PlainHex {
+			fail(fmt.Errorf("%s: plain bytes differ", c.ID))
+		}
+	}
+	fmt.Printf("Go verified %d lzw error cases\n", len(p.LzwErrors))
+}
+
 func verifyBzip(p Packet) {
 	if len(p.Bzip) == 0 {
 		fail(fmt.Errorf("empty bzip cases"))
@@ -305,11 +386,11 @@ func verifyBzip(p Packet) {
 }
 
 func main() {
-	pkg := flag.String("pkg", "lzw", "lzw or bzip2")
+	pkg := flag.String("pkg", "lzw", "lzw, lzw-errors, or bzip2")
 	out := flag.String("out", "", "output JSON file; stdout by default")
 	verify := flag.Bool("verify", false, "verify a packet read from stdin")
 	flag.Parse()
-	if *pkg != "lzw" && *pkg != "bzip2" {
+	if *pkg != "lzw" && *pkg != "lzw-errors" && *pkg != "bzip2" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
 	if *verify {
@@ -322,17 +403,23 @@ func main() {
 		if packet.Schema != 1 || packet.Package != *pkg {
 			fail(fmt.Errorf("invalid packet header"))
 		}
-		if *pkg == "lzw" {
+		switch *pkg {
+		case "lzw":
 			verifyLzw(packet)
-		} else {
+		case "lzw-errors":
+			verifyLzwErrors(packet)
+		default:
 			verifyBzip(packet)
 		}
 		return
 	}
 	packet := Packet{Schema: 1, Package: *pkg}
-	if *pkg == "lzw" {
+	switch *pkg {
+	case "lzw":
 		packet.Lzw = generateLzw()
-	} else {
+	case "lzw-errors":
+		packet.LzwErrors = generateLzwErrors()
+	default:
 		packet.Bzip = generateBzip()
 	}
 	var writer io.Writer = os.Stdout

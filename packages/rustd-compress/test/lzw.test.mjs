@@ -118,6 +118,39 @@ test('truncated LZW stream errors without crashing', () => {
   assert.throws(() => dec.end(), LzwFormatError);
 });
 
+test('Go regenerates LZW truncation/corrupt fixtures; native error text matches', () => {
+  const errorFixturePath = new URL('./fixtures/lzw-errors.json', import.meta.url);
+  const generated = go(['-pkg', 'lzw-errors']);
+  assert.equal(generated.status, 0, generated.stderr);
+  if (process.env.RUSTD_UPDATE_FIXTURES) writeFileSync(errorFixturePath, generated.stdout);
+  const committed = readFileSync(errorFixturePath, 'utf8');
+  assert.equal(generated.stdout, committed, 'Go LZW error fixture drift');
+  const packet = JSON.parse(committed);
+  assert.equal(packet.package, 'lzw-errors');
+  assert.ok(packet.lzwErrors.length >= 40, packet.lzwErrors.length);
+  let trunc = 0;
+  let truncEof = 0;
+  for (const c of packet.lzwErrors) {
+    const opts = { order: c.order, litWidth: c.litWidth };
+    const data = Buffer.from(c.compressedHex, 'hex');
+    if (c.error) {
+      assert.throws(() => lzwDecompress(data, opts), (err) => {
+        assert.equal(err instanceof LzwFormatError, true, `${c.id} type ${err}`);
+        assert.equal(err.message, c.error, `${c.id} message`);
+        return true;
+      }, c.id);
+      if (c.id.includes('-trunc-') || c.id.endsWith('-empty')) {
+        trunc += 1;
+        if (c.error === 'unexpected EOF') truncEof += 1;
+      }
+    } else {
+      assert.equal(hex(lzwDecompress(data, opts)), c.plainHex ?? '', c.id);
+    }
+  }
+  assert.ok(trunc >= 2, trunc);
+  assert.equal(truncEof, trunc, 'every truncation/empty case must be unexpected EOF');
+});
+
 test('typed-array slices are respected and outputs are independent', () => {
   const opts = { order: 'lsb', litWidth: 8 };
   const source = new Uint8Array([9, 1, 2, 3, 9]);
