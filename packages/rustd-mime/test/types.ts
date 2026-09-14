@@ -38,6 +38,7 @@ const mpBytes: Uint8Array = mp.bytes();
 const mpReader = new MultipartReader({ boundary: 'boundary' });
 mpReader.write(mpBytes);
 const next: MultipartPart | null = mpReader.nextPart();
+const raw: MultipartPart | null = mpReader.nextRawPart();
 const formName: string = next?.formName() ?? '';
 const fileName: string = next?.fileName() ?? '';
 const partBody: Uint8Array = next?.read() ?? new Uint8Array();
@@ -48,4 +49,4 @@ const wrong: number = parsed;
 encodeWord('utf-8', 'x', 'x');
 // @ts-expect-error bytes required
 quotedPrintableEncode('ascii');
-void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr];
+void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, raw];

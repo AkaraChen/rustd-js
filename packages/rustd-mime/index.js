@@ -312,6 +312,11 @@ class MultipartReader {
     if (data == null) return null;
     return new MultipartPart(data);
   }
+  nextRawPart() {
+    const data = native(() => this._handle.nextRawPart());
+    if (data == null) return null;
+    return new MultipartPart(data);
+  }
 }
 
 class MimeWordDecoder {

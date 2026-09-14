@@ -1,6 +1,8 @@
-//! Go `mime/multipart.Reader.NextPart` (Go 1.24 `multipart.go`) for a complete body.
+//! Go `mime/multipart.Reader.NextPart` / `NextRawPart` (Go 1.24 `multipart.go`)
+//! for a complete body.
 //!
-//! This slice parses a fully buffered one-part or multi-field body. Incremental
+//! `NextPart` transparently decodes `Content-Transfer-Encoding: quoted-printable`
+//! and hides that header. `NextRawPart` leaves the CTE and body alone. Incremental
 //! 1-byte `write`/`nextPart` interleaving and ReadForm limits are later.
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
@@ -61,6 +63,14 @@ impl MultipartReader {
     }
 
     pub fn next_part(&mut self) -> Result<Option<MultipartPart>, String> {
+        self.next_part_opt(false)
+    }
+
+    pub fn next_raw_part(&mut self) -> Result<Option<MultipartPart>, String> {
+        self.next_part_opt(true)
+    }
+
+    fn next_part_opt(&mut self, raw: bool) -> Result<Option<MultipartPart>, String> {
         if self.finished {
             return Ok(None);
         }
@@ -94,9 +104,12 @@ impl MultipartReader {
                 self.parts_read,
             ) {
                 self.parts_read += 1;
-                let header = read_mime_header(&self.buf, &mut self.pos)?;
-                let body = self.read_part_body()?;
+                let mut header = read_mime_header(&self.buf, &mut self.pos)?;
+                let mut body = self.read_part_body()?;
                 self.current_open = false;
+                if !raw {
+                    body = maybe_decode_quoted_printable(&mut header, body)?;
+                }
                 let (form_name, file_name) = disposition_names(&header);
                 return Ok(Some(MultipartPart {
                     header,
@@ -397,6 +410,22 @@ fn valid_header_value_byte(c: u8) -> bool {
     c == b'\t' || c == b' ' || (0x21..=0x7e).contains(&c) || c >= 0x80
 }
 
+fn maybe_decode_quoted_printable(
+    headers: &mut Vec<(String, Vec<String>)>,
+    body: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    let cte = header_get(headers, "Content-Transfer-Encoding");
+    if !cte.eq_ignore_ascii_case("quoted-printable") {
+        return Ok(body);
+    }
+    headers.retain(|(k, _)| k != "Content-Transfer-Encoding");
+    let (out, err) = crate::qp::qp_decode(&body);
+    match err {
+        Some(e) => Err(e),
+        None => Ok(out),
+    }
+}
+
 fn header_get<'a>(headers: &'a [(String, Vec<String>)], key: &str) -> &'a str {
     let canon = canonical_mime_header_key(key);
     headers
@@ -550,5 +579,97 @@ mod tests {
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0].body, b"hello--bound--world");
         assert_eq!(parts[1].body, b"ok");
+    }
+
+    fn qp_form_body(cte: &str) -> Vec<u8> {
+        format!(
+            "--0016e68ee29c5d515f04cedf6733\r\n\
+Content-Type: text/plain; charset=ISO-8859-1\r\n\
+Content-Disposition: form-data; name=text\r\n\
+Content-Transfer-Encoding: {cte}\r\n\
+\r\n\
+words words words words words words words words words words words words wor=\r\n\
+ds words words words words words words words words words words words words =\r\n\
+words words words words words words words words words words words words wor=\r\n\
+ds words words words words words words words words words words words words =\r\n\
+words words words words words words words words words\r\n\
+--0016e68ee29c5d515f04cedf6733\r\n\
+Content-Type: text/plain; charset=ISO-8859-1\r\n\
+Content-Disposition: form-data; name=submit\r\n\
+\r\n\
+Submit\r\n\
+--0016e68ee29c5d515f04cedf6733--"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn next_part_quoted_printable_cte_decodes_and_hides_header() {
+        let want = b"words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words words";
+        for cte in ["quoted-printable", "Quoted-PRINTABLE"] {
+            let mut r = MultipartReader::new("0016e68ee29c5d515f04cedf6733".into());
+            r.write(&qp_form_body(cte));
+            let part = r.next_part().unwrap().expect("qp part");
+            assert!(
+                part.header
+                    .iter()
+                    .all(|(k, _)| k != "Content-Transfer-Encoding"),
+                "{cte}"
+            );
+            assert_eq!(part.form_name, "text");
+            assert_eq!(part.body, want, "{cte}");
+            let submit = r.next_part().unwrap().expect("submit");
+            assert_eq!(submit.form_name, "submit");
+            assert_eq!(submit.body, b"Submit");
+        }
+    }
+
+    #[test]
+    fn next_raw_part_keeps_quoted_printable_cte() {
+        let body = b"--0016e68ee29c5d515f04cedf6733\r\n\
+Content-Type: text/plain; charset=\"utf-8\"\r\n\
+Content-Transfer-Encoding: quoted-printable\r\n\
+\r\n\
+<div dir=3D\"ltr\">Hello World.</div>\r\n\
+--0016e68ee29c5d515f04cedf6733\r\n\
+Content-Type: text/plain; charset=\"utf-8\"\r\n\
+Content-Transfer-Encoding: quoted-printable\r\n\
+\r\n\
+<div dir=3D\"ltr\">Hello World.</div>\r\n\
+--0016e68ee29c5d515f04cedf6733--"
+            .to_vec();
+        let mut r = MultipartReader::new("0016e68ee29c5d515f04cedf6733".into());
+        r.write(&body);
+        let raw = r.next_raw_part().unwrap().expect("raw");
+        assert_eq!(
+            raw.header
+                .iter()
+                .find(|(k, _)| k == "Content-Transfer-Encoding")
+                .map(|(_, v)| v.clone()),
+            Some(vec!["quoted-printable".into()])
+        );
+        assert_eq!(raw.body, br#"<div dir=3D"ltr">Hello World.</div>"#);
+        let decoded = r.next_part().unwrap().expect("decoded");
+        assert!(decoded
+            .header
+            .iter()
+            .all(|(k, _)| k != "Content-Transfer-Encoding"));
+        assert_eq!(decoded.body, br#"<div dir="ltr">Hello World.</div>"#);
+    }
+
+    #[test]
+    fn next_part_leaves_non_qp_cte() {
+        let body = b"--b\r\nContent-Transfer-Encoding: 7bit\r\nContent-Disposition: form-data; name=plain\r\n\r\nhi\r\n--b--";
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        let part = r.next_part().unwrap().expect("part");
+        assert_eq!(
+            part.header
+                .iter()
+                .find(|(k, _)| k == "Content-Transfer-Encoding")
+                .map(|(_, v)| v.clone()),
+            Some(vec!["7bit".into()])
+        );
+        assert_eq!(part.body, b"hi");
     }
 }
