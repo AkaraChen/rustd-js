@@ -22,10 +22,15 @@ export function constSign(v: GoConstValue): number;
 export function constBitLen(v: GoConstValue): number;
 /**
  * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
- * QUO of Ints is Float (`n` / `n/d` ExactString). QUO/REM by zero → Unknown.
+ * Float (and mixed Int/Float) ADD/SUB/MUL/QUO.
+ * QUO of Ints is Float (`n` / `n/d` ExactString). Integer-valued Float stays Float.
+ * QUO/REM by zero → Unknown. REM/AND/OR/XOR/AND_NOT on Float throw.
  */
 export function constBinaryOp(op: number, x: GoConstValue, y: GoConstValue): GoConstValue;
-/** Int ADD/SUB/XOR. `prec` is Go XOR width in bits; 0 = unlimited. */
+/**
+ * Int ADD/SUB/XOR. Float ADD/SUB (identity / Neg via `big.Rat`).
+ * XOR requires Int. `prec` is Go XOR width in bits; 0 = unlimited.
+ */
 export function constUnaryOp(op: number, y: GoConstValue, prec: number): GoConstValue;
 /** Int SHL/SHR. `s` is a non-negative bigint count (Go `uint`). */
 export function constShift(op: number, x: GoConstValue, s: bigint): GoConstValue;

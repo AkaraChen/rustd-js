@@ -114,7 +114,45 @@ func main() {
 	verifyConstantValFlag := flag.Bool("verify-constant-val", false, "verify a constant-int-float-val packet read from stdin")
 	constantFCmpFlag := flag.Bool("constant-float-compare", false, "dump go/constant Float constCompare fixtures")
 	verifyConstantFCmpFlag := flag.Bool("verify-constant-float-compare", false, "verify a constant-float-compare packet read from stdin")
+	constantFBinFlag := flag.Bool("constant-float-binop", false, "dump go/constant Float BinaryOp fixtures")
+	verifyConstantFBinFlag := flag.Bool("verify-constant-float-binop", false, "verify a constant-float-binop packet read from stdin")
+	constantFUnFlag := flag.Bool("constant-float-unary", false, "dump go/constant Float UnaryOp ADD/SUB fixtures")
+	verifyConstantFUnFlag := flag.Bool("verify-constant-float-unary", false, "verify a constant-float-unary packet read from stdin")
 	flag.Parse()
+	if *verifyConstantFUnFlag {
+		verifyConstantFloatUnary(os.Stdin)
+		return
+	}
+	if *constantFUnFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantFloatUnary(writer)
+		return
+	}
+	if *verifyConstantFBinFlag {
+		verifyConstantFloatBin(os.Stdin)
+		return
+	}
+	if *constantFBinFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantFloatBin(writer)
+		return
+	}
 	if *verifyConstantFCmpFlag {
 		verifyConstantFloatCompare(os.Stdin)
 		return
