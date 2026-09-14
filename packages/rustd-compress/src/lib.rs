@@ -1,7 +1,7 @@
 mod lzw_go;
 
 use bzip2_rs::decoder::{Decoder, ReadState, WriteState};
-use lzw_go::{decode_all as lzw_go_decode, GoEncoder};
+use lzw_go::{decode_all as lzw_go_decode, GoDecoder, GoEncoder};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use weezl::BitOrder;
@@ -399,9 +399,9 @@ impl NativeBzip2Decompressor {
 pub struct NativeLzwDecompressor {
     order: BitOrder,
     lit_width: u8,
-    compressed: Vec<u8>,
+    decoder: GoDecoder,
     output: Vec<u8>,
-    emitted: usize,
+    consumed: u64,
     ended: bool,
 }
 
@@ -414,43 +414,49 @@ impl NativeLzwDecompressor {
         Ok(Self {
             order,
             lit_width: width,
-            compressed: Vec::new(),
+            decoder: GoDecoder::new(order, width),
             output: Vec::new(),
-            emitted: 0,
+            consumed: 0,
             ended: false,
         })
+    }
+
+    fn bit_loc(&self) -> u64 {
+        self.consumed.saturating_mul(8)
+    }
+
+    fn drain(&mut self) {
+        self.output.extend(self.decoder.take_decoded());
     }
 
     #[napi]
     pub fn write(&mut self, chunk: Uint8Array) -> Result<()> {
         if self.ended {
-            return Err(lzw_fmt(
-                (self.compressed.len() as u64).saturating_mul(8),
-                "lzw: write after end",
-            ));
+            return Err(lzw_fmt(self.bit_loc(), "lzw: write after end"));
         }
-        self.compressed.extend_from_slice(chunk.as_ref());
+        self.consumed += chunk.len() as u64;
+        self.decoder
+            .write(chunk.as_ref())
+            .map_err(|err| lzw_fmt(self.bit_loc(), err.message()))?;
+        self.drain();
         Ok(())
     }
 
     #[napi]
     pub fn read(&mut self, max_bytes: Option<u32>) -> Uint8Array {
-        let out = take_out(&mut self.output, max_bytes);
-        self.emitted += out.len();
-        out
+        take_out(&mut self.output, max_bytes)
     }
 
     #[napi]
     pub fn end(&mut self) -> Result<()> {
-        self.ended = true;
-        let full = lzw_decode_all(self.order, self.lit_width, &self.compressed)?;
-        if self.emitted > full.len() {
-            return Err(lzw_fmt(
-                (self.compressed.len() as u64).saturating_mul(8),
-                "unexpected EOF",
-            ));
+        if self.ended {
+            return Ok(());
         }
-        self.output = full[self.emitted..].to_vec();
+        self.ended = true;
+        self.decoder
+            .finish()
+            .map_err(|err| lzw_fmt(self.bit_loc(), err.message()))?;
+        self.drain();
         Ok(())
     }
 
@@ -459,11 +465,18 @@ impl NativeLzwDecompressor {
         *self = Self {
             order: self.order,
             lit_width: self.lit_width,
-            compressed: Vec::new(),
+            decoder: GoDecoder::new(self.order, self.lit_width),
             output: Vec::new(),
-            emitted: 0,
+            consumed: 0,
             ended: false,
         };
+    }
+
+    /// Unconsumed compressed bytes plus leftover bit-buffer bytes. After each
+    /// `write` this stays O(code width), not the whole stream.
+    #[napi]
+    pub fn debug_input_len(&self) -> u32 {
+        self.decoder.pending_len() as u32
     }
 }
 

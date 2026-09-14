@@ -178,130 +178,236 @@ impl GoDecodeError {
     }
 }
 
-pub fn decode_all(order: BitOrder, lit_width: u8, data: &[u8]) -> Result<Vec<u8>, GoDecodeError> {
-    let lit_width = u32::from(lit_width);
-    let mut width = 1 + lit_width;
-    let clear = 1u16 << lit_width;
-    let eof = clear + 1;
-    let mut hi = eof;
-    let mut overflow = 1u16 << width;
-    let mut last = DECODER_INVALID_CODE;
-    let mut bits: u32 = 0;
-    let mut n_bits: u32 = 0;
-    let mut input = data;
-    let mut suffix = [0u8; 1 << MAX_WIDTH];
-    let mut prefix = [0u16; 1 << MAX_WIDTH];
-    let mut output = [0u8; 2 * (1 << MAX_WIDTH)];
-    let mut decoded = Vec::new();
+/// Incremental Go `compress/lzw` decoder. Leftover bits (`bits`/`n_bits`) are
+/// kept across `write` calls so LSB/MSB codes that straddle chunk boundaries
+/// match Go's `readLSB`/`readMSB`.
+pub struct GoDecoder {
+    order: BitOrder,
+    lit_width: u32,
+    width: u32,
+    clear: u16,
+    eof: u16,
+    hi: u16,
+    overflow: u16,
+    last: u16,
+    bits: u32,
+    n_bits: u32,
+    input: Vec<u8>,
+    input_off: usize,
+    suffix: [u8; 1 << MAX_WIDTH],
+    prefix: [u16; 1 << MAX_WIDTH],
+    scratch: [u8; 2 * (1 << MAX_WIDTH)],
+    o: usize,
+    decoded: Vec<u8>,
+    seen_eof: bool,
+    err: Option<GoDecodeError>,
+}
 
-    loop {
-        let mut o = 0usize;
-        loop {
-            let code = match read_code(order, &mut input, &mut bits, &mut n_bits, width) {
-                Ok(code) => code,
-                Err(GoDecodeError::UnexpectedEof) => {
-                    return Err(GoDecodeError::UnexpectedEof);
-                }
-                Err(err) => return Err(err),
-            };
-            if code < clear {
-                output[o] = code as u8;
-                o += 1;
-                if last != DECODER_INVALID_CODE {
-                    suffix[hi as usize] = code as u8;
-                    prefix[hi as usize] = last;
-                }
-            } else if code == clear {
-                width = 1 + lit_width;
-                hi = eof;
-                overflow = 1 << width;
-                last = DECODER_INVALID_CODE;
-                continue;
-            } else if code == eof {
-                decoded.extend_from_slice(&output[..o]);
-                return Ok(decoded);
-            } else if code <= hi {
-                let mut c = code;
-                let mut i = output.len() - 1;
-                if code == hi && last != DECODER_INVALID_CODE {
-                    c = last;
-                    while c >= clear {
-                        c = prefix[c as usize];
+impl GoDecoder {
+    pub fn new(order: BitOrder, lit_width: u8) -> Self {
+        let lit_width = u32::from(lit_width);
+        let width = 1 + lit_width;
+        let clear = 1u16 << lit_width;
+        let eof = clear + 1;
+        Self {
+            order,
+            lit_width,
+            width,
+            clear,
+            eof,
+            hi: eof,
+            overflow: 1u16 << width,
+            last: DECODER_INVALID_CODE,
+            bits: 0,
+            n_bits: 0,
+            input: Vec::new(),
+            input_off: 0,
+            suffix: [0u8; 1 << MAX_WIDTH],
+            prefix: [0u16; 1 << MAX_WIDTH],
+            scratch: [0u8; 2 * (1 << MAX_WIDTH)],
+            o: 0,
+            decoded: Vec::new(),
+            seen_eof: false,
+            err: None,
+        }
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.input.len() - self.input_off + (self.n_bits as usize).div_ceil(8)
+    }
+
+    pub fn take_decoded(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.decoded)
+    }
+
+    pub fn write(&mut self, data: &[u8]) -> Result<(), GoDecodeError> {
+        if let Some(err) = self.err {
+            return Err(err);
+        }
+        if self.seen_eof {
+            return Ok(());
+        }
+        if !data.is_empty() {
+            self.compact_input();
+            self.input.extend_from_slice(data);
+        }
+        self.pump()
+    }
+
+    pub fn finish(&mut self) -> Result<(), GoDecodeError> {
+        if let Some(err) = self.err {
+            return Err(err);
+        }
+        self.pump()?;
+        if self.seen_eof {
+            return Ok(());
+        }
+        self.err = Some(GoDecodeError::UnexpectedEof);
+        Err(GoDecodeError::UnexpectedEof)
+    }
+
+    fn compact_input(&mut self) {
+        if self.input_off == 0 {
+            return;
+        }
+        self.input.drain(..self.input_off);
+        self.input_off = 0;
+    }
+
+    fn flush(&mut self) {
+        if self.o == 0 {
+            return;
+        }
+        self.decoded.extend_from_slice(&self.scratch[..self.o]);
+        self.o = 0;
+    }
+
+    fn read_code(&mut self) -> Result<Option<u16>, GoDecodeError> {
+        match self.order {
+            BitOrder::Lsb => {
+                while self.n_bits < self.width {
+                    if self.input_off >= self.input.len() {
+                        return Ok(None);
                     }
-                    output[i] = c as u8;
-                    i -= 1;
-                    c = last;
+                    let x = self.input[self.input_off];
+                    self.input_off += 1;
+                    self.bits |= u32::from(x) << self.n_bits;
+                    self.n_bits += 8;
                 }
-                while c >= clear {
-                    output[i] = suffix[c as usize];
-                    i -= 1;
-                    c = prefix[c as usize];
-                }
-                output[i] = c as u8;
-                let n = output.len() - i;
-                output.copy_within(i.., o);
-                o += n;
-                if last != DECODER_INVALID_CODE {
-                    suffix[hi as usize] = c as u8;
-                    prefix[hi as usize] = last;
-                }
-            } else {
-                return Err(GoDecodeError::InvalidCode);
+                let code = (self.bits & ((1 << self.width) - 1)) as u16;
+                self.bits >>= self.width;
+                self.n_bits -= self.width;
+                Ok(Some(code))
             }
-            last = code;
-            hi = hi.saturating_add(1);
-            if hi >= overflow {
-                if width == MAX_WIDTH {
-                    last = DECODER_INVALID_CODE;
-                    hi -= 1;
-                } else {
-                    width += 1;
-                    overflow = 1 << width;
+            BitOrder::Msb => {
+                while self.n_bits < self.width {
+                    if self.input_off >= self.input.len() {
+                        return Ok(None);
+                    }
+                    let x = self.input[self.input_off];
+                    self.input_off += 1;
+                    self.bits |= u32::from(x) << (24 - self.n_bits);
+                    self.n_bits += 8;
                 }
-            }
-            if o >= FLUSH_BUFFER {
-                break;
+                let code = (self.bits >> (32 - self.width)) as u16;
+                self.bits <<= self.width;
+                self.n_bits -= self.width;
+                Ok(Some(code))
             }
         }
-        decoded.extend_from_slice(&output[..o]);
+    }
+
+    fn pump(&mut self) -> Result<(), GoDecodeError> {
+        if self.seen_eof {
+            self.flush();
+            return Ok(());
+        }
+        loop {
+            let code = match self.read_code() {
+                Ok(Some(code)) => code,
+                Ok(None) => {
+                    self.flush();
+                    self.compact_input();
+                    return Ok(());
+                }
+                Err(err) => {
+                    self.err = Some(err);
+                    self.flush();
+                    return Err(err);
+                }
+            };
+            if code < self.clear {
+                self.scratch[self.o] = code as u8;
+                self.o += 1;
+                if self.last != DECODER_INVALID_CODE {
+                    self.suffix[self.hi as usize] = code as u8;
+                    self.prefix[self.hi as usize] = self.last;
+                }
+            } else if code == self.clear {
+                self.width = 1 + self.lit_width;
+                self.hi = self.eof;
+                self.overflow = 1u16 << self.width;
+                self.last = DECODER_INVALID_CODE;
+                continue;
+            } else if code == self.eof {
+                self.flush();
+                self.seen_eof = true;
+                self.input.clear();
+                self.input_off = 0;
+                self.n_bits = 0;
+                self.bits = 0;
+                return Ok(());
+            } else if code <= self.hi {
+                let mut c = code;
+                let mut i = self.scratch.len() - 1;
+                if code == self.hi && self.last != DECODER_INVALID_CODE {
+                    c = self.last;
+                    while c >= self.clear {
+                        c = self.prefix[c as usize];
+                    }
+                    self.scratch[i] = c as u8;
+                    i -= 1;
+                    c = self.last;
+                }
+                while c >= self.clear {
+                    self.scratch[i] = self.suffix[c as usize];
+                    i -= 1;
+                    c = self.prefix[c as usize];
+                }
+                self.scratch[i] = c as u8;
+                let n = self.scratch.len() - i;
+                self.scratch.copy_within(i.., self.o);
+                self.o += n;
+                if self.last != DECODER_INVALID_CODE {
+                    self.suffix[self.hi as usize] = c as u8;
+                    self.prefix[self.hi as usize] = self.last;
+                }
+            } else {
+                self.err = Some(GoDecodeError::InvalidCode);
+                self.flush();
+                return Err(GoDecodeError::InvalidCode);
+            }
+            self.last = code;
+            self.hi = self.hi.saturating_add(1);
+            if self.hi >= self.overflow {
+                if self.width == MAX_WIDTH {
+                    self.last = DECODER_INVALID_CODE;
+                    self.hi -= 1;
+                } else {
+                    self.width += 1;
+                    self.overflow = 1u16 << self.width;
+                }
+            }
+            if self.o >= FLUSH_BUFFER {
+                self.flush();
+            }
+        }
     }
 }
 
-fn read_code(
-    order: BitOrder,
-    input: &mut &[u8],
-    bits: &mut u32,
-    n_bits: &mut u32,
-    width: u32,
-) -> Result<u16, GoDecodeError> {
-    match order {
-        BitOrder::Lsb => {
-            while *n_bits < width {
-                let Some((&x, rest)) = input.split_first() else {
-                    return Err(GoDecodeError::UnexpectedEof);
-                };
-                *input = rest;
-                *bits |= u32::from(x) << *n_bits;
-                *n_bits += 8;
-            }
-            let code = (*bits & ((1 << width) - 1)) as u16;
-            *bits >>= width;
-            *n_bits -= width;
-            Ok(code)
-        }
-        BitOrder::Msb => {
-            while *n_bits < width {
-                let Some((&x, rest)) = input.split_first() else {
-                    return Err(GoDecodeError::UnexpectedEof);
-                };
-                *input = rest;
-                *bits |= u32::from(x) << (24 - *n_bits);
-                *n_bits += 8;
-            }
-            let code = (*bits >> (32 - width)) as u16;
-            *bits <<= width;
-            *n_bits -= width;
-            Ok(code)
-        }
-    }
+pub fn decode_all(order: BitOrder, lit_width: u8, data: &[u8]) -> Result<Vec<u8>, GoDecodeError> {
+    let mut decoder = GoDecoder::new(order, lit_width);
+    decoder.write(data)?;
+    decoder.finish()?;
+    Ok(decoder.take_decoded())
 }
