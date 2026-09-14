@@ -68,6 +68,13 @@ $ ls -l packages/rustd-debugfmt/*.node
 
 729,904 bytes / 2,000,000 cap.
 
+`pnpm test:pack` packs the main JS package plus the linux-x64-gnu native
+tarball, installs both offline in a clean directory, and loads CJS + ESM
+(`require` / `import`) to `sniff` ELF magic and `open` a host-built Go
+fixture (`main.main` + `buildInfo().goVersion`). The main tarball must not
+contain `.node`. Five-platform optional packages stay on
+`todo_795520918286` until CI runners exist.
+
 ## Performance (issue #18 §4.8)
 
 Open a real `go build` ELF grown to ≥100MB with a sparse tail (so file size is
