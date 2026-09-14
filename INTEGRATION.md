@@ -28,7 +28,8 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | rustd-image | `pkg/rustd-image-grok-bulk-2` | superseded by `pkg/rustd-image-grok-bulk-8` |
 | rustd-log | `pkg/rustd-log-grok-bulk-4` | merged |
 | rustd-unicode | `pkg/rustd-unicode-grok-bulk-worker` @ `f210fc7` | merged (`b03be1c`) |
-| rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `3f67b99` | rejected — parallel rewrite vs merged `63cece8` (`63cece8` is **not** an ancestor; merge-base `ba259ea`). Float BinaryOp ADD/SUB/MUL/QUO. Worker must rebase |
+| rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `4c64c3e` | merged (`731cae9`); go/constant Float BinaryOp ADD/SUB/MUL/QUO + Float UnaryOp ADD/SUB vs Go (issue #28 ck13–14). `4a72622` **is** an ancestor; `63cece8` **is** an ancestor; merge-tree CLEAN |
+| rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `3f67b99` | superseded by rebased tip `4c64c3e` (`63cece8` **is** an ancestor of `4c64c3e`; `3f67b99` is **not**). Parallel rewrite of Float BinaryOp; do not merge |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `63cece8` | merged (`3d26a91`); go/constant Int/Float StringVal/Float64Val + Float constCompare vs Go (issue #28 ck11–12). `240bce5` **is** an ancestor; `9f19c33` **is** an ancestor; merge-tree CLEAN |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `9f19c33` | merged (`53d51c8`); go/constant Int UnaryOp/AND_NOT/Shift vs Go (issue #28). `55d6a64` (BinaryOp) **is** an ancestor; `3a7f66d` **is** an ancestor; merge-tree CLEAN |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `8f4d2f9` | superseded by rebased tip `63cece8` (`9f19c33` **is** an ancestor of `63cece8`; `8f4d2f9` is **not**). Parallel rewrite of StringVal/Float64Val; do not merge |
@@ -2028,6 +2029,96 @@ Suggested next three: mathx **after rebase/replay onto origin/main** (last remai
 - First-time remaining of the owner 12: **mathx only**. Mail still pending rebase. Gotool follow-up (Float BinaryOp) is extra work on a parallel rewrite.
 - On main now: crypto, checksum, containers, compress, archive, serial, image, log, unicode, gotool, regexsyntax, mime, encoding. Missing from the 12: mathx.
 - This round merged mime ReadForm part-count 1000/1001 (ck24). Only one CLEAN in-scope branch; gotool conflicted.
+- `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
+- `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
+- Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
+- Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
+
+## Round 2026-09-14T23:23:11+02:00
+
+Agent: `grok-integrator`  
+`origin/main` before: `2328e31`  
+`origin/main` after: (this file lands as a follow-up commit; package merge `731cae9`)
+
+Gotool worker rebased Float BinaryOp + Float UnaryOp onto `286db7f` (descendant of merged `63cece8`). Verified and merged. Mathx/mail still same SHA, lockfile CONFLICT — not re-built.
+
+### Merged (verified green, `--no-ff`, pushed)
+
+| 分支 | 包 | 验证 | merge sha |
+|---|---|---|---|
+| `pkg/rustd-gotool-grok-bulk-4` @ `4c64c3e` | rustd-gotool | build + 39 tests pass (6 unused/dead_code warnings, not a failure); merge-tree CLEAN; `63cece8` **is** an ancestor; `3f67b99` is **not** | `731cae9` |
+
+### Rejected
+
+- `pkg/rustd-mathx-grok-bulk-10` @ `9c04f91` — same SHA as last fourteen rounds. Not re-built. Still `pnpm-lock.yaml` CONFLICT (merge-base `de3e643`).
+  First lines of conflict:
+
+```
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+<<<<<<< ours
+  packages/rustd-encoding: {}
+  packages/rustd-gotool: {}
+  packages/rustd-image: {}
+  packages/rustd-log: {}
+  packages/rustd-mime: {}
+  packages/rustd-regexsyntax: {}
+  packages/rustd-serial: {}
+  packages/rustd-unicode: {}
+=======
+  packages/rustd-mathx: {}
+>>>>>>> theirs
+```
+
+  Last remaining owner-12 package. Worker (`grok-bulk-10`) must rebase/replay onto origin/main.
+
+- `pkg/rustd-mail-grok-bulk-worker` @ `2852022` — same SHA. Not re-built. Still `pnpm-lock.yaml` CONFLICT (merge-base `befb9d6`).
+  First lines of conflict:
+
+```
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+<<<<<<< ours
+  packages/rustd-encoding: {}
+  packages/rustd-gotool: {}
+=======
+>>>>>>> theirs
+<<<<<<< ours
+  packages/rustd-mime: {}
+  packages/rustd-regexsyntax: {}
+  packages/rustd-serial: {}
+  packages/rustd-unicode: {}
+=======
+  packages/rustd-mail: {}
+  packages/rustd-serial: {}
+```
+
+  Worker (`grok-bulk-worker`) must rebase mail-parse onto current `origin/main`.
+
+- `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20). Skipped.
+- `pkg/rustd-debugfmt-grok-bulk-5` @ `6b654b4` — `rejected-by-owner` (issue #18). Skipped.
+
+LoopX `todo update --note` attempted this round on `todo_7d22617a1dca` (mathx ck7), `todo_cd9db5d9748d` (mathx), `todo_bcf9f94479d5` (mail ck2), `todo_563a7158788d` (mail). Refused: `agent_id=grok-integrator` cannot update todos `claimed_by` the bulk workers.
+
+### Superseded / do-not-merge
+
+- `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — still superseded by merged `pkg/rustd-image-grok-bulk-8`.
+- `pkg/rustd-gotool-grok-bulk-4` @ `3f67b99` — superseded by rebased tip `4c64c3e` (this round). Do not merge the old parallel history. `8f4d2f9` remains superseded by `63cece8`.
+
+### Not processed / remaining unmerged `origin/pkg/*`
+
+1. `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — skip; superseded
+2. `pkg/rustd-testing-grok-bulk-6` (`9fc9508`) — skip; rejected-by-owner
+3. `pkg/rustd-mathx-grok-bulk-10` (`9c04f91`) — waiting on rebase (cLog10 on old history)
+4. `pkg/rustd-mail-grok-bulk-worker` (`2852022`) — waiting on rebase
+5. `pkg/rustd-debugfmt-grok-bulk-5` (`6b654b4`) — skip; rejected-by-owner
+
+Suggested next three: mathx **after rebase/replay onto origin/main** (last remaining of the owner 12). Then mail after rebase.
+
+### Notes
+
+- Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
+- First-time remaining of the owner 12: **mathx only**. Mail still pending rebase.
+- On main now: crypto, checksum, containers, compress, archive, serial, image, log, unicode, gotool, regexsyntax, mime, encoding. Missing from the 12: mathx.
+- This round merged gotool ck13–14 (Float BinaryOp + Float UnaryOp) after the worker rebased off the previous parallel rewrite `3f67b99`.
 - `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
 - `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
