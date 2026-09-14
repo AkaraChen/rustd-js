@@ -1,7 +1,7 @@
 # rustd-mathx
 
 Go `math/bits`, `math/cmplx`, and `math/rand` for Node via Rust + napi-rs.
-This is checkpoint 4 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**. `seedDefault` is not exported pending review.
+This is checkpoint 5 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**, recertified after Zipf/ziggurat tables (`npm pack` CJS/ESM smoke + linux-x64 size). `seedDefault` is not exported pending review.
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -132,10 +132,9 @@ Local Linux x64 GNU, Node v24.20.0, 200_000 iterations:
 
 ## Size
 
-Release + strip, local Linux x64 GNU:
+Local Linux x64 GNU release + strip, Rust 1.97.1 (after Zipf/ziggurat tables): **482,400 bytes** (issue cap 2 MB; expected ≪ 500 KB).
 
 ```text
 $ ls -l packages/rustd-mathx/*.node
+-rwxrwxr-x 1 akrc akrc 482400 Sep 14 17:59 packages/rustd-mathx/rustd-mathx.linux-x64-gnu.node
 ```
-
-See the local `*.node` after `pnpm --filter rustd-mathx build`. Cap is 2 MB; this package should stay well under 500 KB.
