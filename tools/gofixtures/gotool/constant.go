@@ -970,3 +970,125 @@ func verifyConstantFloatBin(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-float-binop cases\n", len(packet.Cases))
 }
+
+type ConstFUnCase struct {
+	ID       string `json:"id"`
+	Op       string `json:"op"`
+	OpTok    int    `json:"opTok"`
+	FormY    string `json:"formY"`
+	YX       string `json:"yx"`
+	YY       string `json:"yy"`
+	YS       string `json:"ys"`
+	Kind     string `json:"kind"`
+	Exact    string `json:"exact"`
+	Sign     int    `json:"sign"`
+	F64Bits  string `json:"f64Bits"`
+	F64Exact bool   `json:"f64Exact"`
+}
+
+type ConstFUnPacket struct {
+	Schema  int            `json:"schema"`
+	Package string         `json:"package"`
+	Go      string         `json:"go"`
+	Slice   string         `json:"slice"`
+	Cases   []ConstFUnCase `json:"cases"`
+}
+
+func floatUnaryOps() []struct {
+	name string
+	tok  token.Token
+} {
+	return []struct {
+		name string
+		tok  token.Token
+	}{
+		{"ADD", token.ADD},
+		{"SUB", token.SUB},
+	}
+}
+
+func evalFloatUnary(a fcmpSrc, op token.Token) (ConstFUnCase, error) {
+	vy, err := makeConst(a.form, a.x, a.y, a.s)
+	if err != nil {
+		return ConstFUnCase{}, err
+	}
+	v := constant.UnaryOp(op, vy, 0)
+	f, exact := constant.Float64Val(v)
+	return ConstFUnCase{
+		OpTok:    int(op),
+		FormY:    a.form,
+		YX:       a.x,
+		YY:       a.y,
+		YS:       a.s,
+		Kind:     v.Kind().String(),
+		Exact:    v.ExactString(),
+		Sign:     constant.Sign(v),
+		F64Bits:  fmt.Sprintf("%016x", math.Float64bits(f)),
+		F64Exact: exact,
+	}, nil
+}
+
+func dumpConstantFloatUnary(w io.Writer) {
+	packet := ConstFUnPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-float-unary",
+	}
+	corpus := floatCmpCorpus()
+	for _, op := range floatUnaryOps() {
+		for i, a := range corpus {
+			c, err := evalFloatUnary(a, op.tok)
+			if err != nil {
+				fail(err)
+			}
+			c.ID = fmt.Sprintf("go-fun-%s-%d", op.name, i)
+			c.Op = op.name
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantFloatUnary(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstFUnPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-float-unary" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-float-unary packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{}
+	for _, op := range floatUnaryOps() {
+		tokOf[op.name] = op.tok
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		got, err := evalFloatUnary(fcmpSrc{c.FormY, c.YX, c.YY, c.YS}, op)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s op=%s: go kind=%s exact=%s sign=%d f64=%s exact64=%v got kind=%s exact=%s sign=%d f64=%s exact64=%v",
+				i, c.ID, c.Op, got.Kind, got.Exact, got.Sign, got.F64Bits, got.F64Exact,
+				c.Kind, c.Exact, c.Sign, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-float-unary cases\n", len(packet.Cases))
+}
