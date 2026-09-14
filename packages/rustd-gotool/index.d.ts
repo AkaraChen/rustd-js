@@ -4,6 +4,17 @@ export function versionIsValid(x: string): boolean;
 /** Language version, e.g. "go1.21rc2" → "go1.21". Invalid input → "". */
 export function versionLang(x: string): string;
 
+/** Opaque `go/constant.Value` (issue #28). This checkpoint only constructs Int via constMakeInt64. */
+export class GoConstValue {
+  readonly kind: 'Bool' | 'String' | 'Int' | 'Float' | 'Complex' | 'Unknown';
+}
+export function constMakeInt64(v: bigint): GoConstValue;
+export function constToInt(v: GoConstValue): [bigint, boolean];
+/** Integer ordering: -1 / 0 / 1. This checkpoint only compares Int values. */
+export function constCompare(x: GoConstValue, y: GoConstValue): number;
+export function constSign(v: GoConstValue): number;
+export function constBitLen(v: GoConstValue): number;
+
 export const TOKEN: {
   readonly ILLEGAL: number;
   readonly EOF: number;
