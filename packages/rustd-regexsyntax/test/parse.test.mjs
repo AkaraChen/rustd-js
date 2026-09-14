@@ -85,6 +85,21 @@ test('OP/FLAGS match Go iota and Perl bitmask', () => {
   assert.match(flagsToString(FLAGS.Perl), /PerlX/);
 });
 
+test('unicode.Properties names are invalid like Go (Categories/Scripts only)', () => {
+  const pattern = '\\p{White_Space}';
+  assert.throws(() => syntaxParse(pattern, FLAGS.Perl), (err) => {
+    assert.equal(err instanceof SyntaxError, true);
+    assert.equal(err.code, 'invalid character class range');
+    return true;
+  });
+  const verified = go(['-pkg', 'regexsyntax', '-verify'], JSON.stringify({
+    schema: 1,
+    package: 'regexsyntax',
+    cases: [{ id: 'prop-white-space', pattern, flags: FLAGS.Perl, error: 'invalid character class range' }],
+  }));
+  assert.equal(verified.status, 0, verified.stderr);
+});
+
 test('type errors', () => {
   assert.throws(() => syntaxParse(1, FLAGS.Perl), TypeError);
   assert.throws(() => syntaxParse('a', 'x'), TypeError);
