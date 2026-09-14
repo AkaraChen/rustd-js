@@ -93,6 +93,37 @@ test('streaming bzip2 matches one-shot across split points', () => {
   }
 });
 
+test('streaming concat-hello matches one-shot across split points', () => {
+  const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const concat = packet.bzip.find((c) => c.id === 'concat-hello');
+  const data = Buffer.from(concat.compressedB64, 'base64');
+  assert.equal(sha(bzip2Decompress(data)), concat.sha256);
+  for (const size of [1, 2, 3, 7, 64, data.length]) {
+    const dec = new Bzip2Decompressor({ chunkSize: 64 });
+    for (let i = 0; i < data.length; i += size) dec.write(data.subarray(i, i + size));
+    dec.end();
+    const chunks = [];
+    for (;;) {
+      const part = dec.read(size === 1 ? 1 : 32);
+      if (!part.length) break;
+      chunks.push(part);
+    }
+    assert.equal(sha(Buffer.concat(chunks)), concat.sha256, `concat split ${size}`);
+  }
+});
+
+test('Go hello-9 truncation at every offset matches native error text', () => {
+  const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const truncs = packet.bzip.filter((c) => c.id.startsWith('hello-9-trunc-'));
+  assert.ok(truncs.length >= 50, `hello-9-trunc count ${truncs.length}`);
+  let errors = 0;
+  for (const c of truncs) {
+    decodeCase(c);
+    if (c.error) errors += 1;
+  }
+  assert.ok(errors >= 50, `hello-9-trunc errors ${errors}`);
+});
+
 test('bzip2DecompressStream yields the same bytes', async () => {
   const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
   const happy = packet.bzip.find((c) => c.id === 'lcg4k-9');
