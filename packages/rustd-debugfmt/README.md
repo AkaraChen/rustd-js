@@ -19,6 +19,9 @@ Addresses, offsets, and sizes are `bigint`. `open(path)` maps the file with
   innermost source location in `file`/`line`. Inlined callees from
   `FUNCDATA_InlTree` / `PCDATA_InlTreeIndex` are listed innermost-first in
   `inlineFrames`.
+- `LineReader.next()` yields one sequence (including the `EndSequence` row);
+  the following `next()` is `null` until `reset()` or `seek()`. `seek`/`seekPC`
+  search every compile unit, because DWARF addresses are not globally sorted.
 - `DwarfEntry.type()` is a stub (`null`); use `types()` for DIE-derived types.
 - `dynamicValue` always returns `null` in this slice.
 - Fat Mach-O selects the current process architecture and errors if that slice

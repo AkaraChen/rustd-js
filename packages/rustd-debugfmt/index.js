@@ -158,26 +158,53 @@ class LineReader {
   constructor(rows) {
     this._rows = rows ?? [];
     this._i = 0;
+    this._ended = false;
   }
   next() {
-    if (this._i >= this._rows.length) return null;
-    return this._rows[this._i++];
+    if (this._ended || this._i >= this._rows.length) return null;
+    const row = this._rows[this._i++];
+    if (row.endSequence) this._ended = true;
+    return row;
   }
-  reset() { this._i = 0; }
-  tell() { return this._i < this._rows.length ? this._rows[this._i].address : 0n; }
+  reset() {
+    this._i = 0;
+    this._ended = false;
+  }
+  tell() {
+    if (this._ended || this._i >= this._rows.length) return 0n;
+    return this._rows[this._i].address;
+  }
   files() { return [...new Set(this._rows.map((r) => r.file).filter(Boolean))]; }
   seek(addr) {
-    this._i = 0;
-    while (this._i < this._rows.length && this._rows[this._i].address < addr) this._i += 1;
+    this._ended = false;
+    let lastIdx = -1;
+    for (let i = 0; i < this._rows.length; i++) {
+      const row = this._rows[i];
+      if (row.endSequence) {
+        if (row.address > addr && lastIdx >= 0) {
+          this._i = lastIdx;
+          return;
+        }
+        lastIdx = -1;
+        continue;
+      }
+      if (row.address > addr) {
+        this._i = lastIdx >= 0 ? lastIdx : i;
+        return;
+      }
+      lastIdx = i;
+    }
+    this._i = lastIdx >= 0 ? lastIdx : this._rows.length;
   }
   seekPC(pc) {
     let last = null;
     for (const row of this._rows) {
       if (row.endSequence) {
+        if (row.address > pc && last) return last.file;
         last = null;
         continue;
       }
-      if (row.address > pc) break;
+      if (row.address > pc) return last ? last.file : null;
       last = row;
     }
     return last ? last.file : null;
