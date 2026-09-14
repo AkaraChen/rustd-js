@@ -5,10 +5,11 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 3 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
-`go/version`, `go/token`, `go/scanner`, plus `go/parser` and `ast.Fprint`.
-`go/format` / `gofmt`, `go/constant`, and `go/build/constraint` are **not**
-in this release. API is `0.x` and unstable.
+Checkpoint 4 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+`go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`, plus
+`GoParseError.list` / `partialFile` error recovery vs Go. `go/format` / `gofmt`,
+`go/constant`, and `go/build/constraint` are **not** in this release. API is
+`0.x` and unstable.
 
 ```js
 import {
@@ -53,7 +54,12 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 - `parseFile` / `parseExpr` skip identifier resolution (`File.Scope`,
   `Ident.Obj`, `File.Unresolved` are always `null`), matching Go's
   recommended `SkipObjectResolution`.
-- Parse errors throw `GoParseError` with `list` and `partialFile`.
+- Parse errors throw `GoParseError` with `list` and `partialFile` (Go still
+  returns a partial `*ast.File`; the AST is on the error, not discarded).
+  Issue #28 §4.5 compares first-error position and error-count order of
+  magnitude, plus top-level `decls.length`. Error *wording* is recorded when it
+  differs (`test/parse-error-msg-diffs.json`; AllErrors same-offset permutation
+  only in this checkpoint) and is not a pass/fail criterion.
 - `ast.Fprint` is the debug printer, not `gofmt`. `go/format` is not shipped.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 

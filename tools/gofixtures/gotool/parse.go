@@ -122,6 +122,110 @@ func dumpParse(writer io.Writer) {
 	}
 }
 
+type ParseErrorCase struct {
+	ID        string     `json:"id"`
+	Filename  string     `json:"filename"`
+	SrcB64    string     `json:"srcB64"`
+	Mode      uint       `json:"mode"`
+	Errors    []ParseErr `json:"errors"`
+	DeclCount int        `json:"declCount"`
+	NilFile   bool       `json:"nilFile"`
+}
+
+type ParseErrorPacket struct {
+	Schema  int              `json:"schema"`
+	Package string           `json:"package"`
+	Go      string           `json:"go"`
+	Cases   []ParseErrorCase `json:"cases"`
+}
+
+func dumpParseErrorCase(id, filename string, src []byte, mode parser.Mode) ParseErrorCase {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, src, mode)
+	declCount := 0
+	if f != nil {
+		declCount = len(f.Decls)
+	}
+	return ParseErrorCase{
+		ID:        id,
+		Filename:  filename,
+		SrcB64:    base64.StdEncoding.EncodeToString(src),
+		Mode:      uint(mode),
+		Errors:    errorList(err),
+		DeclCount: declCount,
+		NilFile:   f == nil,
+	}
+}
+
+func parseErrorCorpus() []ParseErrorCase {
+	base := parser.ParseComments | parser.SkipObjectResolution
+	all := base | parser.AllErrors
+	srcs := []struct{ id, src string }{
+		{"missing-rparen", "package p\nfunc F( {\n}\nfunc G() {}\n"},
+		{"missing-rbrace", "package p\nfunc F() {\nfunc G() {}\n"},
+		{"bad-for", "package p\nfunc F() {\n\tfor x y {\n\t}\n}\nfunc G() {}\n"},
+		{"missing-semi-expr", "package p\nfunc F() {\n\t1 2\n}\n"},
+		{"bad-type", "package p\ntype T struct {\n\tX int\nfunc G() {}\n"},
+		{"extra-rparen", "package p\nfunc F()) {}\nfunc G() {}\n"},
+		{"missing-package-ident", "package \nfunc F() {}\n"},
+		{"empty-func-sig", "package p\nfunc () {}\nfunc G() {}\n"},
+		{"unclosed-paren-call", "package p\nfunc F() { println(1 }\nfunc G() {}\n"},
+		{"import-after", "package p\nfunc F() {}\nimport \"fmt\"\n"},
+	}
+	var out []ParseErrorCase
+	for _, c := range srcs {
+		out = append(out, dumpParseErrorCase(c.id, c.id+".go", []byte(c.src), base))
+		out = append(out, dumpParseErrorCase(c.id+"-all", c.id+"-all.go", []byte(c.src), all))
+	}
+	return out
+}
+
+func dumpParseErrors(writer io.Writer) {
+	packet := ParseErrorPacket{Schema: 1, Package: "gotool-parse-errors", Go: "go1.24.13", Cases: parseErrorCorpus()}
+	enc := json.NewEncoder(writer)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func sameParseErrPos(a, b ParseErr) bool {
+	return a.Filename == b.Filename && a.Offset == b.Offset && a.Line == b.Line && a.Column == b.Column
+}
+
+func verifyParseErrors(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 64<<20))
+	dec.DisallowUnknownFields()
+	var packet ParseErrorPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool-parse-errors" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid parse-error packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		src, err := base64.StdEncoding.DecodeString(c.SrcB64)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s src: %w", i, c.ID, err))
+		}
+		got := dumpParseErrorCase(c.ID, c.Filename, src, parser.Mode(c.Mode))
+		if got.DeclCount != c.DeclCount || got.NilFile != c.NilFile || len(got.Errors) != len(c.Errors) {
+			fail(fmt.Errorf("mismatch case %d id=%s decls/nil/count go=(%d,%v,%d) packet=(%d,%v,%d)",
+				i, c.ID, got.DeclCount, got.NilFile, len(got.Errors), c.DeclCount, c.NilFile, len(c.Errors)))
+		}
+		for j := range got.Errors {
+			if !sameParseErrPos(got.Errors[j], c.Errors[j]) {
+				fail(fmt.Errorf("mismatch case %d id=%s error[%d] pos go=%+v packet=%+v", i, c.ID, j, got.Errors[j], c.Errors[j]))
+			}
+		}
+	}
+	fmt.Printf("Go verified %d gotool-parse-errors cases\n", len(packet.Cases))
+}
+
 func verifyParse(r io.Reader) {
 	dec := json.NewDecoder(io.LimitReader(r, 64<<20))
 	dec.DisallowUnknownFields()

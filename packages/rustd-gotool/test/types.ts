@@ -18,6 +18,7 @@ import {
   astInspect,
   astIsExported,
   astNewIdent,
+  GoParseError,
 } from '../index.js';
 const cmp: number = versionCompare('go1.21', 'go1.21.0');
 const ok: boolean = versionIsValid('go1.21rc2');
@@ -32,6 +33,10 @@ const scanner = new Scanner(file, new Uint8Array(10), null, SCAN_MODE.ScanCommen
 const r = scanner.scan();
 scanner.scanInto(r);
 const err: GoScanError = new GoScanError({ filename: 'p.go', offset: 0, line: 1, column: 1 }, 'x');
+const parseErr: GoParseError = new GoParseError(
+  [{ filename: 'p.go', offset: 0, line: 1, column: 1, msg: 'x' }],
+  null,
+);
 const parsed = parseFile(fset, 'p.go', new Uint8Array(10), PARSE_MODE.SkipObjectResolution);
 const expr = parseExpr(new FileSet(), '1+2', PARSE_MODE.SkipObjectResolution);
 const sink = { write(c: Uint8Array) { void c; } };
@@ -47,4 +52,4 @@ versionIsValid(1);
 versionLang(1);
 // @ts-expect-error compare does not return boolean
 const wrong: boolean = versionCompare('go1', 'go1.1');
-void [cmp, ok, lang, tok, kw, exp, s, scanner, err, wrong, parsed, expr, id, exported];
+void [cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
