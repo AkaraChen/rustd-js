@@ -111,29 +111,54 @@ fn is_leap(y: i32) -> bool {
     y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
 }
 
+/// Overflow-normalize like Go `time.Date` (`norm` in time.go).
+fn go_norm(hi: i32, lo: i32, base: i32) -> (i32, i32) {
+    let mut hi = hi;
+    let mut lo = lo;
+    if lo < 0 {
+        let n = (-lo - 1) / base + 1;
+        hi -= n;
+        lo += n * base;
+    }
+    if lo >= base {
+        let n = lo / base;
+        hi += n;
+        lo -= n * base;
+    }
+    (hi, lo)
+}
+
+/// Go `msDosTimeToTime` via `time.Date(..., time.UTC)`, including month=0/day=0
+/// overflow (DOS 0/0 → 1979-11-30 UTC).
 fn unix_from_dos(time: u16, date: u16) -> Option<f64> {
-    if date == 0 && time == 0 {
-        return None;
-    }
     let year = 1980 + i32::from(date >> 9);
-    let mo = u32::from((date >> 5) & 0xf);
-    let d = u32::from(date & 0x1f);
-    let h = u32::from(time >> 11);
-    let mi = u32::from((time >> 5) & 0x3f);
-    let s = u32::from(time & 0x1f) * 2;
-    if !(1..=12).contains(&mo) || d == 0 {
-        return None;
-    }
+    let month = i32::from((date >> 5) & 0xf);
+    let day = i32::from(date & 0x1f);
+    let hour = i32::from(time >> 11);
+    let min = i32::from((time >> 5) & 0x3f);
+    let sec = i32::from(time & 0x1f) * 2;
+    let (year, m0) = go_norm(year, month - 1, 12);
+    let month = m0 + 1;
+    let (min, sec) = go_norm(min, sec, 60);
+    let (hour, min) = go_norm(hour, min, 60);
+    let (day_off, hour) = go_norm(0, hour, 24);
+    let day = day + day_off;
     let mut days = 0i64;
-    for y in 1970..year {
-        days += if is_leap(y) { 366 } else { 365 };
+    if year >= 1970 {
+        for y in 1970..year {
+            days += if is_leap(y) { 366 } else { 365 };
+        }
+    } else {
+        for y in year..1970 {
+            days -= if is_leap(y) { 366 } else { 365 };
+        }
     }
     let months = [31, if is_leap(year) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 1..mo {
+    for m in 1..month {
         days += i64::from(months[(m - 1) as usize]);
     }
-    days += i64::from(d) - 1;
-    Some((days * 86400 + i64::from(h) * 3600 + i64::from(mi) * 60 + i64::from(s)) as f64 * 1000.0)
+    days += i64::from(day) - 1;
+    Some((days * 86400 + i64::from(hour) * 3600 + i64::from(min) * 60 + i64::from(sec)) as f64 * 1000.0)
 }
 
 fn deflate(data: &[u8]) -> Result<Vec<u8>> {

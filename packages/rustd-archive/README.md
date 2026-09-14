@@ -48,6 +48,8 @@ do not need `close()`.
   data, entry fields, and interoperability, never compressed archives byte-for-byte.
 - DOS timestamps have two-second resolution when an extended timestamp extra
   field is absent. This package writes extra field `0x5455` when `modified` is set.
+  A zero DOS date/time decodes as 1979-11-30 UTC, matching Go `archive/zip`
+  `msDosTimeToTime` (so `modified` is still a `Date`, not omitted).
 - Non-UTF-8 zip names keep the raw bytes on `rawName` and set `nonUtf8`. The
   `name` string is a lossy UTF-8 view and must not be treated as round-trippable.
 - Filesystem helpers such as `extractTo` belong in `rustd-fs`, not this package.
@@ -70,11 +72,11 @@ Every proper prefix of a well-formed archive must throw one of these errors
 
 ## Size
 
-Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **571,968 bytes** (cap 2,000,000).
+Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **557,008 bytes** (cap 2,000,000).
 
 ```text
 $ ls -l packages/rustd-archive/*.node
--rwxrwxr-x 1 akrc akrc 571968 Sep 14 16:04 packages/rustd-archive/rustd-archive.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 557008 Sep 14 19:32 packages/rustd-archive/rustd-archive.linux-x64-gnu.node
 ```
 
 Same-machine microbench, 200 files × 4 KiB, 20-run average: `tarCreate` **2.80 ms**,
