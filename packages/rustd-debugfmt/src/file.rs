@@ -268,6 +268,10 @@ fn open_shared(source: Source, size: u64, max_section_bytes: u64, base: u64) -> 
                 crate::elf::validate_section_headers(slice)?;
                 parse_object(slice)?;
             }
+            Kind::Pe => {
+                crate::pe::validate_pe(slice)?;
+                parse_object(slice)?;
+            }
             _ => {
                 parse_object(slice)?;
             }

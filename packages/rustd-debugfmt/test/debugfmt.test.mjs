@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  sniff, open, openBytes, readBuildInfoFile, ElfFile,
+  sniff, open, openBytes, readBuildInfoFile, ElfFile, PeFile,
   BinaryFormatError, FileClosedError, BlockedRegionError, UnsupportedFeatureError,
 } from '../index.mjs';
 
@@ -410,6 +410,103 @@ test('issue #18 §4.7: Mach-O fat header offset OOB is BinaryFormatError', () =>
       return true;
     },
   );
+});
+
+/** Minimal PE32+ image: MZ + PE\0\0 + one .text section. */
+function pe64({
+  numberOfSections = 1,
+  sizeOfImage = 0x2000,
+  virtualAddress = 0x1000,
+  virtualSize = 0x200,
+  sizeOfRawData = 0x200,
+} = {}) {
+  const eLfanew = 0x80;
+  const coff = eLfanew + 4;
+  const optSize = 0xf0;
+  const opt = coff + 20;
+  const sectionsOff = opt + optSize;
+  const fileAlign = 0x200;
+  const headersEnd = sectionsOff + Math.max(numberOfSections, 0) * 40;
+  const sizeOfHeaders = Math.ceil(Math.max(headersEnd, fileAlign) / fileAlign) * fileAlign;
+  const buf = Buffer.alloc(sizeOfHeaders + sizeOfRawData);
+  buf.write('MZ', 0);
+  buf.writeUInt32LE(eLfanew, 0x3c);
+  buf.write('PE\0\0', eLfanew);
+  buf.writeUInt16LE(0x8664, coff);
+  buf.writeUInt16LE(numberOfSections, coff + 2);
+  buf.writeUInt16LE(optSize, coff + 16);
+  buf.writeUInt16LE(0x0002, coff + 18);
+  buf.writeUInt16LE(0x20b, opt);
+  buf.writeUInt32LE(virtualAddress, opt + 16);
+  buf.writeUInt32LE(virtualAddress, opt + 20);
+  buf.writeBigUInt64LE(0x140000000n, opt + 24);
+  buf.writeUInt32LE(0x1000, opt + 32);
+  buf.writeUInt32LE(fileAlign, opt + 36);
+  buf.writeUInt16LE(4, opt + 40);
+  buf.writeUInt16LE(4, opt + 48);
+  buf.writeUInt32LE(sizeOfImage, opt + 56);
+  buf.writeUInt32LE(sizeOfHeaders, opt + 60);
+  buf.writeUInt16LE(3, opt + 68);
+  buf.writeUInt32LE(16, opt + 108);
+  if (numberOfSections >= 1) {
+    buf.write('.text\0\0\0', sectionsOff);
+    buf.writeUInt32LE(virtualSize, sectionsOff + 8);
+    buf.writeUInt32LE(virtualAddress, sectionsOff + 12);
+    buf.writeUInt32LE(sizeOfRawData, sectionsOff + 16);
+    buf.writeUInt32LE(sizeOfHeaders, sectionsOff + 20);
+    buf.writeUInt32LE(0x60000020, sectionsOff + 36);
+  }
+  return {
+    bytes: new Uint8Array(buf),
+    numberOfSectionsOffset: coff + 2,
+    sizeOfImageOffset: opt + 56,
+  };
+}
+
+test('issue #18 §4.7: PE NumberOfSections=0 is BinaryFormatError', () => {
+  const pe = pe64({ numberOfSections: 0, sizeOfImage: 0x200 });
+  assert.equal(sniff(pe.bytes.subarray(0, 8)), 'pe');
+  assert.throws(
+    () => openBytes(pe.bytes),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'sections');
+      assert.equal(err.offset, BigInt(pe.numberOfSectionsOffset));
+      return true;
+    },
+  );
+});
+
+test('issue #18 §4.7: PE SizeOfImage vs actual sections is BinaryFormatError', () => {
+  const tooSmall = pe64({ numberOfSections: 1, sizeOfImage: 0x1000, virtualAddress: 0x1000, virtualSize: 0x200 });
+  assert.throws(
+    () => openBytes(tooSmall.bytes),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'size_of_image');
+      assert.equal(err.offset, BigInt(tooSmall.sizeOfImageOffset));
+      return true;
+    },
+  );
+
+  const unaligned = pe64({ numberOfSections: 1, sizeOfImage: 0x2001, virtualAddress: 0x1000, virtualSize: 0x200 });
+  assert.throws(
+    () => openBytes(unaligned.bytes),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'size_of_image');
+      assert.equal(err.offset, BigInt(unaligned.sizeOfImageOffset));
+      return true;
+    },
+  );
+
+  const ok = pe64({ numberOfSections: 1, sizeOfImage: 0x2000, virtualAddress: 0x1000, virtualSize: 0x200 });
+  const file = openBytes(ok.bytes);
+  assert.equal(file.kind, 'pe');
+  const pe = PeFile.openBytes(ok.bytes);
+  assert.equal(pe.coffHeader().numberOfSections, 1);
+  pe.close();
+  file.close();
 });
 
 test('Go linux/amd64 with DWARF: dwarf entries, line table, gosym vs debug/gosym', () => {
