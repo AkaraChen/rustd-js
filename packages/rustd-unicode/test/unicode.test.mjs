@@ -47,6 +47,7 @@ import {
   utf16DecodeRune,
   utf16IsSurrogate,
   utf16RuneLen,
+  firstIsTableMismatch,
   UnknownTableError,
   InvalidRuneError,
 } from '../index.mjs';
@@ -124,6 +125,16 @@ test('isTable matches Go Is() runs for every named table (endpoints + samples)',
     for (let r = 0; r <= 0x10ffff; r += 1024) {
       assert.equal(isTable(name, r), inRuns(runs, r), `${name} ${r}`);
     }
+  }
+});
+
+test('full isTable sweep vs Go Is() compact runs for every named table', () => {
+  for (const name of go.tableNames) {
+    const runs = tableRuns[name];
+    const lo = Uint32Array.from(runs, (row) => row[0]);
+    const hi = Uint32Array.from(runs, (row) => row[1]);
+    const mismatch = firstIsTableMismatch(name, lo, hi);
+    assert.equal(mismatch, -1, `${name} mismatch at U+${(mismatch >>> 0).toString(16)}`);
   }
 });
 
@@ -228,6 +239,10 @@ test('utf8 last-rune, full-rune, runes iterator, validString', () => {
   assert.equal(utf8RuneCount(smile), 1);
 });
 
+function mix32(h, v) {
+  return Math.imul((h ^ (v >>> 0)) >>> 0, 16777619) >>> 0;
+}
+
 test('utf16 encode/decode/surrogate parity with Go', () => {
   for (const row of go.utf16.encode) {
     const units = utf16Encode(Uint32Array.of(row.r >>> 0));
@@ -245,7 +260,58 @@ test('utf16 encode/decode/surrogate parity with Go', () => {
   assert.deepEqual([...utf16Decode(Uint16Array.of(0xd83d))], [0xfffd]);
   assert.deepEqual([...utf16Decode(Uint16Array.of(0xd83d, 0xde00))], [0x1f600]);
   assert.equal(utf16DecodeRune(0xd83d, 0xde00), 0x1f600);
+  assert.equal(utf16DecodeRune(0xdbff, 0xdfff), 0x10ffff);
+  assert.equal(utf16DecodeRune(0xdbff, 0xdc00), 0x10fc00);
+  assert.deepEqual([...utf16Decode(utf16Encode(Uint32Array.of(0x10ffff)))], [0x10ffff]);
+  assert.deepEqual([...utf16Decode(utf16Encode(Uint32Array.of(0x20000)))], [0x20000]);
   assert.notEqual(String.fromCodePoint ? '\uD83D'.codePointAt(0) : 0, 0xfffd);
+});
+
+test('utf16 full codepoint + surrogate-pair DecodeRune vs Go checksums', () => {
+  const full = go.utf16.full;
+  const runes = new Uint32Array(0x110000);
+  for (let r = 0; r <= 0x10ffff; r++) runes[r] = r;
+  const encoded = utf16Encode(runes);
+  assert.equal(encoded.length, full.encodeAllLen);
+  let encH = 2166136261;
+  encH = mix32(encH, encoded.length);
+  for (let i = 0; i < encoded.length; i++) encH = mix32(encH, encoded[i]);
+  assert.equal(encH, full.encodeAllChecksum);
+
+  let erH = 2166136261;
+  let predH = 2166136261;
+  for (let r = 0; r <= 0x10ffff; r++) {
+    const { r1, r2 } = utf16EncodeRune(r);
+    erH = mix32(erH, r1 >>> 0);
+    erH = mix32(erH, r2 >>> 0);
+    predH = mix32(predH, utf16IsSurrogate(r) ? 1 : 0);
+    predH = mix32(predH, utf16RuneLen(r) >>> 0);
+  }
+  assert.equal(erH, full.encodeRuneChecksum);
+  assert.equal(predH, full.predChecksum);
+
+  const decoded = utf16Decode(encoded);
+  let deH = 2166136261;
+  deH = mix32(deH, decoded.length);
+  for (let i = 0; i < decoded.length; i++) deH = mix32(deH, decoded[i]);
+  assert.equal(deH, full.decodeEncodeChecksum);
+
+  const bmp = new Uint16Array(0x10000);
+  for (let i = 0; i <= 0xffff; i++) bmp[i] = i;
+  const bmpDecoded = utf16Decode(bmp);
+  assert.equal(bmpDecoded.length, full.decodeBmpLen);
+  let bmpH = 2166136261;
+  bmpH = mix32(bmpH, bmpDecoded.length);
+  for (let i = 0; i < bmpDecoded.length; i++) bmpH = mix32(bmpH, bmpDecoded[i]);
+  assert.equal(bmpH, full.decodeBmpChecksum);
+
+  let pairH = 2166136261;
+  for (let r1 = 0xd800; r1 <= 0xdfff; r1++) {
+    for (let r2 = 0xd800; r2 <= 0xdfff; r2++) {
+      pairH = mix32(pairH, utf16DecodeRune(r1, r2) >>> 0);
+    }
+  }
+  assert.equal(pairH, full.decodeRuneSurrChecksum);
 });
 
 test('1 MiB LCG byte stream: Valid and RuneCount match Go and do not hang', () => {

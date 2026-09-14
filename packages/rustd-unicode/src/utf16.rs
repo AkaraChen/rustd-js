@@ -11,7 +11,9 @@ pub fn is_surrogate(r: i32) -> bool {
 
 pub fn decode_rune(r1: i32, r2: i32) -> i32 {
     if SURR1 <= r1 && r1 < SURR2 && SURR2 <= r2 && r2 < SURR3 {
-        ((r1 - SURR1) << 10) | (r2 - SURR2) + SURR_SELF
+        // Go `|` and `+` share precedence and associate left:
+        // `((r1-surr1)<<10 | (r2-surr2)) + surrSelf`.
+        (((r1 - SURR1) << 10) | (r2 - SURR2)) + SURR_SELF
     } else {
         REPLACEMENT
     }

@@ -258,3 +258,27 @@ pub fn utf16_rune_len(r: i32) -> i32 {
 pub fn utf16_append_rune(out: Uint16Array, r: i32) -> Uint16Array {
     utf16::append_rune(out.as_ref(), r).into()
 }
+
+/// Test helper: first code point in `0..=0x10FFFF` where `isTable(name)` disagrees
+/// with Go `unicode.Is` compact runs. `-1` means the full sweep matched.
+#[napi]
+pub fn first_is_table_mismatch(name: String, lo: Uint32Array, hi: Uint32Array) -> Result<i32> {
+    let lo = lo.as_ref();
+    let hi = hi.as_ref();
+    if lo.len() != hi.len() {
+        return Err(err("TypeError:lo/hi length mismatch".into()));
+    }
+    let table = tables::require_table(&name).map_err(err)?;
+    let mut i = 0;
+    let n = lo.len();
+    for r in 0..=0x10FFFFu32 {
+        while i < n && hi[i] < r {
+            i += 1;
+        }
+        let want = i < n && lo[i] <= r && r <= hi[i];
+        if tables::is_in(table, r as i32) != want {
+            return Ok(r as i32);
+        }
+    }
+    Ok(-1)
+}

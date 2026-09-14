@@ -177,6 +177,7 @@ module.exports = {
   utf16IsSurrogate: (r) => binding.utf16IsSurrogate(r),
   utf16RuneLen: (r) => binding.utf16RuneLen(r),
   utf16AppendRune: (out, r) => binding.utf16AppendRune(units16(out), r),
+  firstIsTableMismatch: (name, lo, hi) => native(() => binding.firstIsTableMismatch(name, lo, hi)),
   UnknownTableError,
   InvalidRuneError,
   UnknownSpecialCaseError,

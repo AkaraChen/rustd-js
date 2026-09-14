@@ -52,6 +52,7 @@ export const {
   utf16IsSurrogate,
   utf16RuneLen,
   utf16AppendRune,
+  firstIsTableMismatch,
   UnknownTableError,
   InvalidRuneError,
   UnknownSpecialCaseError,
