@@ -50,6 +50,11 @@ descriptors or borrowed JS memory. `reset()` clears codec state.
 `order` ∈ {`lsb`, `msb`} × `litWidth` ∈ {2,3,4,5,6,7,8}. Input bytes must be
 `< 1<<litWidth`.
 
+CLI-generated bzip2 streams live in `testdata/` (`bzip2 -1`/`-5`/`-9`, concat
+stdout, plus named corruptions). Go writes SHA-256 / error text into
+`test/fixtures/bzip2.json`; native tests load the `.bz2` files and assert the
+same catalog. Byte-flip and per-offset truncation stay derived in the catalog.
+
 ## Size
 
 Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **440,368 bytes** (issue cap 1.5 MB).

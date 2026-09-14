@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
@@ -10,6 +10,7 @@ import {
 
 const root = resolve(import.meta.dirname, '../../..');
 const fixturePath = new URL('./fixtures/bzip2.json', import.meta.url);
+const testdataDir = resolve(import.meta.dirname, '../testdata');
 
 function go(args = [], input) {
   const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
@@ -72,6 +73,22 @@ test('Go regenerates committed bzip2 fixtures; native SHA-256 matches', () => {
   }
   assert.ok(exact >= 50, `exact flip error text ${exact}`);
   assert.ok(selectorEof <= 1, `selector-vs-EOF exceptions ${selectorEof}`);
+});
+
+test('committed testdata/*.bz2 match catalog bytes and Go SHA/error', () => {
+  const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const files = packet.bzip.filter((c) => c.file);
+  assert.ok(files.length >= 10, `testdata catalog ${files.length}`);
+  const disk = new Set(readdirSync(testdataDir).filter((name) => name.endsWith('.bz2')));
+  for (const c of files) {
+    assert.ok(disk.has(c.file), `missing testdata/${c.file}`);
+    const data = readFileSync(resolve(testdataDir, c.file));
+    assert.equal(data.toString('base64'), c.compressedB64, `${c.id} bytes`);
+    decodeCase(c);
+  }
+  const verified = go(['-pkg', 'bzip2', '-verify', '-testdata', testdataDir], readFileSync(fixturePath, 'utf8'));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified \d+ bzip cases \(10 testdata files\)/);
 });
 
 test('streaming bzip2 matches one-shot across split points', () => {
