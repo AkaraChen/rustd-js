@@ -55,8 +55,10 @@ do not need `close()`.
   names and comments decode as `nonUtf8` absent/false even when the UTF-8 flag
   is clear. Invalid UTF-8, or multibyte UTF-8 without bit 11, sets `nonUtf8`.
   Invalid name bytes are also kept on `rawName`; `name` is then a lossy UTF-8
-  view and must not be treated as round-trippable. There is no `extra` or
-  archive-level comment field.
+  view and must not be treated as round-trippable. Zip `entry.comment` is Go
+  `FileHeader.Comment`; an empty comment is omitted on the JS object. There is
+  no `extra` field and no archive-level comment (`Writer.SetComment` /
+  `Reader.Comment`).
 - Filesystem helpers such as `extractTo` belong in `rustd-fs`, not this package.
 - Zip `entry.mode` is Go `FileHeader.Mode()` (`io/fs.FileMode` bits), not the
   raw unix extra-attr word. FAT/NTFS/VFAT creators with empty attrs decode as
