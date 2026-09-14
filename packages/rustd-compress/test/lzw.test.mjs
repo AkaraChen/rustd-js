@@ -14,7 +14,7 @@ function go(args = [], input) {
   const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
   const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
   const result = spawnSync(command, [...prefix, 'run', './tools/gofixtures/compress', ...args], {
-    cwd: root, encoding: 'utf8', input, maxBuffer: 32 << 20, timeout: 180000,
+    cwd: root, encoding: 'utf8', input, maxBuffer: 64 << 20, timeout: 180000,
   });
   if (result.error) throw result.error;
   return result;
@@ -171,24 +171,29 @@ function lcg(n, seed) {
   return data;
 }
 
-test('1MiB LZW matches Go compress and round-trips for both orders', () => {
-  const input = lcg(1 << 20, 42);
-  const cases = [];
-  for (const order of ['lsb', 'msb']) {
-    const opts = { order, litWidth: 8 };
-    const compressed = lzwCompress(input, opts);
-    assert.equal(hex(lzwDecompress(compressed, opts)), hex(input), `${order} js roundtrip`);
-    cases.push({
-      id: `js-1mib-${order}`,
-      order,
-      litWidth: 8,
-      inputHex: hex(input),
-      compressedHex: hex(compressed),
-    });
+test('1MiB LZW matches Go compress and round-trips for all litWidth × order', () => {
+  const raw = lcg(1 << 20, 42);
+  for (const litWidth of [2, 3, 4, 5, 6, 7, 8]) {
+    const max = (1 << litWidth) - 1;
+    const input = Buffer.alloc(raw.length);
+    for (let i = 0; i < raw.length; i++) input[i] = raw[i] & max;
+    const cases = [];
+    for (const order of ['lsb', 'msb']) {
+      const opts = { order, litWidth };
+      const compressed = lzwCompress(input, opts);
+      assert.equal(hex(lzwDecompress(compressed, opts)), hex(input), `${order}-${litWidth} js roundtrip`);
+      cases.push({
+        id: `js-1mib-${order}-${litWidth}`,
+        order,
+        litWidth,
+        inputHex: hex(input),
+        compressedHex: hex(compressed),
+      });
+    }
+    const verified = go(['-pkg', 'lzw', '-verify'], JSON.stringify({ schema: 1, package: 'lzw', lzw: cases }));
+    assert.equal(verified.status, 0, `${litWidth}: ${verified.stderr}\n${verified.stdout}`);
+    assert.match(verified.stdout, /Go verified 2 lzw cases/);
   }
-  const verified = go(['-pkg', 'lzw', '-verify'], JSON.stringify({ schema: 1, package: 'lzw', lzw: cases }));
-  assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 2 lzw cases/);
 });
 
 test('lzwCompressStream matches one-shot', async () => {
