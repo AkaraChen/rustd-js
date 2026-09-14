@@ -1,0 +1,25 @@
+{
+  "native": [
+    {
+      "name": "crc32-ieee",
+      "loops": 1000,
+      "nsPerOp": 91487,
+      "mbps": 10424.16
+    },
+    {
+      "name": "adler32",
+      "loops": 1000,
+      "nsPerOp": 364997,
+      "mbps": 2612.83
+    },
+    {
+      "name": "fnv32a",
+      "loops": 1000,
+      "nsPerOp": 2252054,
+      "mbps": 423.47
+    }
+  ],
+  "goStdout": "crc32-ieee 1000 loops 126690 ns/op 7893.22 MiB/s\nadler32 1000 loops 579021 ns/op 1727.05 MiB/s\nfnv32a 1000 loops 1864318 ns/op 536.39 MiB/s\n",
+  "goStderr": "",
+  "goStatus": 0
+}
