@@ -1,0 +1,25 @@
+[package]
+name = "rustd-debugfmt"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+memmap2 = "0.9"
+object = { version = "0.37", default-features = false, features = ["read", "elf", "macho", "pe", "std"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+overflow-checks = true
