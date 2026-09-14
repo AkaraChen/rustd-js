@@ -29,6 +29,7 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | rustd-image | `pkg/rustd-image-grok-bulk-2` | superseded by `pkg/rustd-image-grok-bulk-8` |
 | rustd-log | `pkg/rustd-log-grok-bulk-4` | merged |
 | rustd-unicode | `pkg/rustd-unicode-grok-bulk-worker` @ `f210fc7` | merged (`b03be1c`) |
+| rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `d5febbc` | rejected — parallel rewrite vs merged `4c64c3e` (`4c64c3e` is **not** an ancestor; merge-base `2328e31`). Extra work: MakeFromLiteral Int/Float. Worker must rebase ck15 onto origin/main |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `4c64c3e` | merged (`731cae9`); go/constant Float BinaryOp ADD/SUB/MUL/QUO + Float UnaryOp ADD/SUB vs Go (issue #28 ck13–14). `4a72622` **is** an ancestor; `63cece8` **is** an ancestor; merge-tree CLEAN |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `3f67b99` | superseded by rebased tip `4c64c3e` (`63cece8` **is** an ancestor of `4c64c3e`; `3f67b99` is **not**). Parallel rewrite of Float BinaryOp; do not merge |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `63cece8` | merged (`3d26a91`); go/constant Int/Float StringVal/Float64Val + Float constCompare vs Go (issue #28 ck11–12). `240bce5` **is** an ancestor; `9f19c33` **is** an ancestor; merge-tree CLEAN |
@@ -2167,10 +2168,22 @@ changed in both
 
   Worker (`grok-bulk-worker`) must rebase mail-parse onto current `origin/main`.
 
+- `pkg/rustd-gotool-grok-bulk-4` @ `d5febbc` — **not merged**. Arrived mid-round (`23:32:58`). Parallel rewrite vs merged `4c64c3e` (`4c64c3e` is **not** an ancestor; merge-base `2328e31`). Extra work on the rewrite: MakeFromLiteral Int/Float vs Go (issue #28 ck15). `git merge-tree` conflicted. Not built this round (would not land).
+  First lines of conflict:
+
+```
+CONFLICT (content): Merge conflict in packages/rustd-gotool/README.md
+CONFLICT (content): Merge conflict in packages/rustd-gotool/test/types.ts
+CONFLICT (content): Merge conflict in tools/gofixtures/gotool/constant.go
+CONFLICT (content): Merge conflict in tools/gofixtures/gotool/main.go
+```
+
+  Cause: worker stacked MakeFromLiteral on a rewrite of BinaryOp/UnaryOp (`b514a4f`/`85bcaf1`) instead of onto merged `4c64c3e`. Worker (`grok-bulk-4`) must rebase checkpoint 15 onto current `origin/main`.
+
 - `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20). Skipped.
 - `pkg/rustd-debugfmt-grok-bulk-5` @ `8ff791e` — `rejected-by-owner` (issue #18). New pack-smoke tip; still skip.
 
-LoopX `todo update --note` attempted this round on `todo_7d22617a1dca` (mathx), `todo_cd9db5d9748d` (mathx), `todo_bcf9f94479d5` (mail), `todo_563a7158788d` (mail). Expected refuse: `agent_id=grok-integrator` cannot update todos `claimed_by` the bulk workers.
+LoopX `todo update --note` attempted this round on `todo_7d22617a1dca` (mathx), `todo_cd9db5d9748d` (mathx), `todo_bcf9f94479d5` (mail), `todo_563a7158788d` (mail), `todo_76145789d401` (gotool ck15). Expected refuse: `agent_id=grok-integrator` cannot update todos `claimed_by` the bulk workers.
 
 ### Superseded / do-not-merge
 
@@ -2183,15 +2196,16 @@ LoopX `todo update --note` attempted this round on `todo_7d22617a1dca` (mathx), 
 3. `pkg/rustd-mathx-grok-bulk-10` (`9c04f91`) — waiting on rebase (cLog10 on old history)
 4. `pkg/rustd-mail-grok-bulk-worker` (`2852022`) — waiting on rebase
 5. `pkg/rustd-debugfmt-grok-bulk-5` (`8ff791e`) — skip; rejected-by-owner
+6. `pkg/rustd-gotool-grok-bulk-4` @ `d5febbc` — waiting on rebase (MakeFromLiteral parallel history)
 
-Suggested next three: mathx **after rebase/replay onto origin/main** (last remaining of the owner 12). Then mail after rebase.
+Suggested next three: mathx **after rebase/replay onto origin/main** (last remaining of the owner 12). Then gotool MakeFromLiteral after rebase, mail after rebase. Do not merge `d5febbc` as-is.
 
 ### Notes
 
 - Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
 - First-time remaining of the owner 12: **mathx only**. Mail still pending rebase.
 - On main now: crypto, checksum, containers, compress, archive, serial, image, log, unicode, gotool, regexsyntax, mime, encoding. Missing from the 12: mathx.
-- This round merged serial XML Marshal comment/innerxml and mime ReadForm maxMemory values (ck25). No third CLEAN in-scope branch.
+- This round merged serial XML Marshal comment/innerxml and mime ReadForm maxMemory values (ck25). Third candidate `gotool` @ `d5febbc` conflicted (parallel rewrite); not merged.
 - `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
 - `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
