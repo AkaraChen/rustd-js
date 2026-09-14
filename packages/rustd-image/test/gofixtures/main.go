@@ -11,11 +11,13 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type dump struct {
@@ -226,7 +228,180 @@ func sampleNRGBA() *image.NRGBA {
 	return img
 }
 
+func timeIters(iters int, fn func()) float64 {
+	start := time.Now()
+	for i := 0; i < iters; i++ {
+		fn()
+	}
+	return float64(time.Since(start).Nanoseconds()) / 1e6
+}
+
+func runEncodeBytes() {
+	img := sampleNRGBA()
+	var pngBuf bytes.Buffer
+	enc := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := enc.Encode(&pngBuf, img); err != nil {
+		panic(err)
+	}
+	var gif256, gif16 bytes.Buffer
+	if err := gif.Encode(&gif256, img, &gif.Options{NumColors: 256}); err != nil {
+		panic(err)
+	}
+	if err := gif.Encode(&gif16, img, &gif.Options{NumColors: 16}); err != nil {
+		panic(err)
+	}
+	out := map[string]any{
+		"go":                    runtime.Version(),
+		"pngNoCompressionHex":   hex(pngBuf.Bytes()),
+		"pngNoCompressionLen":   pngBuf.Len(),
+		"gifNumColors256Hex":    hex(gif256.Bytes()),
+		"gifNumColors256Len":    gif256.Len(),
+		"gifNumColors16Hex":     hex(gif16.Bytes()),
+		"gifNumColors16Len":     gif16.Len(),
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		panic(err)
+	}
+}
+
+func runDecode() {
+	if len(os.Args) < 4 {
+		panic("usage: go run ./gofixtures -decode png|jpeg|gif <file>")
+	}
+	kind := os.Args[2]
+	raw, err := os.ReadFile(os.Args[3])
+	if err != nil {
+		panic(err)
+	}
+	r := bytes.NewReader(raw)
+	var cfg image.Config
+	var img image.Image
+	switch kind {
+	case "png":
+		cfg, err = png.DecodeConfig(r)
+		if err != nil {
+			panic(err)
+		}
+		r.Reset(raw)
+		img, err = png.Decode(r)
+	case "jpeg":
+		cfg, err = jpeg.DecodeConfig(r)
+		if err != nil {
+			panic(err)
+		}
+		r.Reset(raw)
+		img, err = jpeg.Decode(r)
+	case "gif":
+		cfg, err = gif.DecodeConfig(r)
+		if err != nil {
+			panic(err)
+		}
+		r.Reset(raw)
+		img, err = gif.Decode(r)
+	default:
+		panic("unknown kind " + kind)
+	}
+	if err != nil {
+		panic(err)
+	}
+	out := map[string]any{
+		"width":      cfg.Width,
+		"height":     cfg.Height,
+		"colorModel": modelName(cfg.ColorModel),
+		"pix":        pixdump(img),
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		panic(err)
+	}
+}
+
+func runBench() {
+	const w, h, iters = 512, 512, 8
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	rng := rand.New(rand.NewSource(1))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{
+				R: uint8(rng.Intn(256)),
+				G: uint8(rng.Intn(256)),
+				B: uint8(rng.Intn(256)),
+				A: 255,
+			})
+		}
+	}
+	var pngBuf, jpegBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		panic(err)
+	}
+	if err := jpeg.Encode(&jpegBuf, img, &jpeg.Options{Quality: 75}); err != nil {
+		panic(err)
+	}
+	pngBytes := pngBuf.Bytes()
+	jpegBytes := jpegBuf.Bytes()
+	if _, err := png.Decode(bytes.NewReader(pngBytes)); err != nil {
+		panic(err)
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(jpegBytes)); err != nil {
+		panic(err)
+	}
+	if err := png.Encode(io.Discard, img); err != nil {
+		panic(err)
+	}
+	if err := jpeg.Encode(io.Discard, img, &jpeg.Options{Quality: 75}); err != nil {
+		panic(err)
+	}
+	pngDecodeMs := timeIters(iters, func() {
+		if _, err := png.Decode(bytes.NewReader(pngBytes)); err != nil {
+			panic(err)
+		}
+	})
+	jpegDecodeMs := timeIters(iters, func() {
+		if _, err := jpeg.Decode(bytes.NewReader(jpegBytes)); err != nil {
+			panic(err)
+		}
+	})
+	pngEncodeMs := timeIters(iters, func() {
+		if err := png.Encode(io.Discard, img); err != nil {
+			panic(err)
+		}
+	})
+	jpegEncodeMs := timeIters(iters, func() {
+		if err := jpeg.Encode(io.Discard, img, &jpeg.Options{Quality: 75}); err != nil {
+			panic(err)
+		}
+	})
+	out := map[string]any{
+		"go":           runtime.Version(),
+		"width":        w,
+		"height":       h,
+		"iters":        iters,
+		"pngBytes":     len(pngBytes),
+		"jpegBytes":    len(jpegBytes),
+		"pngDecodeMs":  pngDecodeMs,
+		"jpegDecodeMs": jpegDecodeMs,
+		"pngEncodeMs":  pngEncodeMs,
+		"jpegEncodeMs": jpegEncodeMs,
+		"pngHex":       hex(pngBytes),
+		"jpegHex":      hex(jpegBytes),
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		panic(err)
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-bench" {
+		runBench()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "-decode" {
+		runDecode()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "-encode-bytes" {
+		runEncodeBytes()
+		return
+	}
 	outDir := "."
 	if len(os.Args) > 1 {
 		outDir = os.Args[1]

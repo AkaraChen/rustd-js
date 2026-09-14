@@ -32,7 +32,7 @@ logical screen **before** frame buffers are allocated (`ImageTooLargeError`).
 | Format | Decode | Encode | Notes |
 | --- | --- | --- | --- |
 | PNG Gray/GA/RGB/RGBA 8/16, palette, tRNS, Adam7 | yes (`png` crate) | yes (8-bit RGBA) | `iCCP`/`gAMA`/`cHRM`/`sRGB` not applied |
-| JPEG baseline + progressive | yes (`jpeg-decoder`, no rayon) | 4:2:0 baseline (`jpeg-encoder`), default quality 75 | lossless/arithmetic SOF → `JpegUnsupportedError`; no EXIF orientation |
+| JPEG baseline + progressive | yes (`zune-jpeg`; issue #19 §6 fallback) | 4:2:0 baseline (`jpeg-encoder`), default quality 75 | lossless/arithmetic SOF → `JpegUnsupportedError`; no EXIF orientation |
 | GIF | yes (`gif` crate, no `color_quant`) | Plan9 palette + optional Floyd–Steinberg | LZW from `gif`; quantize/dither is ours |
 
 ## Differences from Go
@@ -46,21 +46,21 @@ logical screen **before** frame buffers are allocated (`ImageTooLargeError`).
   valid file). Go's `png.Decode` usually returns `unexpected EOF` (`io.ErrUnexpectedEOF`)
   rather than `png.FormatError`; the JS error class is the issue #19 mapping.
   `pngDecodeConfig` still succeeds once IHDR is complete, matching Go.
-- JPEG colour JPEGs are stored as `ycbcr` 4:4:4 after `jpeg-decoder` RGB output
-  is converted with Go's `RGBToYCbCr`/`YCbCrToRGB`. DecodeConfig matches Go
-  (`gray` / `ycbcr` / `cmyk` from SOF).
+- JPEG colour JPEGs are stored as `nrgba` after `zune-jpeg` RGB output (alpha
+  255). DecodeConfig still matches Go (`gray` / `ycbcr` / `cmyk` from SOF).
 - GIF encode uses the Plan9 palette (first `numColors` entries), not Go's
   default median-cut quantizer. Decode of Go-produced GIFs is the
   interoperability path.
-- `rustd-compress` is not on `main` yet; PNG uses the `png` crate's Rust
-  deflate (`miniz_oxide` / `fdeflate`), not a C zlib and not `rustd-compress`.
+- `rustd-compress` on `main` is bzip2/LZW only (issue #3). PNG still uses the
+  `png` crate's Rust deflate (`miniz_oxide` / `fdeflate`), not C zlib and not
+  `rustd-compress` (flate/gzip/zlib are already in Node).
 - No `RegisterFormat`, APNG, WebP, canvas, ICC application, or EXIF rewrite.
 - Stream helpers (`pngDecodeStream`, …) concatenate the async iterable then
   decode; they do not emit scanlines incrementally (issue non-goal).
 
 ## Size
 
-Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **882,232 bytes** / 3,000,000.
+Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **885,136 bytes** / 3,000,000.
 
 Go `image/png` testdata + pngsuite + generated JPEG/GIF/boundary fixtures: **46** files. PNG
 `DecodeConfig` fields and RGBA64 pixdumps match Go, including 1/2/4/8/16-bit,
@@ -68,7 +68,67 @@ Adam7, tRNS, 1×1, gray, and fully-transparent. Every truncated prefix of the Go
 1×1 PNG throws `PngFormatError`. JPEG is config-only (IDCT is not pixel-identical). GIF
 `DecodeAll` matches loop/delay/disposal/pixdump on the two-frame fixture.
 
+Reverse (issue #19 §4.2): `pngEncode` at CompressionLevel `0/-1/-2/-3` round-trips
+through Go `png.Decode` with identical RGBA64 pixdump. `jpegEncode` is checked with
+PSNR ≥ 40 dB against the source (not pixel-identical). `gifEncode` bytes decode
+under Go `gif.Decode` to the same pixdump as `gifDecode`.
+
+Encode **bytes** vs Go (issue #19 §4.5, exploration only — not a publish gate;
+Go's `png.Encode` docs refuse byte-identity). Same 8×8 NRGBA sample as
+`gofixtures` `sampleNRGBA`, Go 1.25.0, 2026-09-14. Report:
+`test/encode-bytes-compare.json`.
+
+| Case | Equal? | Go bytes | TS bytes | First mismatch |
+| --- | --- | ---: | ---: | --- |
+| PNG `NoCompression` (`-1`) | no | 337 | 332 | offset 36 (IDAT length 280 vs 275) |
+| GIF `NumColors=256` | no | 866 | 872 | offset 10 (LSD packed 0x87 vs 0xf7) |
+| GIF `NumColors=16` | no | 101 | 101 | offset 10 (LSD packed 0x83 vs 0xb3) |
+
+PNG IHDR matches (RGBA8, non-interlaced) and both zlib wrappers are `78 01`.
+The IDAT payload differs because Go still picks per-row PNG filters at
+`NoCompression`; the `png` crate stored-deflate stream is 5 bytes shorter.
+GIF GCT **size** matches (256 / 16 entries); Go writes a smaller
+`colorResolution` in the packed LSD and fills the table with median-cut,
+while this package uses the Plan9 prefix (already listed above). LZW then
+diverges. Re-run: `nice -n 10 node --test packages/rustd-image/test/encode-bytes.test.mjs`.
+
 ```text
 $ ls -l packages/rustd-image/*.node
--rwxrwxr-x 1 akrc akrc 882232 Sep 14 17:09 packages/rustd-image/rustd-image.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 882856 Sep 14 17:46 packages/rustd-image/rustd-image.linux-x64-gnu.node
 ```
+
+## Performance (issue #19 §4.9)
+
+Run `nice -n 10 node packages/rustd-image/test/benchmark.mjs`. Recorded on
+2026-09-14, AMD EPYC 9645, Linux x64, Node 24.20.0, Go 1.25.0, `GOMAXPROCS=1`:
+one sequential pass of a 512×512 seeded-random NRGBA (PNG 787,545 bytes, JPEG
+158,294 bytes, quality 75), 8 iterations each. Shared host with concurrent
+workers; these numbers describe the observed run, not a speedup claim.
+Machine-readable output: `test/benchmark-results.json`.
+
+Issue #19 requires **decode** throughput ≥ 60% of same-host Go. Encode is
+reported for completeness and is not a floor.
+
+| Op | rustd-image MP/s | Go MP/s | % of Go |
+| --- | ---: | ---: | ---: |
+| pngDecode | 29.23 | 69.25 | 42 |
+| jpegDecode | 13.87 | 25.11 | 55 |
+| pngEncode | 2.27 | 3.31 | 69 |
+| jpegEncode | 13.16 | 5.96 | 221 |
+
+Decode is still below the 60% floor on this shared host. Causes and follow-up
+(not silent):
+
+- **pngDecode (42%)**: the `png` crate uses `miniz_oxide` / `fdeflate` (pure
+  Rust, no C zlib). After inflate we unpack samples and copy into Go stride
+  models (NRGBA/Gray/… plus an IEND-presence scan so truncated prefixes match
+  Go). `rustd-compress` on `main` is bzip2/LZW only, so it cannot replace PNG
+  inflate. Issue #19 §6 keeps `spng` (C) out of the first release.
+- **jpegDecode (55%)**: switched from `jpeg-decoder` to `zune-jpeg` (issue #19
+  §6 fallback) and fill NRGBA/gray `pix` in a tight loop instead of per-pixel
+  `set_rgba`. Interop matrix still green (`DecodeConfig`, missing-DHT
+  `JpegFormatError`, encode→Go PSNR). The remaining gap is the RGB→NRGBA
+  expand plus napi, not IDCT; `rayon` stays off. Shared-host Go times jitter
+  (this run's `jpegEncode` 221% is Go being slow, not a speedup claim).
+
+`pngEncode` is 69% of Go with the same pure-Rust deflate backend.
