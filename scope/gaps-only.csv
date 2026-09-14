@@ -1,0 +1,163 @@
+Go 包,分类,状态,WinterTC 对应,说明
+bytes,基础与语言层,部分,Uint8Array / DataView (ECMA-262),字节序列操作属语言层；但没有 bytes.Buffer 那样的同步可增长缓冲区与 bytes.Reader
+cmp,基础与语言层,部分,ECMA-262 的比较语义（<、==）,三值比较器/泛型比较函数没有标准形式
+context,基础与语言层,部分,AbortController / AbortSignal (§5.1),取消有（AbortSignal 还能组合与超时）；但没有 value 传播/deadline 树的等价物。TC55 正在补这一块：AsyncLocalStorage 草案（见 raw/wintertc-asynclocalstorage.md）
+fmt,基础与语言层,部分,"console (Console Standard, §5.2)",只有 console 的格式化；没有 Sprintf 动词库、没有 io.Writer 抽象
+iter,基础与语言层,部分,迭代协议 (ECMA-262),迭代协议在语言层，但没有 Seq 式惰性管线与显式 yield 类型
+maps,基础与语言层,部分,Map / Set (ECMA-262),容器在语言层，缺 Keys/Values/Equal/Clone 这类集合工具
+math/bits,基础与语言层,缺失,-,位操作库（前导零/位反转/乘法高位）没有标准 API；语言位运算符只有 32 位语义
+math/cmplx,基础与语言层,缺失,-,无复数支持
+math/rand,基础与语言层,部分,crypto.getRandomValues() (§5.2),安全随机有；没有可播种 PRNG、没有分布采样 API
+math/rand/v2,基础与语言层,部分,crypto.getRandomValues() (§5.2),同上
+reflect,基础与语言层,部分,Proxy / Reflect (ECMA-262),对象属性反射在语言层；Go 的 reflect 是静态类型元编程，两者语义不同
+regexp/syntax,基础与语言层,缺失,-,没有正则语法树/编译结果检视 API
+slices,基础与语言层,部分,Array.prototype / TypedArray.prototype (ECMA-262),常用操作在语言层，缺泛型二分、稳定排序、Chunk/Clip 等工具
+sort,基础与语言层,部分,Array.prototype.sort (ECMA-262),排序在语言层，但没有三值比较器接口、没有 PartialSort/稳定性的显式契约
+strconv,基础与语言层,部分,Number.parseInt/parseFloat/toString (ECMA-262),缺进制/精度控制，也没有 strconv.Quote 那类转义工具
+strings,基础与语言层,部分,String 原语 (ECMA-262),缺 Sprintf 式格式化、Strings.Builder 式的增量拼接、[]byte↔string 零拷贝转换
+structs,基础与语言层,缺失,-,structs.HostLayout 是 cgo 互操作概念，无对应
+unicode,基础与语言层,部分,RegExp \p{...} 属性类 (ECMA-262),有属性匹配，但没有 Unicode 分类表 API；大小写映射靠 String.prototype.toUpperCase，locale 相关要 Intl
+unicode/utf16,基础与语言层,部分,String 本身即 UTF-16 (ECMA-262),有 codePointAt/fromCodePoint，没有显式 UTF-16 编解码器
+unicode/utf8,基础与语言层,部分,"TextEncoder / TextDecoder (Encoding Standard, §5.1)",编解码覆盖，但没有逐码点的校验/遍历 API（RuneCount/Valid/DecodeRune）
+unique,基础与语言层,部分,-,值驻留（interning）没有标准 API；语言层只有字符串/原始值隐式驻留，弱引用走 WeakRef
+unsafe,基础与语言层,缺失,-,JS 没有裸内存/指针概念
+bufio,字节与流,部分,Web Streams（ReadableStream/WritableStream + reader）(§5.1),只有异步流抽象；没有同步 BufferedReader/Writer，也没有按行/按词切分的 Scanner
+io,字节与流,部分,ReadableStream / WritableStream / TransformStream (§5.1),Web Streams 是异步拉取/管道模型；没有同步 Reader/Writer 接口，也没有 io.Copy 的同步形式
+io/fs,字节与流,缺失,-,最小集不含文件系统 API（File System Standard / OPFS 未列入 ECMA-429）
+io/ioutil,字节与流,缺失,-,已废弃包；对应能力（一次性读整个流）在最小集里没有便捷 API
+encoding,编码与序列化,部分,TextEncoder / TextDecoder (Encoding Standard),只有文本编解码接口；没有通用 Marshal/Unmarshal 框架
+encoding/ascii85,编码与序列化,缺失,-,无
+encoding/asn1,编码与序列化,缺失,-,无 ASN.1/DER API（WebCrypto 的 importKey 只是入口，不暴露解析）
+encoding/base32,编码与序列化,缺失,-,无
+encoding/base64,编码与序列化,部分,atob() / btoa() (§5.2),只有 base64，且是 latin1 字符串语义；无 base64url、无流式编码器、无 RawStdEncoding 变体
+encoding/binary,编码与序列化,部分,DataView / TypedArray (ECMA-262),语言层能读写二进制，但没有结构体/格式驱动的编解码器，字节序要自己写
+encoding/csv,编码与序列化,缺失,-,无 CSV API
+encoding/gob,编码与序列化,缺失,-,无
+encoding/hex,编码与序列化,缺失,-,无
+encoding/pem,编码与序列化,缺失,-,无 PEM 编解码 API
+encoding/xml,编码与序列化,缺失,-,DOMParser/XMLSerializer 不在最小集；XML 没有任何被要求的 API
+mime,编码与序列化,部分,Blob.type / FormData (§5.1),MIME 类型只是 Blob 上的字符串；没有 MIME 解析/构造 API（MIME Sniffing 规范没有 API 面）
+mime/multipart,编码与序列化,部分,FormData (§5.1),FormData 能产出 multipart，但不能把 multipart 请求体解析回来（服务端方向缺口）
+mime/quotedprintable,编码与序列化,缺失,-,无
+archive/tar,压缩与归档,缺失,-,无
+archive/zip,压缩与归档,缺失,-,无
+compress/bzip2,压缩与归档,缺失,-,Compression Standard 不含 bzip2
+compress/lzw,压缩与归档,缺失,-,Compression Standard 不含 LZW
+crypto,加解密,部分,crypto / crypto.getRandomValues() (§5.2),命名空间与安全随机有；没有等价的算法包体系
+crypto/aes,加解密,部分,SubtleCrypto: AES-CBC / AES-CTR / AES-GCM / AES-KW,块密码本身没有单独接口，只能用封装好的模式，且必须整块处理
+crypto/cipher,加解密,部分,SubtleCrypto（AEAD 仅 AES-GCM）,没有可组合的块/流密码接口让使用者自己搭模式（CTR+HMAC 之类要拿非标准扩展）
+crypto/des,加解密,缺失,-,WebCrypto 不含 DES/3DES
+crypto/dsa,加解密,缺失,-,WebCrypto 不含 DSA
+crypto/ecdh,加解密,部分,SubtleCrypto: ECDH / X25519,覆盖；但派生密钥不可导出、无裸点运算
+crypto/ecdsa,加解密,部分,SubtleCrypto: ECDSA,覆盖签名/验签，一次性
+crypto/ed25519,加解密,部分,SubtleCrypto: Ed25519,覆盖，一次性
+crypto/elliptic,加解密,部分,SubtleCrypto（曲线由算法与 namedCurve 隐含）,没有裸椭圆曲线运算 API
+crypto/fips140,加解密,缺失,-,WebCrypto 不含该算法/能力
+crypto/hkdf,加解密,部分,SubtleCrypto: HKDF,覆盖派生，一次性
+crypto/hmac,加解密,部分,SubtleCrypto: HMAC,只有一次性 sign/verify，没有流式 MAC
+crypto/md5,加解密,部分,WebCrypto 不含 MD5,MD5 不在 WebCrypto；只能靠运行时扩展（Node 的 createHash）
+crypto/mlkem,加解密,缺失,-,WebCrypto 不含该算法/能力
+crypto/pbkdf2,加解密,缺失,-,WebCrypto 不含该算法/能力
+crypto/rc4,加解密,缺失,-,WebCrypto 不含 RC4
+crypto/rsa,加解密,部分,SubtleCrypto: RSA-OAEP / RSASSA-PKCS1-v1_5 / RSA-PSS,覆盖三种模式，一次性
+crypto/sha1,加解密,部分,SubtleCrypto: SHA-1,只有一次性 digest
+crypto/sha256,加解密,部分,SubtleCrypto: SHA-256,只有一次性 digest，无流式更新
+crypto/sha3,加解密,部分,SubtleCrypto: SHA-3（Level 2 草案新增，实现可选）,规范里有但可选；同样无流式形式
+crypto/sha512,加解密,部分,SubtleCrypto: SHA-384 / SHA-512,只有一次性 digest
+crypto/subtle,加解密,部分,crypto.subtle / SubtleCrypto (§5.1),有 SHA-1/256/384/512（SHA-3 见草案）、AES-CBC/CTR/GCM/KW、RSA 系、ECDSA/ECDH/Ed25519/X25519、HMAC、HKDF/PBKDF2；但**全是一次性整块 API**：无流式哈希、无增量 AEAD、密钥句柄不可导出
+crypto/tls,加解密,缺失,-,最小集只给 fetch，不暴露 TLS 配置面（证书固定/SNI/ALPN/会话复用都没有）
+crypto/x509,加解密,缺失,-,没有任何证书解析/校验 API（浏览器内部有，未标准化到运行时）
+crypto/x509/pkix,加解密,缺失,-,无
+hash,加解密,缺失,-,没有通用哈希接口（语言层也没有）
+hash/adler32,加解密,缺失,-,无非密码学校验和
+hash/crc32,加解密,缺失,-,无
+hash/crc64,加解密,缺失,-,无
+hash/fnv,加解密,缺失,-,无
+hash/maphash,加解密,缺失,-,无（哈希种子/DoS 防护不暴露给应用）
+net,网络,缺失,-,无 TCP/UDP/Unix socket、无 DNS、无网络接口枚举
+net/http,网络,部分,fetch() / Request / Response / Headers (§5.1–5.2),只覆盖**客户端** HTTP；服务端（listen/route/handler/middleware）不在最小集
+net/http/cgi,网络,缺失,-,无
+net/http/cookiejar,网络,缺失,-,cookie 存储与策略不是平台 API（浏览器内部实现，服务端运行时需自备）
+net/http/fcgi,网络,缺失,-,无
+net/http/httptest,网络,缺失,-,无测试用 HTTP 服务器 API
+net/http/httptrace,网络,缺失,-,fetch 不暴露连接级可观测性（DNS/连接/首字节细分计时）
+net/http/httputil,网络,缺失,-,无反向代理/请求转储工具（要自己基于 fetch 拼）
+net/mail,网络,缺失,-,无邮件地址/消息解析
+net/netip,网络,缺失,-,没有 IP 地址/前缀类型（URL 里的 host 只是字符串）
+net/rpc,网络,缺失,-,无 RPC
+net/rpc/jsonrpc,网络,缺失,-,无 RPC
+net/smtp,网络,缺失,-,无 SMTP 客户端
+net/textproto,网络,缺失,-,无文本协议读写工具（Header 的键值对在 fetch 里有，但仅限 HTTP）
+embed,文件系统与路径,缺失,-,资源内联不是平台 API（Import Attributes 属 ECMAScript 提案，且只解决模块导入）
+path,文件系统与路径,缺失,-,只有 URL 路径概念，没有文件路径 API
+path/filepath,文件系统与路径,缺失,-,无（File System Standard / OPFS 未列入 ECMA-429）
+plugin,文件系统与路径,缺失,-,无动态库/插件 ABI
+flag,进程与系统,缺失,-,无 CLI 参数解析
+os,进程与系统,缺失,-,无 env/argv/文件描述符/进程 API；最小集刻意不含，由运行时扩展承担
+os/exec,进程与系统,缺失,-,无子进程 API
+os/signal,进程与系统,缺失,-,无信号 API
+os/user,进程与系统,缺失,-,无用户/组信息
+syscall,进程与系统,缺失,-,无系统调用面
+runtime,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+runtime/cgo,并发与运行时,缺失,-,无 FFI 概念
+runtime/coverage,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+runtime/debug,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+runtime/metrics,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+runtime/pprof,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+runtime/race,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+runtime/trace,并发与运行时,缺失,-,运行时自省（GC/调度器/pprof/trace/metrics/竞态检测）不是平台 API
+sync,并发与运行时,缺失,-,无互斥锁/条件变量/WaitGroup 等价物（Atomics 属 ECMA-262，但最小集不要求 Web Workers，§5.3）
+sync/atomic,并发与运行时,部分,Atomics (ECMA-262),语言层有原子操作，但只对 SharedArrayBuffer 有意义，而最小集不要求 workers，实际可用面取决于运行时
+time,时间与本地化,部分,Date (ECMA-262) + performance.now() / setTimeout() / setInterval() (§5.2),计时与调度有；但缺时区/日历格式化 API（Intl/ECMA-402 有，但不在最小集清单里），也没有比 elapsed 更细的时钟语义
+time/tzdata,时间与本地化,缺失,-,无（时区数据在 Intl/ECMA-402 内，最小集不要求）
+html,文本与模板,缺失,-,HTML 解析器不在最小集（DOMParser 不被要求）
+html/template,文本与模板,缺失,-,无模板引擎
+text/scanner,文本与模板,缺失,-,无词法扫描 API
+text/tabwriter,文本与模板,缺失,-,无表格排版 API
+text/template,文本与模板,缺失,-,无模板引擎
+text/template/parse,文本与模板,缺失,-,无模板引擎
+image,图像,缺失,-,图像模型（RGBA/YCbCr 等）不在最小集
+image/color,图像,缺失,-,无颜色类型 API
+image/color/palette,图像,缺失,-,无调色板
+image/draw,图像,缺失,-,无合成/绘制 API（Canvas 不在最小集）
+image/gif,图像,缺失,-,无 GIF 编解码
+image/jpeg,图像,缺失,-,无 JPEG 编解码
+image/png,图像,缺失,-,无 PNG 编解码
+database/sql,数据与持久化,缺失,-,无数据库抽象层
+database/sql/driver,数据与持久化,缺失,-,无驱动接口
+container/heap,容器与算法,缺失,-,无优先队列
+container/list,容器与算法,缺失,-,无双向链表（语言层没有；只能自己用 Map 模拟）
+container/ring,容器与算法,缺失,-,无环形缓冲
+index/suffixarray,容器与算法,缺失,-,无后缀数组/子串索引
+go/ast,工具链与元编程,缺失,-,无 AST API
+go/build,工具链与元编程,缺失,-,无构建系统 API
+go/build/constraint,工具链与元编程,缺失,-,无构建约束表达式 API
+go/constant,工具链与元编程,缺失,-,无编译期常量值 API
+go/doc,工具链与元编程,缺失,-,无文档抽取 API
+go/doc/comment,工具链与元编程,缺失,-,无文档注释解析 API
+go/format,工具链与元编程,缺失,-,无代码格式化 API（prettier/oxfmt 都是生态工具，不是平台 API）
+go/importer,工具链与元编程,缺失,-,无包导入/类型信息装载 API
+go/parser,工具链与元编程,缺失,-,无解析器 API（JS 侧对应物是 babel/TS，属生态）
+go/printer,工具链与元编程,缺失,-,无源码打印 API
+go/scanner,工具链与元编程,缺失,-,无词法分析 API
+go/token,工具链与元编程,缺失,-,无位置/词法单元 API
+go/types,工具链与元编程,缺失,-,无类型检查 API
+go/version,工具链与元编程,缺失,-,无版本比较 API
+debug/buildinfo,诊断与可观测,缺失,-,二进制/调试格式解析（DWARF/ELF/Mach-O/PE/Plan9/gosym）不属于 Web 平台
+debug/dwarf,诊断与可观测,缺失,-,无
+debug/elf,诊断与可观测,缺失,-,无
+debug/gosym,诊断与可观测,缺失,-,无
+debug/macho,诊断与可观测,缺失,-,无
+debug/pe,诊断与可观测,缺失,-,无
+debug/plan9obj,诊断与可观测,缺失,-,无
+expvar,诊断与可观测,缺失,-,无运行时变量导出端点
+log,诊断与可观测,部分,"console (Console Standard, §5.2)",只有输出通道；无级别、无结构化、无多目标 sink（运行时各自给 node:util/Deno 的 log 不在最小集）
+log/slog,诊断与可观测,部分,"console (Console Standard, §5.2)",同上；结构化日志没有任何平台约定
+log/syslog,诊断与可观测,缺失,-,无
+net/http/pprof,诊断与可观测,缺失,-,无内置性能剖析端点
+testing,测试,缺失,-,无标准测试框架
+testing/fstest,测试,缺失,-,无
+testing/iotest,测试,缺失,-,无
+testing/quick,测试,缺失,-,无属性测试/随机测试 API
+testing/slogtest,测试,缺失,-,无
+testing/synctest,测试,缺失,-,无
