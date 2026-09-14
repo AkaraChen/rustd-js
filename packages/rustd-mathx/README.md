@@ -1,7 +1,7 @@
 # rustd-mathx
 
 Go `math/bits`, `math/cmplx`, and `math/rand` for Node via Rust + napi-rs.
-This is checkpoint 3 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + `uint64N`/`intN` family + `float32`/`float64` + `perm`/`shuffle`/`shuffleInPlace`**. Zipf, `normFloat64`/`expFloat64`, and `defaultRand` are not exported yet.
+This is checkpoint 4 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**. `seedDefault` is not exported pending review.
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -58,7 +58,7 @@ Required signed-zero cases: `cSqrt([-1, 0]) === [0, 1]`, `cPolar([-1, 0]) === { 
 - No platform-width `bits.Len`, `LeadingZeros`, `Add`, … Use `len32`/`len64` (and the matching width for every other op). A `uint` in Go is 32 or 64 bits depending on the platform; this package never hides that.
 - Panic becomes `RangeError`.
 - `math` and `math/big` are out of the 28-package split.
-- `math/rand` checkpoint 3 exports the v2 N-family (`uint64N`/`intN`/…), v1 `int63n`/`int31n`/`intn`/`uint32v1`, `float32`/`float64` (v1 vs v2 algorithms by source), `perm`, `shuffle` (copy, generic JS array), and `shuffleInPlace` (`Uint32Array` | `Float64Array`). Zipf / `normFloat64` / `expFloat64` / `defaultRand` come in checkpoint 4. `seedDefault` is **not** exported pending review (issue #21 shape decision 8).
+- `math/rand` checkpoint 4 adds Zipf, `normFloat64`/`expFloat64` (Go ziggurat; v1 vs v2 consume `Uint32` vs `Uint64`), and `defaultRand()` (one auto-seeded ChaCha8 via `crypto.getRandomValues`). `seedDefault` is **not** exported pending review (issue #21 shape decision 8). Go's `NewZipf` returns nil on `s <= 1` or `v < 1`; we throw `RangeError` instead of returning null.
 - v2 PCG/ChaCha8 throw `RangeError` on v1-only methods (`int63`, `int63n`, `intn`, `read`, …). v2 has no `Read`.
 - `int()` / `uint()` are `bigint` (64-bit Go `int`/`uint`; issue #21 shape 1). `intN(n: number)` stays `number` because `n` is a JS safe integer.
 - `Shuffle` is copy + in-place typed-array APIs rather than Go's `swap` callback (issue #21 recommended shape). `perm`/`shuffle` live in `index.js` so the Fisher-Yates / v1 `Intn` loops are visible; index draws come from native `uint64n` / v1 `int31n`-fast so consumption matches Go.
@@ -77,12 +77,12 @@ Compared on Linux x64 GNU against Go 1.24.13 `math/cmplx`, cartesian of `{±0,±
 | Finite libm ULP (typically 1–7, occasionally ~300 on `cPow` of π-heavy inputs) | Same special-value branches as Go; `sin`/`exp`/`pow` come from glibc vs Go `math` |
 | `cmplx.Pow(0, NaN+Infi)` | Go panics (`not reached`); we do not throw and follow the `modulus == 0` path |
 
-## API (`math/rand` checkpoints 1–3)
+## API (`math/rand` checkpoints 1–4)
 
 **This is a PRNG, not a CSPRNG.** Do not use it for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto.randomBytes` for anything security-sensitive.
 
 ```js
-import { newPCG, newChaCha8, newSource, randFromState } from 'rustd-mathx';
+import { newPCG, newChaCha8, newSource, randFromState, Zipf, defaultRand } from 'rustd-mathx';
 
 const r = newPCG(1n, 2n);
 r.uint64(); // 14192431797130687760n  (same as Go rand/v2.NewPCG(1,2))
@@ -104,13 +104,20 @@ const v1 = newSource(1n);
 v1.int63();   // 5577006791947779410n
 v1.intn(50);
 v1.read(8);   // 52fdfc072182654f after a fresh NewSource(1)
+
+r.normFloat64();
+r.expFloat64();
+new Zipf(r, 1.1, 1, 100).uint64();
+defaultRand(); // auto-seeded ChaCha8; same instance on later calls
 ```
+
+`defaultRand()` is a PRNG seeded from `crypto.getRandomValues`. It is **not** a CSPRNG and must not be used for tokens, keys, nonces, or session IDs.
 
 `state()` / `randFromState()` bytes match Go `encoding.BinaryMarshaler` / `BinaryUnmarshaler` exactly, including the ChaCha8 `"readbuf:"` prefix when a Go `Read` left unconsumed bytes.
 
 ## Not a CSPRNG
 
-`newPCG` / `newChaCha8` / `newSource` / `randFromState` are **predictable PRNGs**. Do not use them for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto` for anything security-sensitive.
+`newPCG` / `newChaCha8` / `newSource` / `randFromState` / `defaultRand` are **predictable PRNGs** (`defaultRand` is auto-seeded but still not a CSPRNG). Do not use them for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto` for anything security-sensitive.
 
 ## Performance
 

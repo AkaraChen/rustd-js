@@ -552,6 +552,178 @@ fn v1_intn(rng: &mut RngSource, n: i64) -> Result<i64> {
     }
 }
 
+fn abs_int32(i: i32) -> u32 {
+    if i < 0 {
+        i.wrapping_neg() as u32
+    } else {
+        i as u32
+    }
+}
+
+fn sample_float64(src: &mut Inner) -> f64 {
+    if src.is_v1() {
+        match src {
+            Inner::Rng(r) => r.float64(),
+            _ => unreachable!(),
+        }
+    } else {
+        v2_float64(src)
+    }
+}
+
+fn v2_norm_float64(src: &mut Inner) -> f64 {
+    loop {
+        let u = src.uint64();
+        let j = u as i32;
+        let i = ((u >> 32) & 0x7F) as usize;
+        let x = f64::from(j) * f64::from(crate::ziggurat::WN[i]);
+        if abs_int32(j) < crate::ziggurat::KN[i] {
+            return x;
+        }
+        if i == 0 {
+            let tail = loop {
+                let x = -sample_float64(src).ln() * (1.0 / crate::ziggurat::RN);
+                let y = -sample_float64(src).ln();
+                if y + y >= x * x {
+                    break x;
+                }
+            };
+            return if j > 0 {
+                crate::ziggurat::RN + tail
+            } else {
+                -crate::ziggurat::RN - tail
+            };
+        }
+        if crate::ziggurat::FN[i]
+            + (sample_float64(src) as f32) * (crate::ziggurat::FN[i - 1] - crate::ziggurat::FN[i])
+            < ((-0.5 * x * x).exp() as f32)
+        {
+            return x;
+        }
+    }
+}
+
+fn v1_norm_float64(rng: &mut RngSource) -> f64 {
+    loop {
+        let j = v1_uint32(rng) as i32;
+        let i = (j as u32 & 0x7F) as usize;
+        let x = f64::from(j) * f64::from(crate::ziggurat::WN[i]);
+        if abs_int32(j) < crate::ziggurat::KN[i] {
+            return x;
+        }
+        if i == 0 {
+            let tail = loop {
+                let x = -rng.float64().ln() * (1.0 / crate::ziggurat::RN);
+                let y = -rng.float64().ln();
+                if y + y >= x * x {
+                    break x;
+                }
+            };
+            return if j > 0 {
+                crate::ziggurat::RN + tail
+            } else {
+                -crate::ziggurat::RN - tail
+            };
+        }
+        if crate::ziggurat::FN[i]
+            + (rng.float64() as f32) * (crate::ziggurat::FN[i - 1] - crate::ziggurat::FN[i])
+            < ((-0.5 * x * x).exp() as f32)
+        {
+            return x;
+        }
+    }
+}
+
+fn v2_exp_float64(src: &mut Inner) -> f64 {
+    loop {
+        let u = src.uint64();
+        let j = u as u32;
+        let i = ((u >> 32) as u8) as usize;
+        let x = f64::from(j) * f64::from(crate::ziggurat::WE[i]);
+        if j < crate::ziggurat::KE[i] {
+            return x;
+        }
+        if i == 0 {
+            return crate::ziggurat::RE - sample_float64(src).ln();
+        }
+        if crate::ziggurat::FE[i]
+            + (sample_float64(src) as f32) * (crate::ziggurat::FE[i - 1] - crate::ziggurat::FE[i])
+            < ((-x).exp() as f32)
+        {
+            return x;
+        }
+    }
+}
+
+fn v1_exp_float64(rng: &mut RngSource) -> f64 {
+    loop {
+        let j = v1_uint32(rng);
+        let i = (j & 0xFF) as usize;
+        let x = f64::from(j) * f64::from(crate::ziggurat::WE[i]);
+        if j < crate::ziggurat::KE[i] {
+            return x;
+        }
+        if i == 0 {
+            return crate::ziggurat::RE - rng.float64().ln();
+        }
+        if crate::ziggurat::FE[i]
+            + (rng.float64() as f32) * (crate::ziggurat::FE[i - 1] - crate::ziggurat::FE[i])
+            < ((-x).exp() as f32)
+        {
+            return x;
+        }
+    }
+}
+
+fn zipf_h(v: f64, oneminus_q: f64, oneminus_q_inv: f64, x: f64) -> f64 {
+    (oneminus_q * (v + x).ln()).exp() * oneminus_q_inv
+}
+
+fn zipf_hinv(v: f64, oneminus_q: f64, oneminus_q_inv: f64, x: f64) -> f64 {
+    (oneminus_q_inv * (oneminus_q * x).ln()).exp() - v
+}
+
+#[napi(object)]
+pub struct ZipfParams {
+    pub imax: f64,
+    pub v: f64,
+    pub q: f64,
+    pub s: f64,
+    pub oneminus_q: f64,
+    pub oneminus_q_inv: f64,
+    pub hxm: f64,
+    pub hx0_minus_hxm: f64,
+}
+
+#[napi(js_name = "zipfParams")]
+pub fn zipf_params(s: f64, v: f64, imax: f64) -> Result<ZipfParams> {
+    if s <= 1.0 || v < 1.0 {
+        return Err(range("invalid argument to Zipf"));
+    }
+    let q = s;
+    let oneminus_q = 1.0 - q;
+    let oneminus_q_inv = 1.0 / oneminus_q;
+    let hxm = zipf_h(v, oneminus_q, oneminus_q_inv, imax + 0.5);
+    let hx0_minus_hxm = zipf_h(v, oneminus_q, oneminus_q_inv, 0.5) - (v.ln() * (-q)).exp() - hxm;
+    let s_hat = 1.0
+        - zipf_hinv(
+            v,
+            oneminus_q,
+            oneminus_q_inv,
+            zipf_h(v, oneminus_q, oneminus_q_inv, 1.5) - ((-q) * (v + 1.0).ln()).exp(),
+        );
+    Ok(ZipfParams {
+        imax,
+        v,
+        q,
+        s: s_hat,
+        oneminus_q,
+        oneminus_q_inv,
+        hxm,
+        hx0_minus_hxm,
+    })
+}
+
 fn shuffle_slice<T>(src: &mut Inner, arr: &mut [T]) {
     let n = arr.len();
     if src.is_v1() {
@@ -745,6 +917,43 @@ impl NativeRand {
     pub fn shuffle_in_place_f64(&mut self, mut arr: Float64Array) -> Result<()> {
         shuffle_slice(&mut self.inner, unsafe { arr.as_mut() });
         Ok(())
+    }
+
+    #[napi(js_name = "normFloat64")]
+    pub fn norm_float64(&mut self) -> Result<f64> {
+        if self.inner.is_v1() {
+            Ok(v1_norm_float64(self.inner.rng()?))
+        } else {
+            Ok(v2_norm_float64(&mut self.inner))
+        }
+    }
+
+    #[napi(js_name = "expFloat64")]
+    pub fn exp_float64(&mut self) -> Result<f64> {
+        if self.inner.is_v1() {
+            Ok(v1_exp_float64(self.inner.rng()?))
+        } else {
+            Ok(v2_exp_float64(&mut self.inner))
+        }
+    }
+
+    #[napi(js_name = "zipfUint64")]
+    pub fn zipf_uint64(&mut self, p: ZipfParams) -> Result<BigInt> {
+        loop {
+            let r = sample_float64(&mut self.inner);
+            let ur = p.hxm + r * p.hx0_minus_hxm;
+            let x = zipf_hinv(p.v, p.oneminus_q, p.oneminus_q_inv, ur);
+            let k = (x + 0.5).floor();
+            if k - x <= p.s {
+                return Ok(u64_out(k as u64));
+            }
+            if ur
+                >= zipf_h(p.v, p.oneminus_q, p.oneminus_q_inv, k + 0.5)
+                    - (-(k + p.v).ln() * p.q).exp()
+            {
+                return Ok(u64_out(k as u64));
+            }
+        }
     }
 
     #[napi]

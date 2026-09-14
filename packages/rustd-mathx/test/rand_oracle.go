@@ -164,6 +164,33 @@ func main() {
 	v1F32 := rand.New(rand.NewSource(1))
 	v1Perm := rand.New(rand.NewSource(1))
 	v1Shuf := rand.New(rand.NewSource(1))
+	pcgNorm := randv2.New(randv2.NewPCG(1, 2))
+	pcgExp := randv2.New(randv2.NewPCG(1, 2))
+	pcgZipf := randv2.NewZipf(randv2.New(randv2.NewPCG(1, 2)), 1.1, 1, 100)
+	if pcgZipf == nil {
+		panic("pcg zipf")
+	}
+	chachaNorm := randv2.New(randv2.NewChaCha8(seed))
+	v1Norm := rand.New(rand.NewSource(1))
+	v1Exp := rand.New(rand.NewSource(1))
+	v1Zipf := rand.NewZipf(rand.New(rand.NewSource(1)), 1.1, 1, 100)
+	if v1Zipf == nil {
+		panic("v1 zipf")
+	}
+	v1Seed99 := rand.New(rand.NewSource(99))
+	_ = v1Seed99.Float32()
+	_ = v1Seed99.Float32()
+	_ = v1Seed99.Float32()
+	_ = v1Seed99.Float64()
+	_ = v1Seed99.Float64()
+	_ = v1Seed99.Float64()
+	pcgExample := randv2.New(randv2.NewPCG(1, 2))
+	_ = pcgExample.Float32()
+	_ = pcgExample.Float32()
+	_ = pcgExample.Float32()
+	_ = pcgExample.Float64()
+	_ = pcgExample.Float64()
+	_ = pcgExample.Float64()
 
 	out := map[string]any{
 		"pcg12First3": []string{
@@ -231,6 +258,17 @@ func main() {
 		"v1Shuffle2": shuffleOf(2, v1Shuf.Shuffle),
 		"v1Shuffle1000": shuffleOf(1000, v1Shuf.Shuffle),
 		"v1Shuffle10000": shuffleOf(10000, v1Shuf.Shuffle),
+		"pcg12Norm":      f64bits(n, pcgNorm.NormFloat64),
+		"pcg12Exp":       f64bits(n, pcgExp.ExpFloat64),
+		"pcg12Zipf":      u64s(n, pcgZipf.Uint64),
+		"chachaNormHead": f64bits(8, chachaNorm.NormFloat64),
+		"v1Norm":         f64bits(n, v1Norm.NormFloat64),
+		"v1Exp":          f64bits(n, v1Exp.ExpFloat64),
+		"v1Zipf":         u64s(n, v1Zipf.Uint64),
+		"v1Seed99Exp3":   f64bits(3, v1Seed99.ExpFloat64),
+		"v1Seed99Norm3":  f64bits(3, v1Seed99.NormFloat64),
+		"pcg12ExampleExp3":  f64bits(3, pcgExample.ExpFloat64),
+		"pcg12ExampleNorm3": f64bits(3, pcgExample.NormFloat64),
 	}
 	enc := json.NewEncoder(os.Stdout)
 	if err := enc.Encode(out); err != nil {

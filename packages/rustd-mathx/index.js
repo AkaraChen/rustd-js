@@ -277,6 +277,12 @@ class Rand {
   float32() {
     return native(() => this._native.float32());
   }
+  normFloat64() {
+    return native(() => this._native.normFloat64());
+  }
+  expFloat64() {
+    return native(() => this._native.expFloat64());
+  }
   // Fisher-Yates in JS for generic arrays (issue #21 shape 5). Swap indices come
   // from native shuffleInPlace so v1 uses int31n-fast and v2 uses uint64n.
   shuffle(values) {
@@ -356,6 +362,35 @@ function randFromState(state) {
   return new Rand(native(() => binding.randFromState(state)));
 }
 
+class Zipf {
+  constructor(rnd, s, v, imax) {
+    if (!(rnd instanceof Rand)) {
+      throw new RangeError('invalid argument to Zipf');
+    }
+    if (typeof s !== 'number' || typeof v !== 'number') {
+      throw new RangeError('invalid argument to Zipf');
+    }
+    if (typeof imax !== 'number' || !Number.isInteger(imax) || imax < 0 || imax > Number.MAX_SAFE_INTEGER) {
+      throw new RangeError('invalid argument to Zipf');
+    }
+    this._rnd = rnd;
+    this._params = native(() => binding.zipfParams(s, v, imax));
+  }
+  uint64() {
+    return native(() => this._rnd._native.zipfUint64(this._params));
+  }
+}
+
+let defaultInstance;
+function defaultRand() {
+  if (!defaultInstance) {
+    const seed = new Uint8Array(32);
+    crypto.getRandomValues(seed);
+    defaultInstance = newChaCha8(seed);
+  }
+  return defaultInstance;
+}
+
 module.exports = {
   leadingZeros8, leadingZeros16, leadingZeros32, leadingZeros64,
   trailingZeros8, trailingZeros16, trailingZeros32, trailingZeros64,
@@ -368,5 +403,5 @@ module.exports = {
   cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cPow, cSqrt,
   cSin, cCos, cTan, cSinh, cCosh, cTanh, cAsin, cAcos, cAtan, cAsinh, cAcosh, cAtanh, cCot,
   cInf, cNaN, cIsInf, cIsNaN,
-  Rand, newPCG, newChaCha8, newSource, randFromState,
+  Rand, newPCG, newChaCha8, newSource, randFromState, Zipf, defaultRand,
 };

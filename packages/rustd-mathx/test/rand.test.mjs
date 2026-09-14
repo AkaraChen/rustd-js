@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { newPCG, newChaCha8, newSource, randFromState } from '../index.mjs';
+import { newPCG, newChaCha8, newSource, randFromState, Zipf, defaultRand } from '../index.mjs';
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const pkg = join(dir, '..');
@@ -291,6 +291,81 @@ test('N-family and shuffle throw RangeError on Go panic inputs', () => {
   assert.throws(() => r.shuffle(-1), RangeError);
   assert.throws(() => r.perm(-1), RangeError);
   assert.equal(r.perm(0).byteLength, 0);
+});
+
+test('PCG/ChaCha8/v1 normFloat64 and expFloat64 match Go ziggurat bits', () => {
+  const n = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Norm.length; i++) {
+    assert.equal(f64bits(n.normFloat64()), packet.pcg12Norm[i], `pcg norm[${i}]`);
+  }
+  const e = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Exp.length; i++) {
+    assert.equal(f64bits(e.expFloat64()), packet.pcg12Exp[i], `pcg exp[${i}]`);
+  }
+  const seed = new Uint8Array(32);
+  seed[0] = 1;
+  const c = newChaCha8(seed);
+  for (let i = 0; i < packet.chachaNormHead.length; i++) {
+    assert.equal(f64bits(c.normFloat64()), packet.chachaNormHead[i], `chacha norm[${i}]`);
+  }
+  const vn = newSource(1n);
+  for (let i = 0; i < packet.v1Norm.length; i++) {
+    assert.equal(f64bits(vn.normFloat64()), packet.v1Norm[i], `v1 norm[${i}]`);
+  }
+  const ve = newSource(1n);
+  for (let i = 0; i < packet.v1Exp.length; i++) {
+    assert.equal(f64bits(ve.expFloat64()), packet.v1Exp[i], `v1 exp[${i}]`);
+  }
+});
+
+test('Go example_test consumption: ExpFloat64/NormFloat64 after 3 float32 + 3 float64', () => {
+  const v2 = newPCG(1n, 2n);
+  v2.float32(); v2.float32(); v2.float32();
+  v2.float64(); v2.float64(); v2.float64();
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f64bits(v2.expFloat64()), packet.pcg12ExampleExp3[i], `example exp[${i}]`);
+  }
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f64bits(v2.normFloat64()), packet.pcg12ExampleNorm3[i], `example norm[${i}]`);
+  }
+  const v1 = newSource(99n);
+  v1.float32(); v1.float32(); v1.float32();
+  v1.float64(); v1.float64(); v1.float64();
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f64bits(v1.expFloat64()), packet.v1Seed99Exp3[i], `v1 example exp[${i}]`);
+  }
+  for (let i = 0; i < 3; i++) {
+    assert.equal(f64bits(v1.normFloat64()), packet.v1Seed99Norm3[i], `v1 example norm[${i}]`);
+  }
+});
+
+test('Zipf uint64 stream matches Go for s=1.1 v=1 imax=100 (PCG and v1)', () => {
+  const z = new Zipf(newPCG(1n, 2n), 1.1, 1, 100);
+  for (let i = 0; i < packet.pcg12Zipf.length; i++) {
+    assert.equal(z.uint64(), BigInt(packet.pcg12Zipf[i]), `pcg zipf[${i}]`);
+  }
+  const v1 = new Zipf(newSource(1n), 1.1, 1, 100);
+  for (let i = 0; i < packet.v1Zipf.length; i++) {
+    assert.equal(v1.uint64(), BigInt(packet.v1Zipf[i]), `v1 zipf[${i}]`);
+  }
+  assert.throws(() => new Zipf(newPCG(1n, 2n), 1, 1, 100), RangeError);
+  assert.throws(() => new Zipf(newPCG(1n, 2n), 1.1, 0.5, 100), RangeError);
+  assert.throws(() => new Zipf(newPCG(1n, 2n), 1.1, 1, -1), RangeError);
+  assert.throws(() => new Zipf({}, 1.1, 1, 100), RangeError);
+});
+
+test('defaultRand is a singleton auto-seeded ChaCha8, not Seed(1) / PCG(1,2)', () => {
+  const a = defaultRand();
+  const b = defaultRand();
+  assert.equal(a, b);
+  const st = a.state();
+  assert.equal(st.byteLength, 48);
+  assert.equal(Buffer.from(st.subarray(0, 8)).toString(), 'chacha8:');
+  assert.notEqual(a.uint64(), 14192431797130687760n);
+  assert.throws(() => a.int63(), RangeError);
+  const x = defaultRand().uint64();
+  const y = defaultRand().uint64();
+  assert.notEqual(x, y);
 });
 
 test('release .node stays under 2MB (expected << 500KB)', () => {

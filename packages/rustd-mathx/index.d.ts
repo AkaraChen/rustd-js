@@ -68,9 +68,9 @@ export function cIsInf(x: Complex, sign?: number): boolean;
 export function cIsNaN(x: Complex): boolean;
 
 /**
- * math/rand v2 PCG / ChaCha8 and v1 lagged-Fibonacci `newSource` (checkpoint 3).
+ * math/rand v2 PCG / ChaCha8 and v1 lagged-Fibonacci `newSource` (checkpoint 4).
  * This is a PRNG, not a CSPRNG: do not use for tokens, keys, nonces, or session IDs.
- * Zipf, normFloat64/expFloat64, and defaultRand land in checkpoint 4. `seedDefault` is not exported.
+ * `defaultRand()` is auto-seeded (ChaCha8 via `crypto.getRandomValues`). `seedDefault` is not exported.
  *
  * 64-bit integers are `bigint` (issue #21 shape 1), including `int()` / `uint()` on this 64-bit port.
  */
@@ -97,6 +97,10 @@ export class Rand {
   float32(): number;
   /** v2 `Float64` on PCG/ChaCha8; v1 `Float64` on `newSource`. */
   float64(): number;
+  /** Standard normal (mean 0, stddev 1). v1 uses `Uint32`; v2 uses `Uint64` (Go ziggurat). */
+  normFloat64(): number;
+  /** Exponential with λ=1. v1 uses `Uint32`; v2 uses `Uint64` (Go ziggurat). */
+  expFloat64(): number;
   /** Copy-and-shuffle. Not an array → `RangeError` (`invalid argument to Shuffle`). */
   shuffle<T>(values: T[]): T[];
   shuffleInPlace(array: Uint32Array | Float64Array): void;
@@ -112,3 +116,13 @@ export function newChaCha8(seed: Uint8Array): Rand;
 /** Go `math/rand.NewSource(seed)` lagged-Fibonacci generator. */
 export function newSource(seed: bigint): Rand;
 export function randFromState(state: Uint8Array): Rand;
+/** Zipf k ∈ [0, imax] with P(k) ∝ (v+k)**(-s). Requires s > 1 and v ≥ 1. Consumes `rnd.float64()`. */
+export class Zipf {
+  constructor(rnd: Rand, s: number, v: number, imax: number);
+  uint64(): bigint;
+}
+/**
+ * Auto-seeded global ChaCha8 (Go 1.20+ `default Source` shape, not `Seed(1)`).
+ * This is a PRNG, not a CSPRNG: do not use for tokens, keys, nonces, or session IDs.
+ */
+export function defaultRand(): Rand;
