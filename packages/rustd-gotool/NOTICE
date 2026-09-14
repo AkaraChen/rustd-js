@@ -1,0 +1,11 @@
+rustd-gotool includes a Go lexer, FileSet, parser, and ast.Fprint
+printer whose control flow and error conditions are derived from the
+Go standard library packages go/token, go/scanner, go/parser, and
+go/ast (BSD-3-Clause, The Go Authors).
+
+Unicode identifier tables (Letter / Digit / Upper range tables) are
+generated from Go 1.24.13 unicode data.
+
+This is not a line-for-line translation of the Go sources.
+
+Go license: https://golang.org/LICENSE
