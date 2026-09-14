@@ -1,0 +1,24 @@
+[package]
+name = "rustd-compress"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+bzip2-rs = { path = "vendor/bzip2-rs" }
+weezl = { version = "0.2.1", default-features = false, features = ["alloc"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
