@@ -10,6 +10,8 @@ Checkpoint 3: `npm pack` of the JS tarball (no `.node` inside) plus a sibling pl
 
 Checkpoint 4: `python3` `quopri` encode/decode vs `quotedPrintable*`, and Go `ParseMediaType` of native `formatMediaType` strings (issue #9 §4.2 non-multipart). Multipart still waits on `rustd-net`.
 
+Checkpoint 5: `curl -H Content-Type` against a local Node HTTP server; the wire header equals the `-H` value, `parseMediaType` of that header matches the original, and Go `ParseMediaType` verifies the same strings (issue #9 §4.2 third-party). Multipart `curl -F` still waits on `rustd-net`.
+
 ## Differences from Go
 
 - **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.
