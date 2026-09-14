@@ -80,6 +80,7 @@ const unaryC = {
   conj: mathx.cConj,
   exp: mathx.cExp,
   log: mathx.cLog,
+  log10: mathx.cLog10,
   sqrt: mathx.cSqrt,
   sin: mathx.cSin,
   cos: mathx.cCos,
@@ -99,6 +100,7 @@ const unaryC = {
 test('math/cmplx required signed-zero / Inf cases', () => {
   const packet = goOracle();
   eqC(mathx.cSqrt([-1, 0]), packet.sqrtNeg1, 'sqrt(-1+0i)');
+  eqC(mathx.cLog10([-1, 0]), packet.log10Neg1, 'log10(-1+0i)');
   eqBits(mathx.cPolar([-1, 0]).r, packet.polarNeg1R, 'polar(-1).r');
   eqBits(mathx.cPolar([-1, 0]).φ, packet.polarNeg1Phi, 'polar(-1).φ');
   assert.equal(mathx.cSqrt([-1, 0])[0], 0);

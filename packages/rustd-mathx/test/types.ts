@@ -1,6 +1,6 @@
 import {
   leadingZeros32, leadingZeros64, rotateLeft64, add32, add64, div64, rem32,
-  cAbs, cPolar, cSqrt, cIsInf, type Complex,
+  cAbs, cPolar, cSqrt, cLog10, cIsInf, type Complex,
   newPCG, newChaCha8, newSource, randFromState, Zipf, defaultRand, type Rand,
 } from '../index.js';
 const lz: number = leadingZeros32(1);
@@ -20,6 +20,7 @@ rotateLeft64(1n, 1n);
 add32(1, 2);
 const z: Complex = [-1, 0];
 const abs: number = cAbs(z);
+const log10: Complex = cLog10(z);
 const polar: { r: number; φ: number } = cPolar(z);
 const sqrt: Complex = cSqrt(z);
 const inf: boolean = cIsInf(z, 0);
@@ -51,4 +52,4 @@ cAbs(1);
 newPCG(1, 2);
 // @ts-expect-error NewSource seed is bigint.
 newSource(1);
-void [lz, lz64, rotated, sum32, sum64, div, rem, abs, polar, sqrt, inf, u, n64, i, iN, shuffled, perm, c8, restored, i63, f64, f32, bytes, idx, nf, ef, zk, globalRng];
+void [lz, lz64, rotated, sum32, sum64, div, rem, abs, log10, polar, sqrt, inf, u, n64, i, iN, shuffled, perm, c8, restored, i63, f64, f32, bytes, idx, nf, ef, zk, globalRng];

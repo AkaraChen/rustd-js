@@ -28,6 +28,7 @@ type Unary struct {
 	Conj               C      `json:"conj"`
 	Exp                C      `json:"exp"`
 	Log                C      `json:"log"`
+	Log10              C      `json:"log10"`
 	Sqrt               C      `json:"sqrt"`
 	Sin                C      `json:"sin"`
 	Cos                C      `json:"cos"`
@@ -66,6 +67,7 @@ func unary(z complex128) Unary {
 		Abs: bits(cmplx.Abs(z)), Arg: bits(cmplx.Phase(z)),
 		Norm: bits(real(z)*real(z) + imag(z)*imag(z)),
 		Conj: pack(cmplx.Conj(z)), Exp: pack(cmplx.Exp(z)), Log: pack(cmplx.Log(z)),
+		Log10: pack(cmplx.Log10(z)),
 		Sqrt: pack(cmplx.Sqrt(z)), Sin: pack(cmplx.Sin(z)), Cos: pack(cmplx.Cos(z)),
 		Tan: pack(cmplx.Tan(z)), Sinh: pack(cmplx.Sinh(z)), Cosh: pack(cmplx.Cosh(z)),
 		Tanh: pack(cmplx.Tanh(z)), Asin: pack(cmplx.Asin(z)), Acos: pack(cmplx.Acos(z)),
@@ -134,6 +136,7 @@ func main() {
 		"inf":          pack(cmplx.Inf()),
 		"nanC":         pack(cmplx.NaN()),
 		"sqrtNeg1":     pack(cmplx.Sqrt(-1)),
+		"log10Neg1":    pack(cmplx.Log10(-1)),
 		"polarNeg1R":   bits(pr),
 		"polarNeg1Phi": bits(pphi),
 		"unary":        unaries,

@@ -362,6 +362,10 @@ pub fn c_log(re: f64, im: f64) -> Vec<f64> {
     pair(cmplx::log((re, im)))
 }
 #[napi]
+pub fn c_log10(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::log10((re, im)))
+}
+#[napi]
 pub fn c_pow(x_re: f64, x_im: f64, y_re: f64, y_im: f64) -> Vec<f64> {
     pair(cmplx::pow((x_re, x_im), (y_re, y_im)))
 }

@@ -8,7 +8,7 @@ export const {
   reverse8, reverse16, reverse32, reverse64,
   reverseBytes16, reverseBytes32, reverseBytes64,
   add32, add64, sub32, sub64, mul32, mul64, div32, div64, rem32, rem64,
-  cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cPow, cSqrt,
+  cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cLog10, cPow, cSqrt,
   cSin, cCos, cTan, cSinh, cCosh, cTanh, cAsin, cAcos, cAtan, cAsinh, cAcosh, cAtanh, cCot,
   cInf, cNaN, cIsInf, cIsNaN,
   Rand, newPCG, newChaCha8, newSource, randFromState, Zipf, defaultRand,

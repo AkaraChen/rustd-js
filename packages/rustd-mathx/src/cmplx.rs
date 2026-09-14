@@ -152,6 +152,12 @@ pub fn log(x: C) -> C {
     (abs(x).ln(), arg(x))
 }
 
+/// Go `cmplx.Log10`: `Log(x) * complex(math.Log10E, 0)`.
+pub fn log10(x: C) -> C {
+    let (re, im) = log(x);
+    (re * std::f64::consts::LOG10_E, im * std::f64::consts::LOG10_E)
+}
+
 pub fn pow(x: C, y: C) -> C {
     if x.0 == 0.0 && x.1 == 0.0 {
         if is_nan_c(y) {

@@ -47,6 +47,7 @@ export function cRect(r: number, φ: number): Complex;
 export function cPolar(x: Complex): { r: number; φ: number };
 export function cExp(x: Complex): Complex;
 export function cLog(x: Complex): Complex;
+export function cLog10(x: Complex): Complex;
 export function cPow(x: Complex, y: Complex): Complex;
 export function cSqrt(x: Complex): Complex;
 export function cSin(x: Complex): Complex;

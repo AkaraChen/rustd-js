@@ -1,7 +1,7 @@
 # rustd-mathx
 
 Go `math/bits`, `math/cmplx`, and `math/rand` for Node via Rust + napi-rs.
-This is checkpoint 5 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**, recertified after Zipf/ziggurat tables (`npm pack` CJS/ESM smoke + linux-x64 size). `seedDefault` is **not** exported (decision: Go `math/rand/v2` has no `Seed`).
+This is checkpoint 9 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` (including `cLog10`) + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**. `seedDefault` is **not** exported (decision: Go `math/rand/v2` has no `Seed`). Five-platform napi artifacts stay later.
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -44,7 +44,7 @@ div64(0n, 10n, 3n);            // { quo: 3n, rem: 1n }
 | `Abs` / `Phase` | `cAbs` / `cArg` |
 | — | `cNorm` (`re²+im²`; not in Go) |
 | `Conj` / `Rect` / `Polar` | `cConj` / `cRect` / `cPolar` → `{ r, φ }` |
-| `Exp` / `Log` / `Pow` / `Sqrt` | `cExp` / `cLog` / `cPow` / `cSqrt` |
+| `Exp` / `Log` / `Log10` / `Pow` / `Sqrt` | `cExp` / `cLog` / `cLog10` / `cPow` / `cSqrt` |
 | `Sin`/`Cos`/`Tan`/`Sinh`/`Cosh`/`Tanh`/`Cot` | `cSin` … `cCot` |
 | `Asin`/`Acos`/`Atan`/`Asinh`/`Acosh`/`Atanh` | `cAsin` … `cAtanh` |
 | `Inf` / `NaN` / `IsInf` / `IsNaN` | `cInf` / `cNaN` / `cIsInf` / `cIsNaN` |
@@ -62,8 +62,7 @@ Required signed-zero cases: `cSqrt([-1, 0]) === [0, 1]`, `cPolar([-1, 0]) === { 
 - v2 PCG/ChaCha8 throw `RangeError` on v1-only methods (`int63`, `int63n`, `intn`, `read`, …). v2 has no `Read`.
 - `int()` / `uint()` are `bigint` (64-bit Go `int`/`uint`; issue #21 shape 1). `intN(n: number)` stays `number` because `n` is a JS safe integer.
 - `Shuffle` is copy + in-place typed-array APIs rather than Go's `swap` callback (issue #21 recommended shape). `perm`/`shuffle` live in `index.js` so the Fisher-Yates / v1 `Intn` loops are visible; index draws come from native `uint64n` / v1 `int31n`-fast so consumption matches Go.
-- `cLog10` is not exported (issue #21 TS draft has `cLog` only).
-- `cNorm` is extra (`re²+im²`). `cIsInf` accepts an optional sign that Go `cmplx.IsInf` does not.
+- `cNorm` is extra (`re²+im²`). `cIsInf` accepts an optional sign that Go `cmplx.IsInf` does not. `cLog10` matches Go `cmplx.Log10` (`Log(x) * Log10E`).
 - NaN payloads from explicit `cNaN()` / Go `math.NaN()` use `0x7ff8000000000001`. Libc `sin`/`exp`/… NaN payloads may still differ; those rows go in the known-diff list if tests find them.
 - Complex arithmetic uses the platform `libm` via Rust `std`. Finite values that differ from Go's `math` package by ULP are recorded as known diffs rather than approximated.
 
