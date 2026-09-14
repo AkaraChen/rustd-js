@@ -225,6 +225,47 @@ test('utf8 DecodeRune single-byte 0x00..0xFF matches Go', () => {
   }
 });
 
+test('utf8 DecodeRune two-byte 0x80..0x7FF full + all C0-DF lead sequences match Go', () => {
+  const two = go.utf8.twoByte;
+  assert.equal(two.lo, 0x80);
+  assert.equal(two.hi, 0x7ff);
+  assert.equal(two.count, 0x7ff - 0x80 + 1);
+
+  let encH = 2166136261;
+  let canH = 2166136261;
+  for (let r = two.lo; r <= two.hi; r++) {
+    const encoded = utf8EncodeRune(r);
+    assert.equal(encoded.length, 2, `EncodeRune U+${r.toString(16)} len`);
+    const fromEnc = utf8DecodeRune(encoded);
+    assert.equal(fromEnc.r, r, `encode-decode r U+${r.toString(16)}`);
+    assert.equal(fromEnc.size, 2, `encode-decode size U+${r.toString(16)}`);
+    encH = mix32(encH, fromEnc.r >>> 0);
+    encH = mix32(encH, fromEnc.size >>> 0);
+
+    const canonical = Uint8Array.of(0xc0 | (r >> 6), 0x80 | (r & 0x3f));
+    const fromCan = utf8DecodeRune(canonical);
+    assert.equal(fromCan.r, r, `canonical r U+${r.toString(16)}`);
+    assert.equal(fromCan.size, 2, `canonical size U+${r.toString(16)}`);
+    canH = mix32(canH, fromCan.r >>> 0);
+    canH = mix32(canH, fromCan.size >>> 0);
+  }
+  assert.equal(encH, two.encodeDecodeChecksum);
+  assert.equal(canH, two.canonicalDecodeChecksum);
+
+  let seqH = 2166136261;
+  let seqCount = 0;
+  for (let b0 = 0xc0; b0 <= 0xdf; b0++) {
+    for (let b1 = 0; b1 <= 0xff; b1++) {
+      const got = utf8DecodeRune(Uint8Array.of(b0, b1));
+      seqH = mix32(seqH, got.r >>> 0);
+      seqH = mix32(seqH, got.size >>> 0);
+      seqCount++;
+    }
+  }
+  assert.equal(seqCount, two.allLeadSeqCount);
+  assert.equal(seqH, two.allLeadSeqChecksum);
+});
+
 test('utf8 structural samples, RuneLen, Valid, round-trip', () => {
   for (const sample of go.utf8.samples) {
     const bytes = fromHex(sample.hex);
