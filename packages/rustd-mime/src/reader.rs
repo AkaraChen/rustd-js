@@ -956,4 +956,35 @@ Content-Transfer-Encoding: quoted-printable\r\n\
             "multipart: message too large"
         );
     }
+
+    fn body_with_part_count(n: usize) -> Vec<u8> {
+        let mut body = Vec::new();
+        for i in 0..n {
+            body.extend(
+                format!("--b\r\nContent-Disposition: form-data; name=\"f{i}\"\r\n\r\n{i}\r\n")
+                    .into_bytes(),
+            );
+        }
+        body.extend_from_slice(b"--b--\r\n");
+        body
+    }
+
+    fn drain_parts(n: usize) -> usize {
+        let mut r = MultipartReader::new("b".into());
+        r.write(&body_with_part_count(n));
+        let mut got = 0usize;
+        loop {
+            match r.next_part().unwrap() {
+                Some(_) => got += 1,
+                None => break,
+            }
+        }
+        got
+    }
+
+    #[test]
+    fn next_part_1000_and_1001_parts_succeed_like_go() {
+        assert_eq!(drain_parts(1000), 1000);
+        assert_eq!(drain_parts(1001), 1001);
+    }
 }

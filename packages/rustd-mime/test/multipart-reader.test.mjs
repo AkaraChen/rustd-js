@@ -754,3 +754,41 @@ test('nextPart missing Content-Disposition mid-boundary splits match whole-body'
     assertPartsMatch(whole, goRead(body, 'b'));
   }
 });
+
+function bodyWithPartCount(n, boundary = 'b') {
+  let s = '';
+  for (let i = 0; i < n; i++) s += `--${boundary}\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\n${i}\r\n`;
+  s += `--${boundary}--\r\n`;
+  return Buffer.from(s);
+}
+
+test('nextPart 1000 parts succeeds vs Go; 1001 also succeeds (limit is ReadForm)', () => {
+  const body1000 = bodyWithPartCount(1000);
+  const go1000 = goRead(body1000, 'b');
+  assert.equal(go1000.error ?? '', '');
+  assert.equal(go1000.parts.length, 1000);
+  const parts1000 = readAll('b', body1000);
+  assertPartsMatch(parts1000, go1000);
+  assert.equal(parts1000[0].formName, 'f0');
+  assert.equal(parts1000[999].formName, 'f999');
+  assert.equal(parts1000[999].bodyHex, hex(Buffer.from('999')));
+
+  const body1001 = bodyWithPartCount(1001);
+  const go1001 = goRead(body1001, 'b');
+  assert.equal(go1001.error ?? '', '');
+  assert.equal(go1001.parts.length, 1001, 'Go NextPart has no 1000-part cap');
+  const parts1001 = readAll('b', body1001);
+  assertPartsMatch(parts1001, go1001);
+  assert.equal(parts1001[1000].formName, 'f1000');
+  assert.equal(parts1001[1000].bodyHex, hex(Buffer.from('1000')));
+});
+
+test('nextPart ignores GODEBUG multipartmaxparts (ReadForm-only in Go 1.24)', () => {
+  const body = bodyWithPartCount(4);
+  const goParts = goReadEnv(body, 'b', { GODEBUG: 'multipartmaxparts=3' });
+  assert.equal(goParts.error ?? '', '');
+  assert.equal(goParts.parts.length, 4);
+  const parts = readAll('b', body);
+  assertPartsMatch(parts, goParts);
+  assert.deepEqual(readAll1Byte('b', body), parts);
+});

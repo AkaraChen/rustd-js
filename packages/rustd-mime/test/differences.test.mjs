@@ -51,6 +51,19 @@ test('nextPart missing Content-Disposition vs Go (checkpoint 22)', () => {
   assert.equal(reader.nextPart(), null);
 });
 
+test('nextPart part-count 1000/1001 vs Go (checkpoint 23); ReadForm later', () => {
+  assert.equal(typeof api.MultipartReader.prototype.nextPart, 'function');
+  assert.equal(api.readForm, undefined, 'readForm');
+  let s = '';
+  for (let i = 0; i < 1001; i++) s += `--b\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\n${i}\r\n`;
+  s += '--b--\r\n';
+  const reader = new api.MultipartReader({ boundary: 'b' });
+  reader.write(Buffer.from(s));
+  let n = 0;
+  while (reader.nextPart() != null) n++;
+  assert.equal(n, 1001);
+});
+
 test('documented Windows registry difference: no extra lookup API', () => {
   assert.equal(typeof api.typeByExtension, 'function');
   assert.equal(api.typeByRegistry, undefined);
