@@ -57,6 +57,9 @@ do not need `close()`.
 `TarFormatError` (`ERR_TAR_FORMAT`) and `ZipFormatError` (`ERR_ZIP_FORMAT`)
 extend `ArchiveError` and carry `offset`. Messages follow Go phrasing
 (`archive/tar: invalid tar header`, `archive/zip: not a valid zip file`).
+Every proper prefix of a well-formed archive must throw one of these errors
+(issue #2 §4.3). Listing is checked with GNU `tar -tf` and `unzip -Z -1`
+(Linux stand-in for `bsdtar -tf` / `unzip -l`).
 
 ## Size
 
