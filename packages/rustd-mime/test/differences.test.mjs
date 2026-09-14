@@ -23,6 +23,20 @@ test('nextPart malformed empty-boundary / missing-colon / missing-closer vs Go (
   assert.throws(() => empty.nextPart(), api.MultipartError);
 });
 
+test('nextPart overlong boundary / header without CRLF vs Go (checkpoint 21)', () => {
+  assert.equal(typeof api.MultipartReader.prototype.nextPart, 'function');
+  assert.equal(api.readForm, undefined, 'readForm');
+  const long = 'x'.repeat(71);
+  const body = Buffer.from(
+    `--${long}\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello\r\n--${long}--\r\n`,
+  );
+  const reader = new api.MultipartReader({ boundary: long });
+  reader.write(body);
+  const part = reader.nextPart();
+  assert.equal(part.formName(), 'foo');
+  assert.throws(() => new api.MultipartWriter({ boundary: long }), api.MultipartError);
+});
+
 test('documented Windows registry difference: no extra lookup API', () => {
   assert.equal(typeof api.typeByExtension, 'function');
   assert.equal(api.typeByRegistry, undefined);

@@ -590,6 +590,78 @@ mod tests {
         assert!(one.next_part().unwrap().is_none());
     }
 
+    fn body_with_boundary_len(n: usize) -> (String, Vec<u8>) {
+        let boundary = "x".repeat(n);
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello\r\n--{boundary}--\r\n"
+        )
+        .into_bytes();
+        (boundary, body)
+    }
+
+    #[test]
+    fn next_part_rfc_boundary_length_70_and_71() {
+        for n in [70, 71] {
+            let (boundary, body) = body_with_boundary_len(n);
+            let parts = collect_parts(&boundary, &body);
+            assert_eq!(parts.len(), 1, "n={n}");
+            assert_eq!(parts[0].form_name, "foo");
+            assert_eq!(parts[0].body, b"hello");
+            parts_eq(&parts, &collect_parts_1byte(&boundary, &body));
+        }
+        match MultipartWriter::new(Some("x".repeat(71))) {
+            Ok(_) => panic!("71-char Writer boundary should fail"),
+            Err(e) => assert_eq!(e, "mime: invalid boundary length"),
+        }
+    }
+
+    #[test]
+    fn next_part_lf_only_headers_no_crlf() {
+        let body = b"--b\nContent-Disposition: form-data; name=foo\n\nhello\n--b--\n";
+        let parts = collect_parts("b", body);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].form_name, "foo");
+        assert_eq!(parts[0].body, b"hello");
+        parts_eq(&parts, &collect_parts_1byte("b", body));
+    }
+
+    #[test]
+    fn next_part_header_without_blank_crlf_is_missing_colon() {
+        let body = b"--b\r\nContent-Disposition: form-data; name=foo\r\nhello\r\n--b--\r\n";
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        assert_eq!(
+            r.next_part().unwrap_err(),
+            r#"malformed MIME header: missing colon: "hello""#
+        );
+        let mut one = MultipartReader::new("b".into());
+        let mut err = None;
+        for byte in body {
+            one.write(std::slice::from_ref(byte));
+            match one.next_part() {
+                Ok(None) => {}
+                Ok(Some(_)) => panic!("unexpected part"),
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            err.as_deref(),
+            Some(r#"malformed MIME header: missing colon: "hello""#)
+        );
+    }
+
+    #[test]
+    fn next_part_truncated_header_without_newline_is_none() {
+        let body = b"--b\r\nFoo: bar";
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        assert!(r.next_part().unwrap().is_none());
+        parts_eq(&[], &collect_parts_1byte("b", body));
+    }
+
     fn collect_parts(boundary: &str, body: &[u8]) -> Vec<MultipartPart> {
         let mut r = MultipartReader::new(boundary.into());
         r.write(body);

@@ -590,3 +590,88 @@ test('nextPart missing closer is null here; Go NextPart+Read is unexpected EOF',
   reader.write(noFinal);
   assert.equal(reader.nextPart(), null);
 });
+
+function bodyWithBoundaryLen(n) {
+  const boundary = 'x'.repeat(n);
+  const body = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello\r\n--${boundary}--\r\n`,
+  );
+  return { boundary, body };
+}
+
+test('nextPart RFC 70-char boundary vs Go; 71-char Reader still parses (Writer rejects)', () => {
+  for (const n of [70, 71]) {
+    const { boundary, body } = bodyWithBoundaryLen(n);
+    const goParts = goRead(body, boundary);
+    assert.equal(goParts.error ?? '', '', `go n=${n}`);
+    const parts = readAll(boundary, body);
+    assertPartsMatch(parts, goParts);
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0].formName, 'foo');
+    assert.equal(parts[0].bodyHex, hex(Buffer.from('hello')));
+    assert.deepEqual(readAll1Byte(boundary, body), parts);
+  }
+  assert.throws(() => new MultipartWriter({ boundary: 'x'.repeat(71) }), MultipartError);
+  const w70 = new MultipartWriter({ boundary: 'x'.repeat(70) });
+  assert.equal(w70.boundary(), 'x'.repeat(70));
+});
+
+test('nextPart LF-only part headers (no CRLF) match Go', () => {
+  const body = Buffer.from(
+    '--b\nContent-Disposition: form-data; name=foo\n\nhello\n--b--\n',
+  );
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error ?? '', '');
+  const parts = readAll('b', body);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].formName, 'foo');
+  assert.equal(parts[0].bodyHex, hex(Buffer.from('hello')));
+  assert.deepEqual(readAll1Byte('b', body), parts);
+
+  const mixed = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name=foo\n\nhello\r\n--b--\r\n',
+  );
+  const goMixed = goRead(mixed, 'b');
+  const mixedParts = readAll('b', mixed);
+  assertPartsMatch(mixedParts, goMixed);
+  assert.deepEqual(readAll1Byte('b', mixed), mixedParts);
+});
+
+test('nextPart header without blank CRLF matches Go missing-colon', () => {
+  const body = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name=foo\r\nhello\r\n--b--\r\n',
+  );
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error, 'malformed MIME header: missing colon: "hello"');
+  assert.equal(goParts.parts.length, 0);
+  assertThrowsMultipart(() => {
+    const reader = new MultipartReader({ boundary: 'b' });
+    reader.write(body);
+    reader.nextPart();
+  }, goParts.error);
+
+  const one = new MultipartReader({ boundary: 'b' });
+  let threw;
+  for (let i = 0; i < body.length; i++) {
+    one.write(body.subarray(i, i + 1));
+    try {
+      assert.equal(one.nextPart(), null);
+    } catch (err) {
+      threw = err;
+      break;
+    }
+  }
+  assert.ok(threw instanceof MultipartError);
+  assert.equal(threw.message, goParts.error);
+});
+
+test('nextPart truncated header without newline is null; Go NextPart is EOF', () => {
+  const body = Buffer.from('--b\r\nFoo: bar');
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error ?? '', '');
+  assert.equal(goParts.parts.length, 0);
+  const reader = new MultipartReader({ boundary: 'b' });
+  reader.write(body);
+  assert.equal(reader.nextPart(), null);
+  assert.deepEqual(readAll1Byte('b', body), []);
+});
