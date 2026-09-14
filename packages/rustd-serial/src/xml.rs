@@ -1201,6 +1201,24 @@ impl Encoder {
         }
     }
 
+    /// Go `encoding/xml` Marshal comment field (`printer` comment case), not EncodeToken.
+    fn write_comment(&mut self, b: &[u8]) -> Result<(), XmlError> {
+        if b.is_empty() {
+            return Ok(());
+        }
+        if b.windows(2).any(|w| w == b"--") {
+            return Err(XmlError::other(r#"xml: comments must not contain "--""#));
+        }
+        self.write_indent(0);
+        self.buf.extend_from_slice(b"<!--");
+        self.buf.extend_from_slice(b);
+        if b.last() == Some(&b'-') {
+            self.buf.push(b' ');
+        }
+        self.buf.extend_from_slice(b"-->");
+        Ok(())
+    }
+
     fn write_start(&mut self, name: &Name, attr: &[Attr]) -> Result<(), XmlError> {
         if name.local.is_empty() {
             return Err(XmlError::other("xml: start tag with no name"));
@@ -1496,6 +1514,14 @@ fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (y as i32, m as u32, d as u32)
 }
 
+fn child_key(child: &Schema) -> String {
+    if child.name.is_empty() {
+        child.tag.clone().unwrap_or_default()
+    } else {
+        child.name.clone()
+    }
+}
+
 fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<(), XmlError> {
     if value.is_null() {
         return Ok(());
@@ -1542,70 +1568,79 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
             value: xmlns.clone(),
         });
     }
-    let mut chardata = Vec::new();
-    let mut comments = Vec::new();
-    let mut child_work: Vec<(&Schema, &Value)> = Vec::new();
     if let Some(children) = &schema.children {
         let obj = value.as_object();
         for child in children {
-            let key = if child.name.is_empty() {
-                child.tag.clone().unwrap_or_default()
-            } else {
-                child.name.clone()
-            };
-            let cv = obj.and_then(|o| o.get(&key)).unwrap_or(&Value::Null);
+            let cv = obj.and_then(|o| o.get(&child_key(child))).unwrap_or(&Value::Null);
+            let (_, _, _, ck, omit) = parse_tag(child);
+            if omit && is_empty_json(cv) {
+                continue;
+            }
+            if ck == "attr" {
+                if cv.is_null() {
+                    continue;
+                }
+                let (aname, ax, _, _, _) = parse_tag(child);
+                attrs.push(Attr {
+                    name: Name {
+                        space: ax,
+                        local: aname,
+                    },
+                    value: String::from_utf8_lossy(&scalar_text(child, cv)?).into_owned(),
+                });
+            }
+        }
+        let start_name = Name {
+            space: xmlns,
+            local: name,
+        };
+        enc.write_start(&start_name, &attrs)?;
+        for child in children {
+            let cv = obj.and_then(|o| o.get(&child_key(child))).unwrap_or(&Value::Null);
             let (_, _, _, ck, omit) = parse_tag(child);
             if omit && is_empty_json(cv) {
                 continue;
             }
             match ck {
-                "attr" => {
-                    if cv.is_null() {
-                        continue;
-                    }
-                    let (aname, ax, _, _, _) = parse_tag(child);
-                    attrs.push(Attr {
-                        name: Name {
-                            space: ax,
-                            local: aname,
-                        },
-                        value: String::from_utf8_lossy(&scalar_text(child, cv)?).into_owned(),
-                    });
-                }
+                "attr" => {}
                 "chardata" => {
                     if !cv.is_null() {
-                        chardata = scalar_text(child, cv)?;
+                        enc.encode_token(&Token::CharData(scalar_text(child, cv)?))?;
                     }
                 }
                 "comment" => {
                     if !cv.is_null() {
-                        comments = scalar_text(child, cv)?;
+                        enc.write_comment(&scalar_text(child, cv)?)?;
                     }
                 }
-                _ => child_work.push((child, cv)),
+                "any" => {
+                    if !cv.is_null() {
+                        enc.buf.extend_from_slice(&scalar_text(child, cv)?);
+                    }
+                }
+                _ => {
+                    if !cv.is_null() {
+                        marshal_value(enc, child, cv)?;
+                    }
+                }
             }
         }
-    } else if schema.typ.is_some() || value.is_string() || value.is_number() || value.is_boolean() {
-        chardata = scalar_text(schema, value)?;
-    }
-    let start_name = Name {
-        space: xmlns,
-        local: name,
-    };
-    enc.write_start(&start_name, &attrs)?;
-    if !comments.is_empty() {
-        enc.encode_token(&Token::Comment(comments))?;
-    }
-    if !chardata.is_empty() {
-        enc.encode_token(&Token::CharData(chardata))?;
-    }
-    for (child, cv) in child_work {
-        if cv.is_null() {
-            continue;
+        enc.write_end(&start_name)?;
+    } else {
+        let mut chardata = Vec::new();
+        if schema.typ.is_some() || value.is_string() || value.is_number() || value.is_boolean() {
+            chardata = scalar_text(schema, value)?;
         }
-        marshal_value(enc, child, cv)?;
+        let start_name = Name {
+            space: xmlns,
+            local: name,
+        };
+        enc.write_start(&start_name, &attrs)?;
+        if !chardata.is_empty() {
+            enc.encode_token(&Token::CharData(chardata))?;
+        }
+        enc.write_end(&start_name)?;
     }
-    enc.write_end(&start_name)?;
     for p in parents.iter().rev() {
         enc.write_end(&Name {
             space: String::new(),
