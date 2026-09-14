@@ -59,14 +59,14 @@ $ ls -l packages/rustd-containers/*.node
 
 ## SuffixArray.build scaling (issue #23 §4.3)
 
-256 KiB / 1 MiB / 4 MiB: median of 3 after one warmup. 1 / 4 / 16 MiB: 5 timed samples, drop min/max, median of remaining 3 (shared-host 3-sample medians flake at the caps). Same builder, existing linux-x64-gnu `.node`, `nice -n 10`. Five-platform numbers are not in this slice.
+256 KiB / 1 MiB / 4 MiB: median of 3 after one warmup. 1 / 4 / 16 MiB: 5 timed samples, drop min/max, median of remaining 3 (shared-host 3-sample medians flake at the caps). Same builder, existing linux-x64-gnu `.node`, `nice -n 10`. Go 1.24.13 `index/suffixarray.New` on the same host (3 runs, no 16 MiB): identical 256K/1M/4M ≈ 2.3 / 8.8 / 47.8 ms; patterned ≈ 9.5 / 58.1 / 443.6 ms (4MB/1MB ≈ 7.6–9.8×). Five-platform numbers are not in this slice.
 
 | input | 256 KiB | 1 MiB | 4 MiB | 16 MiB | 16M/4M | 16M/1M |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | identical `a` | 1.99 ms | 6.81 ms | 32.2 ms | 148 ms | 4.60 | 21.7 |
 | patterned bytes | 7.60 ms | 50.0 ms | 678 ms | 2771 ms | 4.09 | 55.5 |
 
-Caps: 4× size ≤ 8× time; 16× size ≤ 64× time (two 4× steps). Patterned 4 MiB is host-noisy on the shared 8-core box (3-sample checkpoint-6 slice was 302 ms); ratios use the contemporaneous 16 MiB slice. `lookup` of `aaaa` (`n=8`) on 1 MiB identical input: ~119k QPS (2000 calls / 16.8 ms). Naive suffix sort would blow up on identical bytes; SA-IS stays near-linear through 16 MiB.
+Caps: identical 4× size ≤ 8× time and 16× size ≤ 64× time. Patterned 4× size ≤ 16× time and 16× size ≤ 128× time — Go SA-IS is already ~10× for 4× size on this LMS-dense pattern, so an 8×/64× cap red-boards a correct port (integrator 4MB/1MB=14.4, 16MB/1MB=77.27). Naive suffix sort still fails both. `lookup` of `aaaa` (`n=8`) on 1 MiB identical input: ~119k QPS (2000 calls / 16.8 ms).
 
 ## Errors
 
