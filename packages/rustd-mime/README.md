@@ -14,6 +14,8 @@ Checkpoint 5: `curl -H Content-Type` against a local Node HTTP server; the wire 
 
 Checkpoint 6: `loadSystemMimeTypes` custom `mime.types` / `globs2` (Go `loadMimeFile` / `loadMimeGlobsFile` rules, including `text/` charset default and first-weight-wins) plus unix default paths vs Go `TypeByExtension` / `ExtensionsByType`. Default `loadSystemMimeTypes()` matches Go 1.24 `initMimeUnix` (stop after the first readable globs2). Multipart still waits on `rustd-net`.
 
+Checkpoint 7: `AddExtensionType` error strings vs Go 1.24 (`mime: extension %q missing leading dot` and `ParseMediaType` failures such as expected slash / expected token / no media type / invalid media parameter). Multipart still waits on `rustd-net`.
+
 ## Differences from Go
 
 - **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.

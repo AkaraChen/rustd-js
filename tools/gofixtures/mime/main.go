@@ -45,6 +45,12 @@ type ExtCase struct {
 	Exts []string `json:"exts"`
 }
 
+type AddExtCase struct {
+	Ext   string `json:"ext"`
+	Type  string `json:"type"`
+	Error string `json:"error"`
+}
+
 type FormatCase struct {
 	Type      string            `json:"type"`
 	Params    map[string]string `json:"params"`
@@ -66,6 +72,7 @@ type Packet struct {
 	Headers []HeaderCase `json:"headers"`
 	Format  []FormatCase `json:"format"`
 	Ext     []ExtCase    `json:"ext"`
+	AddExt  []AddExtCase `json:"addExt"`
 }
 
 func hexOf(b []byte) string {
@@ -510,6 +517,39 @@ func extCases() []ExtCase {
 	return out
 }
 
+func addExtCases() []AddExtCase {
+	// Error-only: AddExtensionType returns before mutating the global table,
+	// so these can run after extCases() without changing TypeByExtension.
+	specs := [][2]string{
+		{"no-dot", "application/x-test"},
+		{"txt", "text/plain"},
+		{"", "text/plain"},
+		{`foo"bar`, "text/plain"},
+		{"foo\\bar", "text/plain"},
+		{"no-dot-ä", "text/plain"},
+		{" leading", "text/plain"},
+		{"missing", "application/json"},
+		{".ck7slash", "not a type"},
+		{".ck7token", "bogus/"},
+		{".ck7empty", "/plain"},
+		{".ck7param", "text/plain; charset"},
+		{".ck7blank", ""},
+		{".ck7bogus", "bogus ;========="},
+		{".ck7dup", "text/plain; charset=utf-8; charset"},
+		{".ck7script", "bogus/<script>alert</script>"},
+		{".ck7after", "bogus/bogus<script>alert</script>"},
+	}
+	out := make([]AddExtCase, 0, len(specs))
+	for _, s := range specs {
+		c := AddExtCase{Ext: s[0], Type: s[1]}
+		if err := mime.AddExtensionType(s[0], s[1]); err != nil {
+			c.Error = err.Error()
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
 func main() {
@@ -525,7 +565,7 @@ func main() {
 		if packet.Schema != 1 || packet.Package != "mime" {
 			fail(fmt.Errorf("invalid packet"))
 		}
-		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext) == 0 {
+		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt) == 0 {
 			fail(fmt.Errorf("empty cases"))
 		}
 		for _, c := range packet.Parse {
@@ -627,10 +667,20 @@ func main() {
 				}
 			}
 		}
-		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext))
+		for _, c := range packet.AddExt {
+			err := mime.AddExtensionType(c.Ext, c.Type)
+			errText := ""
+			if err != nil {
+				errText = err.Error()
+			}
+			if errText != c.Error {
+				fail(fmt.Errorf("addExt mismatch %q %q: got %q want %q", c.Ext, c.Type, errText, c.Error))
+			}
+		}
+		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt))
 		return
 	}
-	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Headers: headerCases(), Format: formatCases(), Ext: extCases()}
+	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Headers: headerCases(), Format: formatCases(), Ext: extCases(), AddExt: addExtCases()}
 	var writer io.Writer = os.Stdout
 	if *out != "" {
 		f, err := os.Create(*out)

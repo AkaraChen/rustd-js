@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
-  parseMediaType, formatMediaType, typeByExtension, extensionsByType,
+  parseMediaType, formatMediaType, typeByExtension, extensionsByType, addExtensionType,
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableError, QuotedPrintableReader,
   encodeWord, MimeWordDecoder, InvalidMediaParameterError, MediaTypeError,
 } from '../index.mjs';
@@ -33,6 +33,16 @@ function parseNative(input) {
   }
 }
 
+function addExtNative(ext, typ) {
+  try {
+    addExtensionType(ext, typ);
+    return { error: '' };
+  } catch (err) {
+    if (err instanceof MediaTypeError) return { error: err.message };
+    throw err;
+  }
+}
+
 test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures; native matches', () => {
   const generated = go();
   assert.equal(generated.status, 0, generated.stderr);
@@ -44,6 +54,7 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
   assert.ok(fixture.words.length >= 15, `word cases ${fixture.words.length}`);
   assert.ok(fixture.headers.length >= 25, `header cases ${fixture.headers.length}`);
   assert.ok(fixture.format.length >= 20, `format cases ${fixture.format.length}`);
+  assert.ok(fixture.addExt.length >= 15, `addExt cases ${fixture.addExt.length}`);
   for (const c of fixture.parse) {
     const got = parseNative(c.in);
     assert.equal(got.mediaType, c.mediaType, `mediaType ${c.in}`);
@@ -97,6 +108,9 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
   for (const c of fixture.headers) {
     assert.equal(decoder.decodeHeader(c.in), c.out, `header ${JSON.stringify(c.in)}`);
   }
+  for (const c of fixture.addExt) {
+    assert.equal(addExtNative(c.ext, c.type).error, c.error, `addExt ${JSON.stringify(c.ext)} ${JSON.stringify(c.type)}`);
+  }
 });
 
 test('JS generates quoted-printable and media types → Go verifies', () => {
@@ -121,7 +135,8 @@ test('JS generates quoted-printable and media types → Go verifies', () => {
     type: typeByExtension(c.ext),
     exts: c.type ? [...extensionsByType(c.type)].sort() : [],
   }));
-  const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers, ext };
+  const addExt = fixture.addExt.map((c) => ({ ext: c.ext, type: c.type, error: addExtNative(c.ext, c.type).error }));
+  const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers, ext, addExt };
   const verified = go(['-verify'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
   assert.match(verified.stdout, /Go verified \d+ mime cases/);
