@@ -100,12 +100,16 @@ hold file descriptors.
   stack overflow. Go has no such cap.
 - `quick-xml` is not used. The tokenizer is a Go-faithful port so
   `Strict=false`, `AutoClose`, line numbers, and entity tables stay aligned.
+- `path: 'a>b>c'` (and `tag: 'a>b>c'`) walks nested wrappers on both marshal
+  and unmarshal. Repeated matching leaves become arrays, same as other child
+  elements. A single matching leaf stays a scalar, unlike Go's `[]T` which is
+  always a slice.
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **699,208 bytes** (issue cap 2 MB).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **701,056 bytes** (issue cap 2 MB).
 
 ```text
 $ ls -l packages/rustd-serial/*.node
--rwxrwxr-x 1 akrc akrc 699208 Sep 14 17:23 packages/rustd-serial/rustd-serial.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 701056 Sep 14 18:00 packages/rustd-serial/rustd-serial.linux-x64-gnu.node
 ```

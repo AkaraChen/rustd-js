@@ -22,6 +22,61 @@ const personSchema = {
   ],
 };
 
+const decodeSchemas = {
+  book: {
+    name: 'book',
+    kind: 'element',
+    children: [
+      { name: 'isbn', kind: 'attr', type: 'string' },
+      { name: 'title', kind: 'element', type: 'string' },
+      { name: 'pages', kind: 'element', type: 'int' },
+    ],
+  },
+  note: {
+    name: 'note',
+    kind: 'element',
+    children: [{ name: 'body', kind: 'chardata', type: 'string' }],
+  },
+  comment: {
+    name: 'c',
+    kind: 'element',
+    children: [{ name: 'msg', kind: 'comment', type: 'string' }],
+  },
+  inner: {
+    name: 'wrap',
+    kind: 'element',
+    children: [{ name: 'inner', kind: 'any', type: 'string' }],
+  },
+  path: {
+    name: 'doc',
+    kind: 'element',
+    children: [{ name: 'city', kind: 'element', type: 'string', path: 'a>b>c' }],
+  },
+  items: {
+    name: 'items',
+    kind: 'element',
+    children: [{ name: 'item', kind: 'element', type: 'string' }],
+  },
+  omit: {
+    name: 'omit',
+    kind: 'element',
+    children: [
+      { name: 'a', kind: 'element', type: 'string', omitempty: true },
+      { name: 'b', kind: 'element', type: 'int', omitempty: true },
+      { name: 'c', kind: 'element', type: 'string' },
+    ],
+  },
+  flags: {
+    name: 'flags',
+    kind: 'element',
+    children: [
+      { name: 'on', kind: 'element', type: 'bool' },
+      { name: 'n', kind: 'element', type: 'uint' },
+      { name: 'f', kind: 'element', type: 'float' },
+    ],
+  },
+};
+
 function go(args = [], input) {
   const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
   const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
@@ -118,6 +173,29 @@ test('Go regenerates committed XML fixtures; native tokens/escape/marshal match'
     const again = xmlMarshal({ id: c.idAttr, name: c.itemName, age: c.age }, personSchema);
     assert.equal(hex(again), c.xmlHex, `${c.id} round-trip`);
   }
+
+  assert.ok((packet.decodes ?? []).length >= 8, `decodes ${packet.decodes?.length}`);
+  for (const c of packet.decodes) {
+    const xml = Buffer.from(c.xmlHex, 'hex');
+    const schema = decodeSchemas[c.kind];
+    assert.ok(schema, `${c.id} schema ${c.kind}`);
+    if (c.kind === 'omit') {
+      const produced = xmlMarshal({ a: '', b: 0, c: 'x' }, schema);
+      assert.equal(hex(produced), c.xmlHex, `${c.id} omitempty marshal`);
+      const round = xmlUnmarshal(produced, schema);
+      assert.equal(round.c, 'x', `${c.id} keep c`);
+      assert.equal(round.a, undefined, `${c.id} omit a`);
+      continue;
+    }
+    const got = xmlUnmarshal(xml, schema);
+    if (c.kind === 'inner') {
+      assert.equal(got.inner, c.value.inner, `${c.id} innerxml`);
+    } else {
+      assert.deepEqual(got, c.value, `${c.id} decode`);
+    }
+    const viaDecoder = new XmlDecoder(xml).decode(schema);
+    assert.deepEqual(viaDecoder, got, `${c.id} XmlDecoder.decode`);
+  }
 });
 
 test('JS-generated XML verifies against Go', () => {
@@ -126,11 +204,19 @@ test('JS-generated XML verifies against Go', () => {
     { id: 'js-bo', xmlHex: hex(xmlMarshal({ id: 1, name: 'Bo', age: 0 }, personSchema)) },
     { id: 'js-cafe', xmlHex: hex(xmlMarshal({ id: 2, name: 'café', age: 40 }, personSchema)) },
   ];
+  const decodes = [
+    { id: 'js-book', kind: 'book', xmlHex: hex(xmlMarshal({ isbn: '1', title: 'T', pages: 3 }, decodeSchemas.book)) },
+    { id: 'js-note', kind: 'note', xmlHex: hex(xmlMarshal({ body: 'z' }, decodeSchemas.note)) },
+    { id: 'js-path', kind: 'path', xmlHex: hex(xmlMarshal({ city: 'Oslo' }, decodeSchemas.path)) },
+    { id: 'js-items', kind: 'items', xmlHex: hex(xmlMarshal({ item: ['p', 'q'] }, decodeSchemas.items)) },
+    { id: 'js-omit', kind: 'omit', xmlHex: hex(xmlMarshal({ a: '', b: 0, c: 'keep' }, decodeSchemas.omit)) },
+    { id: 'js-flags', kind: 'flags', xmlHex: hex(xmlMarshal({ on: false, n: 2, f: 0.5 }, decodeSchemas.flags)) },
+  ];
   const verified = go(['-pkg', 'serial-xml', '-verify'], JSON.stringify({
-    schema: 1, package: 'serial-xml', people,
+    schema: 1, package: 'serial-xml', people, decodes,
   }));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 3 serial-xml encode cases/);
+  assert.match(verified.stdout, /Go verified 9 serial-xml encode cases/);
 });
 
 test('xmllint parses native marshal output', () => {

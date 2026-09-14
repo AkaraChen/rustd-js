@@ -1352,9 +1352,7 @@ fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, boo
         let parts: Vec<&str> = path.split('>').collect();
         if parts.len() > 1 {
             parents = parts[..parts.len() - 1].iter().map(|s| s.to_string()).collect();
-            if name.is_empty() {
-                name = parts[parts.len() - 1].to_string();
-            }
+            name = parts[parts.len() - 1].to_string();
         } else if name.is_empty() {
             name = path.clone();
         }
@@ -1673,6 +1671,79 @@ fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     (era * 146097 + doe as i64 - 719468) as i64
 }
 
+fn merge_repeat(prev: Option<Value>, next: Value) -> Value {
+    match prev {
+        None => next,
+        Some(Value::Array(mut a)) => {
+            a.push(next);
+            Value::Array(a)
+        }
+        Some(prev) => Value::Array(vec![prev, next]),
+    }
+}
+
+fn insert_child(obj: &mut serde_json::Map<String, Value>, key: String, val: Value) {
+    match obj.remove(&key) {
+        None => {
+            obj.insert(key, val);
+        }
+        Some(Value::Array(mut a)) => {
+            a.push(val);
+            obj.insert(key, Value::Array(a));
+        }
+        Some(prev) => {
+            obj.insert(key, Value::Array(vec![prev, val]));
+        }
+    }
+}
+
+/// Walk Go `a>b>c` parents then unmarshal the leaf. `wrappers` is the remaining
+/// path including the already-consumed start's local name.
+fn unmarshal_path(
+    dec: &mut Decoder,
+    wrappers: &[String],
+    leaf: &Schema,
+    start: Token,
+) -> Result<Value, XmlError> {
+    let Token::Start { name: start_name, .. } = start.clone() else {
+        return Err(XmlError::other("expected start"));
+    };
+    if wrappers.is_empty() {
+        return unmarshal_element(dec, leaf, start);
+    }
+    let rest = &wrappers[1..];
+    let want_next = if rest.is_empty() {
+        parse_tag(leaf).0
+    } else {
+        rest[0].clone()
+    };
+    let mut found: Option<Value> = None;
+    loop {
+        match dec.token()? {
+            None => return Err(dec.syntax("unexpected EOF")),
+            Some(Token::End { name }) if name.local == start_name.local => break,
+            Some(Token::Start { name, attr }) => {
+                let tok = Token::Start {
+                    name: name.clone(),
+                    attr,
+                };
+                if name.local == want_next {
+                    let val = if rest.is_empty() {
+                        unmarshal_element(dec, leaf, tok)?
+                    } else {
+                        unmarshal_path(dec, rest, leaf, tok)?
+                    };
+                    found = Some(merge_repeat(found, val));
+                } else {
+                    dec.skip()?;
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(found.unwrap_or(Value::Null))
+}
+
 fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result<Value, XmlError> {
     let Token::Start { name: start_name, attr } = start else {
         return Err(XmlError::other("expected start"));
@@ -1681,8 +1752,7 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
     let mut obj = serde_json::Map::new();
     let mut chardata = Vec::new();
     let mut comment = Vec::new();
-    let mut inner = Vec::new();
-    let mut any_tokens = Vec::new();
+    let inner_start = dec.input_offset().max(0) as usize;
     for child in &children {
         let (cname, _, _, kind, _) = parse_tag(child);
         if kind == "attr" {
@@ -1693,6 +1763,7 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
     }
     let leaf = children.is_empty() && schema.typ.is_some();
     loop {
+        let before = dec.input_offset().max(0) as usize;
         match dec.token()? {
             None => return Err(dec.syntax("unexpected EOF")),
             Some(Token::End { name }) => {
@@ -1702,17 +1773,43 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
                         start_name.local, name.local
                     )));
                 }
-                break;
+                let inner_end = before.min(dec.input.len());
+                let inner_raw = if inner_end >= inner_start {
+                    dec.input[inner_start..inner_end].to_vec()
+                } else {
+                    Vec::new()
+                };
+                if leaf {
+                    return parse_scalar(schema.typ.as_deref(), &chardata);
+                }
+                for child in &children {
+                    let (_, _, _, kind, _) = parse_tag(child);
+                    match kind {
+                        "chardata" => {
+                            obj.insert(child.name.clone(), parse_scalar(child.typ.as_deref(), &chardata)?);
+                        }
+                        "comment" => {
+                            obj.insert(child.name.clone(), parse_scalar(child.typ.as_deref(), &comment)?);
+                        }
+                        "any" => {
+                            obj.insert(
+                                child.name.clone(),
+                                parse_scalar(child.typ.as_deref().or(Some("string")), &inner_raw)?,
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                if obj.is_empty() && !chardata.is_empty() {
+                    return parse_scalar(schema.typ.as_deref(), &chardata);
+                }
+                return Ok(Value::Object(obj));
             }
             Some(Token::CharData(b)) => {
                 chardata.extend_from_slice(&b);
-                inner.extend_from_slice(&escape_text(&b, false));
             }
             Some(Token::Comment(b)) => {
                 comment = b.clone();
-                inner.extend_from_slice(b"<!--");
-                inner.extend_from_slice(&b);
-                inner.extend_from_slice(b"-->");
             }
             Some(Token::Start { name, attr }) => {
                 let tok = Token::Start {
@@ -1720,8 +1817,8 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
                     attr: attr.clone(),
                 };
                 if let Some(child) = children.iter().find(|c| {
-                    let (n, _, _, k, _) = parse_tag(c);
-                    k == "element" && n == name.local
+                    let (n, _, parents, k, _) = parse_tag(c);
+                    k == "element" && parents.is_empty() && n == name.local
                 }) {
                     let val = unmarshal_element(dec, child, tok)?;
                     let key = if child.name.is_empty() {
@@ -1729,29 +1826,23 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
                     } else {
                         child.name.clone()
                     };
-                    match obj.remove(&key) {
-                        None => {
-                            obj.insert(key, val);
-                        }
-                        Some(Value::Array(mut a)) => {
-                            a.push(val);
-                            obj.insert(key, Value::Array(a));
-                        }
-                        Some(prev) => {
-                            obj.insert(key, Value::Array(vec![prev, val]));
-                        }
+                    insert_child(&mut obj, key, val);
+                } else if let Some(child) = children.iter().find(|c| {
+                    let (_, _, parents, k, _) = parse_tag(c);
+                    k == "element" && parents.first().is_some_and(|p| p == &name.local)
+                }) {
+                    let (_, _, parents, _, _) = parse_tag(child);
+                    let val = unmarshal_path(dec, &parents, child, tok)?;
+                    let key = if child.name.is_empty() {
+                        parse_tag(child).0
+                    } else {
+                        child.name.clone()
+                    };
+                    if !val.is_null() {
+                        insert_child(&mut obj, key, val);
                     }
                 } else if children.iter().any(|c| parse_tag(c).3 == "any") {
-                    let mut skip_depth = 1;
-                    any_tokens.push(json!({"type":"start","name": name.local}));
-                    while skip_depth > 0 {
-                        match dec.token()? {
-                            None => return Err(dec.syntax("unexpected EOF")),
-                            Some(Token::Start { .. }) => skip_depth += 1,
-                            Some(Token::End { .. }) => skip_depth -= 1,
-                            _ => {}
-                        }
-                    }
+                    dec.skip()?;
                 } else {
                     dec.skip()?;
                 }
@@ -1759,31 +1850,6 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
             Some(_) => {}
         }
     }
-    if leaf {
-        return parse_scalar(schema.typ.as_deref(), &chardata);
-    }
-    for child in &children {
-        let (_, _, _, kind, _) = parse_tag(child);
-        match kind {
-            "chardata" => {
-                obj.insert(child.name.clone(), parse_scalar(child.typ.as_deref(), &chardata)?);
-            }
-            "comment" => {
-                obj.insert(child.name.clone(), parse_scalar(child.typ.as_deref(), &comment)?);
-            }
-            "any" => {
-                obj.insert(
-                    child.name.clone(),
-                    json!({ "$b": hex::encode(&inner) }),
-                );
-            }
-            _ => {}
-        }
-    }
-    if obj.is_empty() && !chardata.is_empty() {
-        return parse_scalar(schema.typ.as_deref(), &chardata);
-    }
-    Ok(Value::Object(obj))
 }
 
 fn token_to_json(t: &Token) -> Value {
