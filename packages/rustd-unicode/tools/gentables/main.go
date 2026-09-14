@@ -233,18 +233,18 @@ func runs(pred func(rune) bool) [][2]uint32 {
 }
 
 type fixtureFile struct {
-	Version    string                `json:"version"`
-	GoVersion  string                `json:"goVersion"`
-	TableNames []string              `json:"tableNames"`
-	TableCount int                   `json:"tableCount"`
+	Version    string                 `json:"version"`
+	GoVersion  string                 `json:"goVersion"`
+	TableNames []string               `json:"tableNames"`
+	TableCount int                    `json:"tableCount"`
 	Predicates map[string][][2]uint32 `json:"predicates"`
-	CaseNonID  [][5]int32            `json:"caseNonIdentity"`
-	CaseFull   caseFull              `json:"caseFull"`
-	Special    map[string][][4]int32 `json:"specialCase"`
-	Utf8       utf8Fix               `json:"utf8"`
-	Utf16      utf16Fix              `json:"utf16"`
-	JsDiffs    jsDiffs               `json:"jsDiffs"`
-	RandomUtf8 randomUtf8            `json:"randomUtf8"`
+	CaseNonID  [][5]int32             `json:"caseNonIdentity"`
+	CaseFull   caseFull               `json:"caseFull"`
+	Special    map[string][][4]int32  `json:"specialCase"`
+	Utf8       utf8Fix                `json:"utf8"`
+	Utf16      utf16Fix               `json:"utf16"`
+	JsDiffs    jsDiffs                `json:"jsDiffs"`
+	RandomUtf8 randomUtf8             `json:"randomUtf8"`
 }
 
 type randomUtf8 struct {
@@ -255,24 +255,35 @@ type randomUtf8 struct {
 
 type utf8Fix struct {
 	SingleByte [][3]int     `json:"singleByte"`
+	TwoByte    twoByteFix   `json:"twoByte"`
 	Samples    []utf8Sample `json:"samples"`
 	RuneLen    [][2]int32   `json:"runeLen"`
 }
 
+type twoByteFix struct {
+	Lo                      int    `json:"lo"`
+	Hi                      int    `json:"hi"`
+	Count                   int    `json:"count"`
+	EncodeDecodeChecksum    uint32 `json:"encodeDecodeChecksum"`
+	CanonicalDecodeChecksum uint32 `json:"canonicalDecodeChecksum"`
+	AllLeadSeqCount         int    `json:"allLeadSeqCount"`
+	AllLeadSeqChecksum      uint32 `json:"allLeadSeqChecksum"`
+}
+
 type utf8Sample struct {
-	Hex  string `json:"hex"`
-	R    int32  `json:"r"`
-	Size int    `json:"size"`
-	Valid bool  `json:"valid"`
+	Hex   string `json:"hex"`
+	R     int32  `json:"r"`
+	Size  int    `json:"size"`
+	Valid bool   `json:"valid"`
 }
 
 type utf16Fix struct {
-	Encode      []utf16Enc `json:"encode"`
-	DecodeLone  [][2]int32 `json:"decodeLone"`
-	Surrogate   [][2]any   `json:"surrogate"`
-	RuneLen     [][2]int32 `json:"runeLen"`
-	EncodeRune  [][3]int32 `json:"encodeRune"`
-	Full        utf16Full  `json:"full"`
+	Encode     []utf16Enc `json:"encode"`
+	DecodeLone [][2]int32 `json:"decodeLone"`
+	Surrogate  [][2]any   `json:"surrogate"`
+	RuneLen    [][2]int32 `json:"runeLen"`
+	EncodeRune [][3]int32 `json:"encodeRune"`
+	Full       utf16Full  `json:"full"`
 }
 
 type utf16Full struct {
@@ -292,7 +303,7 @@ type caseFull struct {
 }
 
 type utf16Enc struct {
-	R     int32   `json:"r"`
+	R     int32    `json:"r"`
 	Units []uint16 `json:"units"`
 }
 
@@ -412,6 +423,48 @@ func decodeSample(p []byte) utf8Sample {
 	return utf8Sample{Hex: hexBytes(p), R: r, Size: size, Valid: utf8.Valid(p)}
 }
 
+func utf8TwoByteFixtures() twoByteFix {
+	const lo, hi = 0x80, 0x7FF
+	encH := uint32(2166136261)
+	canH := uint32(2166136261)
+	count := 0
+	for r := rune(lo); r <= hi; r++ {
+		var buf [4]byte
+		n := utf8.EncodeRune(buf[:], r)
+		dr, size := utf8.DecodeRune(buf[:n])
+		encH = mix32(encH, uint32(dr))
+		encH = mix32(encH, uint32(size))
+
+		b0 := byte(0xC0 | (r >> 6))
+		b1 := byte(0x80 | (r & 0x3F))
+		cr, csize := utf8.DecodeRune([]byte{b0, b1})
+		canH = mix32(canH, uint32(cr))
+		canH = mix32(canH, uint32(csize))
+		count++
+	}
+
+	seqH := uint32(2166136261)
+	seqCount := 0
+	for b0 := 0xC0; b0 <= 0xDF; b0++ {
+		for b1 := 0; b1 <= 0xFF; b1++ {
+			r, size := utf8.DecodeRune([]byte{byte(b0), byte(b1)})
+			seqH = mix32(seqH, uint32(r))
+			seqH = mix32(seqH, uint32(size))
+			seqCount++
+		}
+	}
+
+	return twoByteFix{
+		Lo:                      lo,
+		Hi:                      hi,
+		Count:                   count,
+		EncodeDecodeChecksum:    encH,
+		CanonicalDecodeChecksum: canH,
+		AllLeadSeqCount:         seqCount,
+		AllLeadSeqChecksum:      seqH,
+	}
+}
+
 func writeFixtures(dir string, named []namedTable) {
 	names := make([]string, len(named))
 	for i, n := range named {
@@ -462,29 +515,47 @@ func writeFixtures(dir string, named []namedTable) {
 		r, size := utf8.DecodeRune(p)
 		fx.Utf8.SingleByte = append(fx.Utf8.SingleByte, [3]int{b, int(r), size})
 	}
+	fx.Utf8.TwoByte = utf8TwoByteFixtures()
 	samples8 := [][]byte{
 		{},
 		{0x00},
 		{0x7f},
 		{0x80},
 		{0xc0, 0x80},
+		{0xc1, 0xbf},
 		{0xc2, 0x80},
 		{0xdf, 0xbf},
+		{0xc2, 0x7f},
+		{0xc2, 0xc0},
+		{0xdf, 0x00},
 		{0xe0, 0x80, 0x80},
+		{0xe0, 0x9f, 0xbf},
 		{0xe0, 0xa0, 0x80},
+		{0xe0, 0xa0, 0x7f},
+		{0xe1, 0x00, 0x80},
+		{0xe1},
 		{0xed, 0x9f, 0xbf},
 		{0xed, 0xa0, 0x80},
+		{0xed, 0xbf, 0xbf},
+		{0xed, 0xa0},
 		{0xee, 0x80, 0x80},
+		{0xef, 0xbf, 0xbf},
 		{0xef, 0xbf, 0xbd},
 		{0xf0, 0x80, 0x80, 0x80},
+		{0xf0, 0x8f, 0xbf, 0xbf},
 		{0xf0, 0x90, 0x80, 0x80},
+		{0xf0},
+		{0xf0, 0x90},
+		{0xf0, 0x90, 0x80},
+		{0xf0, 0x90, 0x80, 0x7f},
 		{0xf4, 0x8f, 0xbf, 0xbf},
 		{0xf4, 0x90, 0x80, 0x80},
 		{0xf5, 0x80, 0x80, 0x80},
+		{0xf8, 0x80, 0x80, 0x80},
+		{0x80, 0x80, 0x80},
 		{0xff},
 		{0xc2},
 		{0xe0, 0xa0},
-		{0xf0, 0x90, 0x80},
 		[]byte("😀"),
 		{0xef, 0xbf, 0xbd},
 	}

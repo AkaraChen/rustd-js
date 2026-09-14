@@ -39204,6 +39204,15 @@
         1
       ]
     ],
+    "twoByte": {
+      "lo": 128,
+      "hi": 2047,
+      "count": 1920,
+      "encodeDecodeChecksum": 3669357765,
+      "canonicalDecodeChecksum": 3669357765,
+      "allLeadSeqCount": 8192,
+      "allLeadSeqChecksum": 2872740293
+    },
     "samples": [
       {
         "hex": "",
@@ -39236,6 +39245,12 @@
         "valid": false
       },
       {
+        "hex": "c1 bf",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
         "hex": "c2 80",
         "r": 128,
         "size": 2,
@@ -39248,7 +39263,31 @@
         "valid": true
       },
       {
+        "hex": "c2 7f",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "c2 c0",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "df 00",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
         "hex": "e0 80 80",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "e0 9f bf",
         "r": 65533,
         "size": 1,
         "valid": false
@@ -39258,6 +39297,24 @@
         "r": 2048,
         "size": 3,
         "valid": true
+      },
+      {
+        "hex": "e0 a0 7f",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "e1 00 80",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "e1",
+        "r": 65533,
+        "size": 1,
+        "valid": false
       },
       {
         "hex": "ed 9f bf",
@@ -39272,8 +39329,26 @@
         "valid": false
       },
       {
+        "hex": "ed bf bf",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "ed a0",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
         "hex": "ee 80 80",
         "r": 57344,
+        "size": 3,
+        "valid": true
+      },
+      {
+        "hex": "ef bf bf",
+        "r": 65535,
         "size": 3,
         "valid": true
       },
@@ -39290,10 +39365,40 @@
         "valid": false
       },
       {
+        "hex": "f0 8f bf bf",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
         "hex": "f0 90 80 80",
         "r": 65536,
         "size": 4,
         "valid": true
+      },
+      {
+        "hex": "f0",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "f0 90",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "f0 90 80",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "f0 90 80 7f",
+        "r": 65533,
+        "size": 1,
+        "valid": false
       },
       {
         "hex": "f4 8f bf bf",
@@ -39314,6 +39419,18 @@
         "valid": false
       },
       {
+        "hex": "f8 80 80 80",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
+        "hex": "80 80 80",
+        "r": 65533,
+        "size": 1,
+        "valid": false
+      },
+      {
         "hex": "ff",
         "r": 65533,
         "size": 1,
@@ -39327,12 +39444,6 @@
       },
       {
         "hex": "e0 a0",
-        "r": 65533,
-        "size": 1,
-        "valid": false
-      },
-      {
-        "hex": "f0 90 80",
         "r": 65533,
         "size": 1,
         "valid": false
