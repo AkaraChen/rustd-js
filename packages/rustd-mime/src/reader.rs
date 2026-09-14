@@ -1,9 +1,9 @@
-//! Go `mime/multipart.Reader.NextPart` / `NextRawPart` (Go 1.24 `multipart.go`)
-//! for a complete body.
+//! Go `mime/multipart.Reader.NextPart` / `NextRawPart` (Go 1.24 `multipart.go`).
 //!
 //! `NextPart` transparently decodes `Content-Transfer-Encoding: quoted-printable`
-//! and hides that header. `NextRawPart` leaves the CTE and body alone. Incremental
-//! 1-byte `write`/`nextPart` interleaving and ReadForm limits are later.
+//! and hides that header. `NextRawPart` leaves the CTE and body alone. `write`
+//! may split a boundary across chunks; `next_part` returns `Ok(None)` until a
+//! complete part (or the closing delimiter) is buffered. ReadForm limits are later.
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
 use crate::mediatype::parse_media_type;
@@ -12,7 +12,13 @@ use std::collections::HashMap;
 #[derive(Clone, Copy)]
 enum ReadErr {
     Eof,
+    #[allow(dead_code)]
     UnexpectedEof,
+}
+
+enum StreamErr {
+    NeedMore,
+    Msg(String),
 }
 
 #[derive(Debug)]
@@ -70,32 +76,52 @@ impl MultipartReader {
         self.next_part_opt(true)
     }
 
+    fn snapshot(&self) -> (usize, u32, bool, bool, Vec<u8>, Vec<u8>) {
+        (
+            self.pos,
+            self.parts_read,
+            self.current_open,
+            self.finished,
+            self.nl.clone(),
+            self.nl_dash_boundary.clone(),
+        )
+    }
+
+    fn restore(&mut self, snap: (usize, u32, bool, bool, Vec<u8>, Vec<u8>)) {
+        self.pos = snap.0;
+        self.parts_read = snap.1;
+        self.current_open = snap.2;
+        self.finished = snap.3;
+        self.nl = snap.4;
+        self.nl_dash_boundary = snap.5;
+    }
+
     fn next_part_opt(&mut self, raw: bool) -> Result<Option<MultipartPart>, String> {
         if self.finished {
             return Ok(None);
         }
+        let snap = self.snapshot();
+        match self.try_next_part(raw) {
+            Ok(part) => Ok(part),
+            Err(StreamErr::NeedMore) => {
+                self.restore(snap);
+                Ok(None)
+            }
+            Err(StreamErr::Msg(e)) => Err(e),
+        }
+    }
+
+    fn try_next_part(&mut self, raw: bool) -> Result<Option<MultipartPart>, StreamErr> {
         if self.current_open {
-            let _ = self.read_part_body();
+            self.read_part_body()?;
             self.current_open = false;
         }
         if self.dash_boundary == b"--" {
-            return Err("multipart: boundary is empty".into());
+            return Err(StreamErr::Msg("multipart: boundary is empty".into()));
         }
         let mut expect_new_part = false;
         loop {
-            let (line, eof) = read_slice_nl(&self.buf, &mut self.pos);
-            if eof && is_final_boundary(&line, &self.dash_boundary_dash, &self.nl) {
-                self.finished = true;
-                return Ok(None);
-            }
-            if eof {
-                let wrapped = if line.is_empty() && self.pos >= self.buf.len() {
-                    "EOF"
-                } else {
-                    "unexpected EOF"
-                };
-                return Err(format!("multipart: NextPart: {wrapped}"));
-            }
+            let line = self.read_next_line()?;
             if is_boundary_delimiter_line(
                 &line,
                 &self.dash_boundary,
@@ -108,7 +134,8 @@ impl MultipartReader {
                 let mut body = self.read_part_body()?;
                 self.current_open = false;
                 if !raw {
-                    body = maybe_decode_quoted_printable(&mut header, body)?;
+                    body = maybe_decode_quoted_printable(&mut header, body)
+                        .map_err(StreamErr::Msg)?;
                 }
                 let (form_name, file_name) = disposition_names(&header);
                 return Ok(Some(MultipartPart {
@@ -123,10 +150,10 @@ impl MultipartReader {
                 return Ok(None);
             }
             if expect_new_part {
-                return Err(format!(
+                return Err(StreamErr::Msg(format!(
                     "multipart: expecting a new Part; got line {}",
                     quoted_go(&line)
-                ));
+                )));
             }
             if self.parts_read == 0 {
                 continue;
@@ -135,17 +162,35 @@ impl MultipartReader {
                 expect_new_part = true;
                 continue;
             }
-            return Err(format!(
+            return Err(StreamErr::Msg(format!(
                 "multipart: unexpected line in Next(): {}",
                 quoted_go(&line)
-            ));
+            )));
         }
     }
 
-    fn read_part_body(&mut self) -> Result<Vec<u8>, String> {
+    fn read_next_line(&mut self) -> Result<Vec<u8>, StreamErr> {
+        if self.pos >= self.buf.len() {
+            return Err(StreamErr::NeedMore);
+        }
+        if let Some(rel) = self.buf[self.pos..].iter().position(|&b| b == b'\n') {
+            let end = self.pos + rel + 1;
+            let line = self.buf[self.pos..end].to_vec();
+            self.pos = end;
+            return Ok(line);
+        }
+        let rest = &self.buf[self.pos..];
+        if is_final_boundary(rest, &self.dash_boundary_dash, &self.nl) {
+            let line = rest.to_vec();
+            self.pos = self.buf.len();
+            return Ok(line);
+        }
+        Err(StreamErr::NeedMore)
+    }
+
+    fn read_part_body(&mut self) -> Result<Vec<u8>, StreamErr> {
         let mut body = Vec::new();
         let mut total: i64 = 0;
-        let mut read_err: Option<ReadErr> = None;
         loop {
             let peek = &self.buf[self.pos..];
             let (n, err) = scan_until_boundary(
@@ -153,17 +198,10 @@ impl MultipartReader {
                 &self.dash_boundary,
                 &self.nl_dash_boundary,
                 total,
-                read_err,
+                None,
             );
             if n == 0 && err.is_none() {
-                if self.pos + peek.len() >= self.buf.len() {
-                    if matches!(read_err, Some(ReadErr::UnexpectedEof)) {
-                        return Err("multipart: NextPart: unexpected EOF".into());
-                    }
-                    read_err = Some(ReadErr::UnexpectedEof);
-                    continue;
-                }
-                return Err("multipart: NextPart: unexpected EOF".into());
+                return Err(StreamErr::NeedMore);
             }
             if n > 0 {
                 body.extend_from_slice(&self.buf[self.pos..self.pos + n]);
@@ -173,31 +211,17 @@ impl MultipartReader {
             match err {
                 Some(ReadErr::Eof) => return Ok(body),
                 Some(ReadErr::UnexpectedEof) => {
-                    return Err("multipart: NextPart: unexpected EOF".into())
+                    return Err(StreamErr::Msg(
+                        "multipart: NextPart: unexpected EOF".into(),
+                    ))
                 }
                 None => {
                     if n == 0 {
-                        return Err("multipart: NextPart: unexpected EOF".into());
+                        return Err(StreamErr::NeedMore);
                     }
                 }
             }
         }
-    }
-}
-
-fn read_slice_nl(buf: &[u8], pos: &mut usize) -> (Vec<u8>, bool) {
-    if *pos >= buf.len() {
-        return (Vec::new(), true);
-    }
-    if let Some(rel) = buf[*pos..].iter().position(|&b| b == b'\n') {
-        let end = *pos + rel + 1;
-        let line = buf[*pos..end].to_vec();
-        *pos = end;
-        (line, false)
-    } else {
-        let line = buf[*pos..].to_vec();
-        *pos = buf.len();
-        (line, true)
     }
 }
 
@@ -302,18 +326,33 @@ fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+fn read_full_line(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, StreamErr> {
+    if *pos >= buf.len() {
+        return Err(StreamErr::NeedMore);
+    }
+    match buf[*pos..].iter().position(|&b| b == b'\n') {
+        Some(rel) => {
+            let end = *pos + rel + 1;
+            let line = buf[*pos..end].to_vec();
+            *pos = end;
+            Ok(line)
+        }
+        None => Err(StreamErr::NeedMore),
+    }
+}
+
 fn read_mime_header(
     buf: &[u8],
     pos: &mut usize,
-) -> Result<Vec<(String, Vec<String>)>, String> {
+) -> Result<Vec<(String, Vec<String>)>, StreamErr> {
     if *pos < buf.len() && (buf[*pos] == b' ' || buf[*pos] == b'\t') {
-        let (line, _) = read_slice_nl(buf, pos);
+        let line = read_full_line(buf, pos)?;
         let shown = strip_nl(&line);
         let shown = if shown.len() > 80 { &shown[..80] } else { shown };
-        return Err(format!(
+        return Err(StreamErr::Msg(format!(
             "malformed MIME header initial line: {}",
             String::from_utf8_lossy(shown)
-        ));
+        )));
     }
     let mut headers: Vec<(String, Vec<String>)> = Vec::new();
     loop {
@@ -323,23 +362,23 @@ fn read_mime_header(
             Some(line) => line,
         };
         let Some(colon) = kv.iter().position(|&b| b == b':') else {
-            return Err(format!(
+            return Err(StreamErr::Msg(format!(
                 "malformed MIME header line: {}",
                 String::from_utf8_lossy(&kv)
-            ));
+            )));
         };
         let key = canonical_mime_header_key_ok(&kv[..colon]).ok_or_else(|| {
-            format!(
+            StreamErr::Msg(format!(
                 "malformed MIME header line: {}",
                 String::from_utf8_lossy(&kv)
-            )
+            ))
         })?;
         let v = &kv[colon + 1..];
         if !v.iter().copied().all(valid_header_value_byte) {
-            return Err(format!(
+            return Err(StreamErr::Msg(format!(
                 "malformed MIME header line: {}",
                 String::from_utf8_lossy(&kv)
-            ));
+            )));
         }
         let value = String::from_utf8_lossy(trim_left_space_tab(v)).into_owned();
         if let Some(existing) = headers.iter_mut().find(|(k, _)| *k == key) {
@@ -351,19 +390,13 @@ fn read_mime_header(
     Ok(headers)
 }
 
-fn read_continued_line(buf: &[u8], pos: &mut usize) -> Result<Option<Vec<u8>>, String> {
-    if *pos >= buf.len() {
-        return Err("EOF".into());
-    }
-    let (raw, eof) = read_slice_nl(buf, pos);
-    if eof && raw.is_empty() {
-        return Err("EOF".into());
-    }
+fn read_continued_line(buf: &[u8], pos: &mut usize) -> Result<Option<Vec<u8>>, StreamErr> {
+    let raw = read_full_line(buf, pos)?;
     if !raw.is_empty() && !raw.contains(&b':') && !strip_nl(&raw).is_empty() {
-        return Err(format!(
+        return Err(StreamErr::Msg(format!(
             "malformed MIME header: missing colon: {}",
             quoted_go(&raw)
-        ));
+        )));
     }
     let mut line = strip_nl(&raw).to_vec();
     if line.is_empty() {
@@ -371,19 +404,21 @@ fn read_continued_line(buf: &[u8], pos: &mut usize) -> Result<Option<Vec<u8>>, S
     }
     loop {
         if *pos >= buf.len() {
-            break;
+            return Err(StreamErr::NeedMore);
         }
         let next = buf[*pos];
         if next != b' ' && next != b'\t' {
             break;
         }
-        let (cont, _) = read_slice_nl(buf, pos);
+        if !buf[*pos..].contains(&b'\n') {
+            return Err(StreamErr::NeedMore);
+        }
+        let cont = read_full_line(buf, pos)?;
         let cont = strip_nl(&cont);
         let cont = trim_left_space_tab(cont);
         line.push(b' ');
         line.extend_from_slice(cont);
     }
-    let _ = eof;
     Ok(Some(line))
 }
 
@@ -531,6 +566,32 @@ mod tests {
         parts
     }
 
+    fn collect_parts_1byte(boundary: &str, body: &[u8]) -> Vec<MultipartPart> {
+        let mut r = MultipartReader::new(boundary.into());
+        let mut parts = Vec::new();
+        for byte in body {
+            r.write(std::slice::from_ref(byte));
+            while let Some(p) = r.next_part().unwrap() {
+                parts.push(p);
+            }
+        }
+        while let Some(p) = r.next_part().unwrap() {
+            parts.push(p);
+        }
+        assert!(r.next_part().unwrap().is_none());
+        parts
+    }
+
+    fn parts_eq(a: &[MultipartPart], b: &[MultipartPart]) {
+        assert_eq!(a.len(), b.len());
+        for (i, (l, r)) in a.iter().zip(b).enumerate() {
+            assert_eq!(l.form_name, r.form_name, "form_name[{i}]");
+            assert_eq!(l.file_name, r.file_name, "file_name[{i}]");
+            assert_eq!(l.header, r.header, "header[{i}]");
+            assert_eq!(l.body, r.body, "body[{i}]");
+        }
+    }
+
     #[test]
     fn next_part_multi_field_matches_writer() {
         let mut w = MultipartWriter::new(Some("boundary".into())).unwrap();
@@ -671,5 +732,39 @@ Content-Transfer-Encoding: quoted-printable\r\n\
             Some(vec!["7bit".into()])
         );
         assert_eq!(part.body, b"hi");
+    }
+
+    #[test]
+    fn next_part_1byte_feed_matches_whole_body() {
+        let mut w = MultipartWriter::new(Some("bound".into())).unwrap();
+        w.write_field("foo", "bar").unwrap();
+        w.write_field("keep", "hello--bound--world").unwrap();
+        w.write_field("empty", "").unwrap();
+        let body = w.finish().unwrap();
+        parts_eq(
+            &collect_parts("bound", &body),
+            &collect_parts_1byte("bound", &body),
+        );
+
+        let qp = qp_form_body("quoted-printable");
+        parts_eq(
+            &collect_parts("0016e68ee29c5d515f04cedf6733", &qp),
+            &collect_parts_1byte("0016e68ee29c5d515f04cedf6733", &qp),
+        );
+    }
+
+    #[test]
+    fn next_part_1byte_returns_none_until_a_complete_part() {
+        let mut w = MultipartWriter::new(Some("b".into())).unwrap();
+        w.write_field("only", "x").unwrap();
+        let body = w.finish().unwrap();
+        let mut r = MultipartReader::new("b".into());
+        r.write(&body[..1]);
+        assert!(r.next_part().unwrap().is_none());
+        r.write(&body[1..]);
+        let part = r.next_part().unwrap().expect("part");
+        assert_eq!(part.form_name, "only");
+        assert_eq!(part.body, b"x");
+        assert!(r.next_part().unwrap().is_none());
     }
 }

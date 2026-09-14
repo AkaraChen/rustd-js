@@ -34,20 +34,39 @@ function goRead(body, boundary, raw = false) {
   return JSON.parse(generated.stdout);
 }
 
+function snapshotPart(part) {
+  return {
+    formName: part.formName(),
+    fileName: part.fileName(),
+    header: part.header,
+    bodyHex: hex(part.read()),
+  };
+}
+
+function drain(reader, parts, raw) {
+  for (;;) {
+    const part = raw ? reader.nextRawPart() : reader.nextPart();
+    if (part == null) break;
+    parts.push(snapshotPart(part));
+  }
+}
+
 function readAll(boundary, body, raw = false) {
   const reader = new MultipartReader({ boundary });
   reader.write(body);
   const parts = [];
-  for (;;) {
-    const part = raw ? reader.nextRawPart() : reader.nextPart();
-    if (part == null) break;
-    parts.push({
-      formName: part.formName(),
-      fileName: part.fileName(),
-      header: part.header,
-      bodyHex: hex(part.read()),
-    });
+  drain(reader, parts, raw);
+  return parts;
+}
+
+function readAll1Byte(boundary, body, raw = false) {
+  const reader = new MultipartReader({ boundary });
+  const parts = [];
+  for (let i = 0; i < body.length; i++) {
+    reader.write(body.subarray(i, i + 1));
+    drain(reader, parts, raw);
   }
+  drain(reader, parts, raw);
   return parts;
 }
 
@@ -254,4 +273,64 @@ test('nextPart quoted-printable decode error is QuotedPrintableError', () => {
   const reader = new MultipartReader({ boundary: 'b' });
   reader.write(body);
   assert.throws(() => reader.nextPart(), QuotedPrintableError);
+});
+
+test('nextPart 1-byte write matches whole-body for Go Writer fields', () => {
+  const fields = [
+    { name: 'foo', value: 'bar', mode: 'writeField' },
+    { name: 'a"b', value: 'x\\y', mode: 'writeField' },
+    { name: 'empty', value: '', mode: 'writeField' },
+    { name: 'keep', value: 'hello--boundary--world', mode: 'writeField' },
+  ];
+  const golden = goWrite(fields, 'boundary');
+  const body = unhex(golden.bodyHex);
+  const whole = readAll('boundary', body);
+  const oneByte = readAll1Byte('boundary', body);
+  const goParts = goRead(body, 'boundary');
+  assertPartsMatch(whole, goParts);
+  assert.deepEqual(oneByte, whole);
+});
+
+test('nextPart 1-byte write matches whole-body for native createPart/createFormFile', () => {
+  const w = new MultipartWriter({ boundary: 'xyzzy' });
+  w.createPart({ 'Content-Disposition': ['form-data; name="note"'] }).write(Buffer.from('hi'));
+  const file = w.createFormFile('file', 'a.txt');
+  file.write(Buffer.from([0, 255, 10]));
+  file.end();
+  const body = w.bytes();
+  const whole = readAll('xyzzy', body);
+  const oneByte = readAll1Byte('xyzzy', body);
+  assert.deepEqual(oneByte, whole);
+  const goParts = goRead(body, 'xyzzy');
+  assertPartsMatch(whole, goParts);
+});
+
+test('nextPart 1-byte write matches whole-body for quoted-printable CTE', () => {
+  const body = qpFormBody('quoted-printable');
+  const boundary = '0016e68ee29c5d515f04cedf6733';
+  const whole = readAll(boundary, body);
+  const oneByte = readAll1Byte(boundary, body);
+  assert.deepEqual(oneByte, whole);
+  assertPartsMatch(whole, goRead(body, boundary));
+});
+
+test('nextRawPart 1-byte write matches whole-body', () => {
+  const body = Buffer.from(
+    `--0016e68ee29c5d515f04cedf6733\r\nContent-Type: text/plain; charset="utf-8"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<div dir=3D"ltr">Hello World.</div>\r\n--0016e68ee29c5d515f04cedf6733--`,
+  );
+  const boundary = '0016e68ee29c5d515f04cedf6733';
+  assert.deepEqual(readAll1Byte(boundary, body, true), readAll(boundary, body, true));
+});
+
+test('nextPart returns null (does not throw) after a 1-byte prefix', () => {
+  const golden = goWrite([{ name: 'only', value: 'x', mode: 'writeField' }], 'b');
+  const body = unhex(golden.bodyHex);
+  const reader = new MultipartReader({ boundary: 'b' });
+  reader.write(body.subarray(0, 1));
+  assert.equal(reader.nextPart(), null);
+  reader.write(body.subarray(1));
+  const part = reader.nextPart();
+  assert.equal(part.formName(), 'only');
+  assert.equal(hex(part.read()), hex(Buffer.from('x')));
+  assert.equal(reader.nextPart(), null);
 });
