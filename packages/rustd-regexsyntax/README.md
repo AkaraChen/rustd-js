@@ -3,7 +3,9 @@
 Synchronous Rust + Node-API port of Go `regexp/syntax` (parse, print, Simplify, Compile).
 Unicode `\p` / `\P` tables are generated from Go 1.24.13
 `unicode.Categories` / `unicode.Scripts` (Unicode 15.0.0). Matching engine
-and Go→JS translation stay out of scope (issue #30).
+and Go→JS translation stay out of scope (issue #30). Parse fixtures cover
+430 Go `syntax.Parse` cases (dump + String), including POSIX/Perl dual-mode
+and 121 illegal samples.
 
 Runtime Node >=20; no JavaScript runtime dependencies.
 

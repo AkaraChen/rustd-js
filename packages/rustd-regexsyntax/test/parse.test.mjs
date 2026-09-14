@@ -31,15 +31,25 @@ test('Go regenerates committed parse fixtures; native dump and String match', ()
   assert.equal(generated.stdout, committed, 'Go regexsyntax fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'regexsyntax');
-  assert.ok(packet.cases.length >= 95, `cases ${packet.cases.length}`);
-  const pCases = packet.cases.filter((c) => /\\p|\\P/.test(c.pattern));
+  assert.ok(packet.cases.length >= 300, `cases ${packet.cases.length}`);
+  const pCases = packet.cases.filter((c) => /\\p|\\P/.test(c.pattern ?? ''));
   assert.ok(pCases.length >= 14, `p-cases ${pCases.length}`);
+  const illegal = packet.cases.filter((c) => c.error);
+  assert.ok(illegal.length >= 40, `illegal ${illegal.length}`);
+  const posix = packet.cases.filter((c) => c.flags === FLAGS.POSIX);
+  const perl = packet.cases.filter((c) => c.flags === FLAGS.Perl);
+  assert.ok(posix.length >= 20, `posix ${posix.length}`);
+  assert.ok(perl.length >= 20, `perl ${perl.length}`);
 
   for (const c of packet.cases) {
+    if (c.patternHex) {
+      assert.ok(c.error, `${c.id} invalid UTF-8 must fail in Go`);
+      continue;
+    }
     if (c.error) {
       assert.throws(() => syntaxParse(c.pattern, c.flags), (err) => {
         assert.equal(err instanceof SyntaxError, true, `${c.id} class`);
-        assert.equal(err.code, c.error, `${c.id} code`);
+        assert.equal(err.code, c.error, `${c.id} code want ${c.error} got ${err.code}`);
         return true;
       }, c.id);
       continue;
