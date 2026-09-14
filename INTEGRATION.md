@@ -11,7 +11,7 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | rustd-containers | `pkg/rustd-containers-grok-bulk-2` @ `b32631f` | merged (`f47add7`); SuffixArray.build 256KB/4MB near-linear + read-counterexamples (`26792ee` **is** an ancestor). Newer tip `7d889e4` rewritten (not an ancestor) — do not merge |
 | rustd-compress | `pkg/rustd-compress-grok-bulk-9` @ `90cc578` | merged (`56a635e`); lzwCompressStream splits vs one-shot. `6c0e6d2` **is** an ancestor |
 | rustd-compress | `pkg/rustd-compress-grok-bulk-worker` | superseded by `pkg/rustd-compress-grok-bulk-9` (ancestor of the merge) |
-| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `64883bb` | merged (`e563b14`); zip comment vs FileHeader.Comment. `d579956` **is** an ancestor (`cba8246`) |
+| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `939bab5` | merged (`4a7ec70`); zip data-descriptor GPBF bit 3 vs FileHeader. `64883bb` **is** an ancestor (`e563b14`) |
 | rustd-archive | `pkg/rustd-archive-grok-bulk-3` | superseded by `pkg/rustd-archive-grok-bulk-6` |
 | rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `f2d0491` | superseded — rewritten parallel history; replaced by later descendant tips |
 | rustd-serial | `pkg/rustd-serial-grok-bulk-7` @ `0a51358` | merged (`ccb0a37`); XML Decode schema (`39a26ca` **is** an ancestor) |
@@ -24,9 +24,9 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `bb6a034` | merged (`37eaa9f`); remaining §4.8 long-line / go:build / generics (rebased onto `1295731`) |
 | rustd-encoding | `pkg/rustd-encoding-grok-bulk-2` @ `c6695ea` | rejected — `pnpm-lock.yaml` conflict vs `rustd-log`; docs commit on un-rebased history (merge-base still `0d5273d`; `b5f930e` is ancestor) |
 | rustd-mathx | `pkg/rustd-mathx-grok-bulk-10` @ `9c04f91` | rejected — `pnpm-lock.yaml` conflict (merge-base still `de3e643`); cLog10 on un-rebased history (`a8246ba` is ancestor). Worker must rebase |
-| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `bd5ba7d` | merged (`c1c0fa1`); NextPart quoted-printable CTE vs Go NextRawPart. `8004ed3` **is** an ancestor (`fea9fd7`) |
-| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `6d87b0a` | superseded — rewritten parallel history vs merged `bd5ba7d` (CreateFormFile; `README.md` + `differences.test.mjs` + `types.ts` CONFLICT). Worker must rebase |
-| rustd-regexsyntax | `pkg/rustd-regexsyntax-grok-bulk-7` @ `db8034a` | merged (`6c34178`); reverse restring vs Go regexp.Compile match. `974aded` **is** an ancestor (`6e055cb`) |
+| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `813b59a` | merged (`66ed85e`); CreatePart + CreateFormFile vs Go (issue #9). `bd5ba7d` **is** an ancestor (`c1c0fa1`) |
+| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `6d87b0a` | superseded — rewritten parallel history vs merged `bd5ba7d`; replaced by descendant tip `813b59a` |
+| rustd-regexsyntax | `pkg/rustd-regexsyntax-grok-bulk-7` @ `c3dafb5` | merged (`dfbe5ac`); 10k mixed parse throughput vs Go in README. `db8034a` **is** an ancestor (`6c34178`) |
 | rustd-mail | `pkg/rustd-mail-grok-bulk-worker` @ `2852022` | pending — was CLEAN vs pre-mime main; now `pnpm-lock.yaml` CONFLICT after mime landed. Worker must rebase |
 | rustd-testing | `pkg/rustd-testing-grok-bulk-6` | rejected-by-owner (issue #20, 2026-09-14) |
 | rustd-std | `pkg/rustd-std-*` | rejected-by-owner (issue #29, 2026-09-14); no current unmerged branch |
@@ -1040,6 +1040,102 @@ Suggested next three: encoding/mathx **after rebase onto origin/main** (last rem
 
 - Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
 - First-time remaining of the owner 12: `encoding`, `mathx` — both still blocked on `pnpm-lock.yaml` importer conflict vs later-landed packages. Regexsyntax reverse-match and archive zip Comment follow-ups landed this round.
+- On main now: crypto, checksum, containers, compress, archive, serial, image, log, unicode, gotool, regexsyntax, mime. Missing from the 12: encoding, mathx. Mail still pending rebase.
+- `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
+- `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
+- Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
+- Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
+
+## Round 2026-09-14T21:00:30+02:00
+
+Agent: `grok-integrator`  
+`origin/main` before: `aada7e7`  
+`origin/main` after: (this file lands as a follow-up commit on top of `66ed85e`)
+
+Priority this round: encoding/mathx still un-rebased at the same SHAs (`c6695ea` / `9c04f91`) — lockfile still CONFLICT, not re-verified. Mail still `2852022` CONFLICT. Took three CLEAN descendant follow-ups that landed after last round: archive `939bab5` (FF from `aada7e7`), regexsyntax `c3dafb5` (`db8034a` is ancestor), mime `813b59a` (`bd5ba7d` is ancestor; CreateFormFile rebased off the old `6d87b0a` rewrite). Did not merge the containers rewrite. Skipped owner-cut `debugfmt` / `testing`.
+
+### Merged (verified green, `--no-ff`, pushed)
+
+| 分支 | 包 | 验证 | merge sha |
+|---|---|---|---|
+| `pkg/rustd-archive-grok-bulk-6` @ `939bab5` | rustd-archive follow-up | build + 78 tests pass (was 73); zip data-descriptor GPBF bit 3 vs FileHeader. `64883bb` **is** an ancestor; merge-tree CLEAN (FF from `aada7e7`) | `4a7ec70` |
+| `pkg/rustd-regexsyntax-grok-bulk-7` @ `c3dafb5` | rustd-regexsyntax follow-up | build + 21 tests pass (6 `unused_mut`/`dead_code` warnings, not a failure); 10k mixed parse throughput vs Go in README. `db8034a` **is** an ancestor; merge-tree CLEAN | `dfbe5ac` |
+| `pkg/rustd-mime-grok-bulk-3` @ `813b59a` | rustd-mime follow-up | build + 59 tests pass (was 52); CreatePart + CreateFormFile vs Go (issue #9). `bd5ba7d` **is** an ancestor; `6d87b0a` is **not**; merge-tree CLEAN | `66ed85e` |
+
+### Rejected
+
+- `pkg/rustd-encoding-grok-bulk-2` @ `c6695ea` — same SHA as last five rounds. merge-tree `pnpm-lock.yaml` CONFLICT (merge-base still `0d5273d`). Not re-verified.
+  First lines of conflict:
+
+```
+Auto-merging pnpm-lock.yaml
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+<<<<<<< ours
+  packages/rustd-gotool: {}
+  packages/rustd-image: {}
+  packages/rustd-log: {}
+  packages/rustd-mime: {}
+=======
+  packages/rustd-encoding: {}
+>>>>>>> origin/pkg/rustd-encoding-grok-bulk-2
+```
+
+  Cause: encoding merge-base is still `0d5273d` (pre-log). Worker must rebase onto current `origin/main` and re-push. Implementation todo `todo_2f742a305406` is already done (`claimed_by=grok-bulk-worker`).
+
+- `pkg/rustd-mathx-grok-bulk-10` @ `9c04f91` — same SHA as last four rounds (cLog10 on un-rebased history; `a8246ba` is ancestor). merge-tree still `pnpm-lock.yaml` CONFLICT (merge-base `de3e643`). Not re-verified.
+  First lines of conflict:
+
+```
+Auto-merging pnpm-lock.yaml
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+<<<<<<< ours
+  packages/rustd-gotool: {}
+  packages/rustd-image: {}
+  packages/rustd-log: {}
+  packages/rustd-mime: {}
+=======
+  packages/rustd-mathx: {}
+>>>>>>> origin/pkg/rustd-mathx-grok-bulk-10
+```
+
+  Worker must rebase onto current `origin/main`. Implementation todo `todo_cd9db5d9748d` is already done (`claimed_by=grok-bulk-10`).
+
+- `pkg/rustd-mail-grok-bulk-worker` @ `2852022` — same SHA; merge-tree still `pnpm-lock.yaml` CONFLICT after mime. Not re-verified.
+
+```
+Auto-merging pnpm-lock.yaml
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+```
+
+  Implementation todo `todo_563a7158788d` is already done. Worker must rebase mail-parse onto current `origin/main`.
+
+- `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20). Skipped.
+- `pkg/rustd-debugfmt-grok-bulk-5` @ `6b654b4` — `rejected-by-owner` (issue #18). Skipped.
+
+LoopX `todo update --note` attempted this round on `todo_2f742a305406`, `todo_cd9db5d9748d`, `todo_563a7158788d`.
+
+### Superseded / do-not-merge
+
+- `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — still superseded by merged `pkg/rustd-image-grok-bulk-8`.
+- `pkg/rustd-containers-grok-bulk-2` @ `7d889e4` — **do not merge**; rewritten parallel history vs merged `b32631f` (`README.md` + `build-linear.test.mjs` CONFLICT; merge-base `196959b`). Worker should rebase onto current `origin/main`.
+- `pkg/rustd-mime-grok-bulk-3` @ `6d87b0a` — superseded by descendant tip `813b59a` (CreateFormFile rebased onto merged `bd5ba7d` history).
+
+### Not processed / remaining unmerged `origin/pkg/*`
+
+1. `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — skip; superseded
+2. `pkg/rustd-testing-grok-bulk-6` (`9fc9508`) — skip; rejected-by-owner
+3. `pkg/rustd-encoding-grok-bulk-2` (`c6695ea`) — waiting on rebase
+4. `pkg/rustd-mail-grok-bulk-worker` (`2852022`) — waiting on rebase
+5. `pkg/rustd-mathx-grok-bulk-10` (`9c04f91`) — waiting on rebase (cLog10 on old history)
+6. `pkg/rustd-debugfmt-grok-bulk-5` (`6b654b4`) — skip; rejected-by-owner
+7. `pkg/rustd-containers-grok-bulk-2` rewrite `7d889e4` — **do not merge** until rebased
+
+Suggested next three: encoding/mathx **after rebase onto origin/main** (last remaining of the owner 12). Then mail after rebase. If still un-rebased, this lane is blocked on workers rebasing lockfile conflicts — do not merge the containers rewrite `7d889e4`.
+
+### Notes
+
+- Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
+- First-time remaining of the owner 12: `encoding`, `mathx` — both still blocked on `pnpm-lock.yaml` importer conflict vs later-landed packages. Archive zip GPBF bit 3, regexsyntax 10k parse throughput, and mime CreatePart/CreateFormFile landed this round.
 - On main now: crypto, checksum, containers, compress, archive, serial, image, log, unicode, gotool, regexsyntax, mime. Missing from the 12: encoding, mathx. Mail still pending rebase.
 - `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
 - `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
