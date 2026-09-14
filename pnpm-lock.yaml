@@ -30,6 +30,8 @@ importers:
 
   packages/rustd-crypto: {}
 
+  packages/rustd-encoding: {}
+
   packages/rustd-gotool: {}
 
   packages/rustd-image: {}
@@ -37,6 +39,8 @@ importers:
   packages/rustd-log: {}
 
   packages/rustd-mime: {}
+
+  packages/rustd-regexsyntax: {}
 
   packages/rustd-serial: {}
 
