@@ -236,6 +236,34 @@ func timeIters(iters int, fn func()) float64 {
 	return float64(time.Since(start).Nanoseconds()) / 1e6
 }
 
+func runEncodeBytes() {
+	img := sampleNRGBA()
+	var pngBuf bytes.Buffer
+	enc := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := enc.Encode(&pngBuf, img); err != nil {
+		panic(err)
+	}
+	var gif256, gif16 bytes.Buffer
+	if err := gif.Encode(&gif256, img, &gif.Options{NumColors: 256}); err != nil {
+		panic(err)
+	}
+	if err := gif.Encode(&gif16, img, &gif.Options{NumColors: 16}); err != nil {
+		panic(err)
+	}
+	out := map[string]any{
+		"go":                    runtime.Version(),
+		"pngNoCompressionHex":   hex(pngBuf.Bytes()),
+		"pngNoCompressionLen":   pngBuf.Len(),
+		"gifNumColors256Hex":    hex(gif256.Bytes()),
+		"gifNumColors256Len":    gif256.Len(),
+		"gifNumColors16Hex":     hex(gif16.Bytes()),
+		"gifNumColors16Len":     gif16.Len(),
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		panic(err)
+	}
+}
+
 func runDecode() {
 	if len(os.Args) < 4 {
 		panic("usage: go run ./gofixtures -decode png|jpeg|gif <file>")
@@ -368,6 +396,10 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "-decode" {
 		runDecode()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "-encode-bytes" {
+		runEncodeBytes()
 		return
 	}
 	outDir := "."

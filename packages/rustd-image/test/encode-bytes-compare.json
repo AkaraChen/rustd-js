@@ -1,0 +1,144 @@
+{
+  "generatedAt": "2026-09-14T16:32:33.278Z",
+  "go": "go1.25.0",
+  "sample": "8x8 NRGBA with (0,0) a=128; same pixels as gofixtures sampleNRGBA",
+  "issue": "#19 §4.5 exploration (not a publish gate)",
+  "cases": [
+    {
+      "name": "png-NoCompression",
+      "equal": false,
+      "goLen": 337,
+      "tsLen": 332,
+      "firstDiff": {
+        "offset": 36,
+        "go": 24,
+        "ts": 19
+      },
+      "goChunks": {
+        "signatureOk": true,
+        "types": [
+          {
+            "type": "IHDR",
+            "len": 13
+          },
+          {
+            "type": "IDAT",
+            "len": 280
+          },
+          {
+            "type": "IEND",
+            "len": 0
+          }
+        ],
+        "ihdr": {
+          "width": 8,
+          "height": 8,
+          "bitDepth": 8,
+          "colorType": 6,
+          "compression": 0,
+          "filter": 0,
+          "interlace": 0
+        },
+        "idatCount": 1,
+        "idatBytes": 280,
+        "zlib": {
+          "cmf": 120,
+          "flg": 1
+        }
+      },
+      "tsChunks": {
+        "signatureOk": true,
+        "types": [
+          {
+            "type": "IHDR",
+            "len": 13
+          },
+          {
+            "type": "IDAT",
+            "len": 275
+          },
+          {
+            "type": "IEND",
+            "len": 0
+          }
+        ],
+        "ihdr": {
+          "width": 8,
+          "height": 8,
+          "bitDepth": 8,
+          "colorType": 6,
+          "compression": 0,
+          "filter": 0,
+          "interlace": 0
+        },
+        "idatCount": 1,
+        "idatBytes": 275,
+        "zlib": {
+          "cmf": 120,
+          "flg": 1
+        }
+      },
+      "note": "IHDR is identical (8×8, bitDepth 8, colorType 6 RGBA, non-interlaced). zlib CMF/FLG both 0x78 0x01 (no-compression). First mismatch is the IDAT length field (Go 280 vs TS 275) because Go still runs its per-row PNG filter heuristic at NoCompression; the png crate stored-deflate payload is 5 bytes shorter. Go does not promise PNG byte identity."
+    },
+    {
+      "name": "gif-NumColors-256",
+      "equal": false,
+      "goLen": 866,
+      "tsLen": 872,
+      "firstDiff": {
+        "offset": 10,
+        "go": 135,
+        "ts": 247
+      },
+      "goHeader": {
+        "version": "GIF89a",
+        "width": 8,
+        "height": 8,
+        "packed": 135,
+        "gctFlag": true,
+        "colorResolutionBits": 1,
+        "gctSize": 768
+      },
+      "tsHeader": {
+        "version": "GIF89a",
+        "width": 8,
+        "height": 8,
+        "packed": 247,
+        "gctFlag": true,
+        "colorResolutionBits": 8,
+        "gctSize": 768
+      },
+      "note": "Both GIF89a 8×8 with 256-entry GCT (768 bytes). Packed LSD differs: Go 0x87 (colorResolution 1-bit) vs TS 0xf7 (8-bit). Palette is Go median-cut vs rustd-image Plan9 prefix, so LZW stream differs. Not a publish gate."
+    },
+    {
+      "name": "gif-NumColors-16",
+      "equal": false,
+      "goLen": 101,
+      "tsLen": 101,
+      "firstDiff": {
+        "offset": 10,
+        "go": 131,
+        "ts": 179
+      },
+      "goHeader": {
+        "version": "GIF89a",
+        "width": 8,
+        "height": 8,
+        "packed": 131,
+        "gctFlag": true,
+        "colorResolutionBits": 1,
+        "gctSize": 48
+      },
+      "tsHeader": {
+        "version": "GIF89a",
+        "width": 8,
+        "height": 8,
+        "packed": 179,
+        "gctFlag": true,
+        "colorResolutionBits": 4,
+        "gctSize": 48
+      },
+      "note": "Same 101-byte length; first mismatch is packed LSD (Go 0x83 vs TS 0xb3). 16-entry GCT size matches; contents and LZW differ for the same quantizer reason."
+    }
+  ]
+}

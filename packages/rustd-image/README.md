@@ -73,6 +73,25 @@ through Go `png.Decode` with identical RGBA64 pixdump. `jpegEncode` is checked w
 PSNR ≥ 40 dB against the source (not pixel-identical). `gifEncode` bytes decode
 under Go `gif.Decode` to the same pixdump as `gifDecode`.
 
+Encode **bytes** vs Go (issue #19 §4.5, exploration only — not a publish gate;
+Go's `png.Encode` docs refuse byte-identity). Same 8×8 NRGBA sample as
+`gofixtures` `sampleNRGBA`, Go 1.25.0, 2026-09-14. Report:
+`test/encode-bytes-compare.json`.
+
+| Case | Equal? | Go bytes | TS bytes | First mismatch |
+| --- | --- | ---: | ---: | --- |
+| PNG `NoCompression` (`-1`) | no | 337 | 332 | offset 36 (IDAT length 280 vs 275) |
+| GIF `NumColors=256` | no | 866 | 872 | offset 10 (LSD packed 0x87 vs 0xf7) |
+| GIF `NumColors=16` | no | 101 | 101 | offset 10 (LSD packed 0x83 vs 0xb3) |
+
+PNG IHDR matches (RGBA8, non-interlaced) and both zlib wrappers are `78 01`.
+The IDAT payload differs because Go still picks per-row PNG filters at
+`NoCompression`; the `png` crate stored-deflate stream is 5 bytes shorter.
+GIF GCT **size** matches (256 / 16 entries); Go writes a smaller
+`colorResolution` in the packed LSD and fills the table with median-cut,
+while this package uses the Plan9 prefix (already listed above). LZW then
+diverges. Re-run: `nice -n 10 node --test packages/rustd-image/test/encode-bytes.test.mjs`.
+
 ```text
 $ ls -l packages/rustd-image/*.node
 -rwxrwxr-x 1 akrc akrc 882856 Sep 14 17:46 packages/rustd-image/rustd-image.linux-x64-gnu.node
