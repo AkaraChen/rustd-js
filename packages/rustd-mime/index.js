@@ -204,6 +204,11 @@ function mimeHeaderDel(header, key) {
   delete requireMIMEHeader(header)[canonicalMIMEHeaderKey(key)];
 }
 
+function fileContentDisposition(fieldname, filename) {
+  if (typeof fieldname !== 'string' || typeof filename !== 'string') throw new TypeError('mime: expected string');
+  return native(() => binding.fileContentDisposition(fieldname, filename));
+}
+
 function encodeWord(charset, s, enc) {
   if (typeof charset !== 'string' || typeof s !== 'string') throw new TypeError('mime: expected string');
   if (enc !== 'b' && enc !== 'q') throw new TypeError('mime: encoding must be b or q');
@@ -248,6 +253,25 @@ class MultipartWriter {
   createFormField(fieldname) {
     if (typeof fieldname !== 'string') throw new TypeError('mime: expected string');
     const partId = native(() => this._handle.createFormField(fieldname));
+    return new MultipartPartWriter(this._handle, partId);
+  }
+  createFormFile(fieldname, filename) {
+    if (typeof fieldname !== 'string' || typeof filename !== 'string') throw new TypeError('mime: expected string');
+    const partId = native(() => this._handle.createFormFile(fieldname, filename));
+    return new MultipartPartWriter(this._handle, partId);
+  }
+  createPart(header) {
+    const rec = requireMIMEHeader(header);
+    const fields = [];
+    for (const key of Object.keys(rec)) {
+      const values = rec[key];
+      if (!Array.isArray(values)) throw new TypeError('mime: MIMEHeader values must be string arrays');
+      for (const value of values) {
+        if (typeof value !== 'string') throw new TypeError('mime: MIMEHeader values must be strings');
+      }
+      fields.push({ key, values: values.slice() });
+    }
+    const partId = native(() => this._handle.createPart(fields));
     return new MultipartPartWriter(this._handle, partId);
   }
   writeField(fieldname, value) {
@@ -344,5 +368,5 @@ module.exports = {
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
-  MultipartWriter, MultipartReader, MultipartPart,
+  MultipartWriter, MultipartReader, MultipartPart, fileContentDisposition,
 };

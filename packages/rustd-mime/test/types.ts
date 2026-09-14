@@ -4,6 +4,7 @@ import {
   QuotedPrintableReader, QuotedPrintableWriter, InvalidMediaParameterError, type MediaType,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
   type MIMEHeader, MultipartWriter, MultipartReader, MultipartPart, MultipartError,
+  fileContentDisposition,
 } from '../index.js';
 const parsed: MediaType = parseMediaType('text/plain; charset=utf-8');
 const formatted: string = formatMediaType('text/plain', { charset: 'utf-8' });
@@ -34,6 +35,10 @@ mp.writeField('foo', 'bar');
 const part = mp.createFormField('baz');
 part.write(new Uint8Array([1, 2]));
 part.end();
+const filePart = mp.createFormFile('file', 'a.txt');
+filePart.write(new Uint8Array([3]));
+filePart.end();
+const disp: string = fileContentDisposition('file', 'a.txt');
 const mpBytes: Uint8Array = mp.bytes();
 const mpReader = new MultipartReader({ boundary: 'boundary' });
 mpReader.write(mpBytes);
@@ -49,4 +54,4 @@ const wrong: number = parsed;
 encodeWord('utf-8', 'x', 'x');
 // @ts-expect-error bytes required
 quotedPrintableEncode('ascii');
-void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, raw];
+void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, raw, disp];
