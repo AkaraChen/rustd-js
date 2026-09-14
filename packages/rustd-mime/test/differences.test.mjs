@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as api from '../index.mjs';
 
-test('multipart 1-byte nextPart is in; ReadForm later (checkpoint 17)', () => {
+test('multipart mid-boundary nextPart is in; ReadForm later (checkpoint 18)', () => {
   assert.equal(typeof api.MultipartWriter, 'function');
   assert.equal(typeof api.MultipartWriter.prototype.createFormFile, 'function');
   assert.equal(typeof api.MultipartWriter.prototype.createPart, 'function');

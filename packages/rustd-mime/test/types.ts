@@ -46,6 +46,11 @@ const next: MultipartPart | null = mpReader.nextPart();
 const streamed = new MultipartReader({ boundary: 'boundary' });
 for (let i = 0; i < mpBytes.length; i++) streamed.write(mpBytes.subarray(i, i + 1));
 const streamedPart: MultipartPart | null = streamed.nextPart();
+const mid = new MultipartReader({ boundary: 'boundary' });
+const cut = Math.max(1, Math.min(mpBytes.length - 1, 4));
+mid.write(mpBytes.subarray(0, cut));
+mid.write(mpBytes.subarray(cut));
+const midPart: MultipartPart | null = mid.nextPart();
 const raw: MultipartPart | null = mpReader.nextRawPart();
 const formName: string = next?.formName() ?? '';
 const fileName: string = next?.fileName() ?? '';
@@ -57,4 +62,4 @@ const wrong: number = parsed;
 encodeWord('utf-8', 'x', 'x');
 // @ts-expect-error bytes required
 quotedPrintableEncode('ascii');
-void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, raw, disp, streamedPart];
+void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, raw, disp, streamedPart, midPart];

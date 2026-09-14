@@ -70,6 +70,57 @@ function readAll1Byte(boundary, body, raw = false) {
   return parts;
 }
 
+/** mulberry32; issue #9 §4.3c requires a fixed seed so mid-boundary splits are reproducible. */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function splitNearBoundary(body, boundary, seed) {
+  body = Buffer.from(body);
+  const token = Buffer.from(`--${boundary}`);
+  const cuts = new Set([0, body.length]);
+  const rng = mulberry32(seed);
+  let from = 0;
+  while (from <= body.length - token.length) {
+    const idx = body.indexOf(token, from);
+    if (idx < 0) break;
+    const interior = 1 + Math.floor(rng() * (token.length - 1));
+    cuts.add(idx + interior);
+    if (rng() < 0.5 && idx > 0) cuts.add(idx);
+    if (rng() < 0.5) cuts.add(Math.min(body.length, idx + token.length));
+    from = idx + 1;
+  }
+  const points = [...cuts].sort((a, b) => a - b);
+  const chunks = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    if (points[i] < points[i + 1]) chunks.push(body.subarray(points[i], points[i + 1]));
+  }
+  return chunks;
+}
+
+function readAllChunks(boundary, chunks, raw = false) {
+  const reader = new MultipartReader({ boundary });
+  const parts = [];
+  for (const chunk of chunks) {
+    reader.write(chunk);
+    drain(reader, parts, raw);
+  }
+  drain(reader, parts, raw);
+  return parts;
+}
+
+function readAllRandomNearBoundary(boundary, body, seed, raw = false) {
+  return readAllChunks(boundary, splitNearBoundary(body, boundary, seed), raw);
+}
+
+const MID_BOUNDARY_SEED = 0x4d494d45; // 'MIME'
+
 test('nextPart of Go Writer one-part body matches Go NewReader', () => {
   const fields = [{ name: 'foo', value: 'bar', mode: 'writeField' }];
   const golden = goWrite(fields, 'boundary');
@@ -329,6 +380,73 @@ test('nextPart returns null (does not throw) after a 1-byte prefix', () => {
   reader.write(body.subarray(0, 1));
   assert.equal(reader.nextPart(), null);
   reader.write(body.subarray(1));
+  const part = reader.nextPart();
+  assert.equal(part.formName(), 'only');
+  assert.equal(hex(part.read()), hex(Buffer.from('x')));
+  assert.equal(reader.nextPart(), null);
+});
+
+function assertThreeFeedModes(boundary, body, raw = false) {
+  const whole = readAll(boundary, body, raw);
+  const oneByte = readAll1Byte(boundary, body, raw);
+  const mid = readAllRandomNearBoundary(boundary, body, MID_BOUNDARY_SEED, raw);
+  assert.deepEqual(oneByte, whole);
+  assert.deepEqual(mid, whole);
+  const chunks = splitNearBoundary(body, boundary, MID_BOUNDARY_SEED);
+  assert.ok(chunks.some((c) => c.length > 1), 'mid-boundary feed uses multi-byte chunks');
+  assert.ok(chunks.length > 1, 'mid-boundary feed actually splits the body');
+  return whole;
+}
+
+test('nextPart random mid-boundary splits match whole-body and 1-byte for Go Writer fields', () => {
+  const fields = [
+    { name: 'foo', value: 'bar', mode: 'writeField' },
+    { name: 'a"b', value: 'x\\y', mode: 'writeField' },
+    { name: 'empty', value: '', mode: 'writeField' },
+    { name: 'keep', value: 'hello--boundary--world', mode: 'writeField' },
+  ];
+  const golden = goWrite(fields, 'boundary');
+  const body = unhex(golden.bodyHex);
+  const whole = assertThreeFeedModes('boundary', body);
+  assertPartsMatch(whole, goRead(body, 'boundary'));
+});
+
+test('nextPart random mid-boundary splits match whole-body and 1-byte for native createPart/createFormFile', () => {
+  const w = new MultipartWriter({ boundary: 'xyzzy' });
+  w.createPart({ 'Content-Disposition': ['form-data; name="note"'] }).write(Buffer.from('hi'));
+  const file = w.createFormFile('file', 'a.txt');
+  file.write(Buffer.from([0, 255, 10]));
+  file.end();
+  const body = w.bytes();
+  const whole = assertThreeFeedModes('xyzzy', body);
+  assertPartsMatch(whole, goRead(body, 'xyzzy'));
+});
+
+test('nextPart random mid-boundary splits match whole-body and 1-byte for quoted-printable CTE', () => {
+  const body = qpFormBody('quoted-printable');
+  const boundary = '0016e68ee29c5d515f04cedf6733';
+  const whole = assertThreeFeedModes(boundary, body);
+  assertPartsMatch(whole, goRead(body, boundary));
+});
+
+test('nextRawPart random mid-boundary splits match whole-body and 1-byte', () => {
+  const body = Buffer.from(
+    `--0016e68ee29c5d515f04cedf6733\r\nContent-Type: text/plain; charset="utf-8"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n<div dir=3D"ltr">Hello World.</div>\r\n--0016e68ee29c5d515f04cedf6733--`,
+  );
+  const boundary = '0016e68ee29c5d515f04cedf6733';
+  assertThreeFeedModes(boundary, body, true);
+});
+
+test('nextPart returns null after a chunk that ends inside the opening boundary', () => {
+  const golden = goWrite([{ name: 'only', value: 'x', mode: 'writeField' }], 'boundary');
+  const body = unhex(golden.bodyHex);
+  const token = Buffer.from('--boundary');
+  const idx = body.indexOf(token);
+  assert.ok(idx >= 0);
+  const reader = new MultipartReader({ boundary: 'boundary' });
+  reader.write(body.subarray(0, idx + 4)); // '--bo'
+  assert.equal(reader.nextPart(), null);
+  reader.write(body.subarray(idx + 4));
   const part = reader.nextPart();
   assert.equal(part.formName(), 'only');
   assert.equal(hex(part.read()), hex(Buffer.from('x')));
