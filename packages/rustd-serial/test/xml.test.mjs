@@ -75,6 +75,16 @@ const decodeSchemas = {
       { name: 'f', kind: 'element', type: 'float' },
     ],
   },
+  mix: {
+    name: 'mix',
+    kind: 'element',
+    children: [
+      { name: 'a', kind: 'element', type: 'string' },
+      { name: 'msg', kind: 'comment', type: 'string' },
+      { name: 'inner', kind: 'any', type: 'string' },
+      { name: 'b', kind: 'element', type: 'string' },
+    ],
+  },
 };
 
 function go(args = [], input) {
@@ -196,6 +206,23 @@ test('Go regenerates committed XML fixtures; native tokens/escape/marshal match'
     const viaDecoder = new XmlDecoder(xml).decode(schema);
     assert.deepEqual(viaDecoder, got, `${c.id} XmlDecoder.decode`);
   }
+
+  assert.ok((packet.encodes ?? []).length >= 12, `encodes ${packet.encodes?.length}`);
+  for (const c of packet.encodes) {
+    const schema = decodeSchemas[c.kind];
+    assert.ok(schema, `${c.id} schema ${c.kind}`);
+    if (c.error) {
+      assert.throws(() => xmlMarshal(c.value, schema), (err) => {
+        assert.equal(err.message, c.error, `${c.id} error`);
+        return true;
+      }, c.id);
+      continue;
+    }
+    const produced = c.indent
+      ? xmlMarshalIndent(c.value, schema, c.prefix ?? '', c.indent)
+      : xmlMarshal(c.value, schema);
+    assert.equal(hex(produced), c.xmlHex, `${c.id} ${Buffer.from(produced).toString()}`);
+  }
 });
 
 test('JS-generated XML verifies against Go', () => {
@@ -211,12 +238,15 @@ test('JS-generated XML verifies against Go', () => {
     { id: 'js-items', kind: 'items', xmlHex: hex(xmlMarshal({ item: ['p', 'q'] }, decodeSchemas.items)) },
     { id: 'js-omit', kind: 'omit', xmlHex: hex(xmlMarshal({ a: '', b: 0, c: 'keep' }, decodeSchemas.omit)) },
     { id: 'js-flags', kind: 'flags', xmlHex: hex(xmlMarshal({ on: false, n: 2, f: 0.5 }, decodeSchemas.flags)) },
+    { id: 'js-comment', kind: 'comment', xmlHex: hex(xmlMarshal({ msg: 'hi-' }, decodeSchemas.comment)) },
+    { id: 'js-inner', kind: 'inner', xmlHex: hex(xmlMarshal({ inner: '<x>1</x><y>2</y>' }, decodeSchemas.inner)) },
+    { id: 'js-mix', kind: 'mix', xmlHex: hex(xmlMarshal({ a: '1', msg: 'c', inner: '<z/>', b: '2' }, decodeSchemas.mix)) },
   ];
   const verified = go(['-pkg', 'serial-xml', '-verify'], JSON.stringify({
     schema: 1, package: 'serial-xml', people, decodes,
   }));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 9 serial-xml encode cases/);
+  assert.match(verified.stdout, /Go verified 12 serial-xml encode cases/);
 });
 
 test('xmllint parses native marshal output', () => {
@@ -285,6 +315,19 @@ test('HTML helpers, header, skip, encoder tokens, indent', () => {
   assert.equal(Buffer.from(enc.bytes()).toString(), '<a>x&lt;y</a>');
   const indented = xmlMarshalIndent({ id: 1, name: 'A', age: 2 }, personSchema, '', '  ');
   assert.match(Buffer.from(indented).toString(), /\n  <name>/);
+
+  const cmtEnc = new XmlEncoder();
+  cmtEnc.encodeToken({ type: 'comment', text: 'a--b' });
+  cmtEnc.flush();
+  assert.equal(Buffer.from(cmtEnc.bytes()).toString(), '<!--a--b-->');
+  assert.throws(
+    () => xmlMarshal({ msg: 'a--b' }, decodeSchemas.comment),
+    (err) => err.message === 'xml: comments must not contain "--"',
+  );
+  assert.throws(
+    () => new XmlEncoder().encodeToken({ type: 'comment', text: 'a-->b' }),
+    (err) => String(err.message).includes('EncodeToken of Comment containing --> marker'),
+  );
 });
 
 test('DefaultSpace, charsetReader, and type errors', () => {

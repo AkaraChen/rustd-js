@@ -63,6 +63,16 @@ type XmlDecodeCase struct {
 	Value  json.RawMessage `json:"value"`
 }
 
+type XmlEncodeCase struct {
+	ID     string          `json:"id"`
+	Kind   string          `json:"kind"`
+	XMLHex string          `json:"xmlHex,omitempty"`
+	Value  json.RawMessage `json:"value"`
+	Error  string          `json:"error,omitempty"`
+	Prefix string          `json:"prefix,omitempty"`
+	Indent string          `json:"indent,omitempty"`
+}
+
 type XmlPacket struct {
 	Schema  int              `json:"schema"`
 	Package string           `json:"package"`
@@ -70,6 +80,7 @@ type XmlPacket struct {
 	Escapes []XmlEscapeCase  `json:"escapes"`
 	Marshal []XmlMarshalCase `json:"marshal"`
 	Decodes []XmlDecodeCase  `json:"decodes"`
+	Encodes []XmlEncodeCase  `json:"encodes"`
 }
 
 type Person struct {
@@ -263,6 +274,7 @@ func generateXml() XmlPacket {
 		Escapes: escapes,
 		Marshal: marshals,
 		Decodes: generateXmlDecodes(),
+		Encodes: generateXmlEncodes(),
 	}
 }
 
@@ -312,6 +324,14 @@ type xmlFlags struct {
 	F       float64  `xml:"f"`
 }
 
+type xmlMix struct {
+	XMLName xml.Name `xml:"mix"`
+	A       string   `xml:"a"`
+	Msg     string   `xml:",comment"`
+	Inner   string   `xml:",innerxml"`
+	B       string   `xml:"b"`
+}
+
 func decodeCase(id, kind string, xmlBytes []byte, value any) XmlDecodeCase {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -326,6 +346,51 @@ func mustXML(v any) []byte {
 		fail(err)
 	}
 	return b
+}
+
+func encodeCase(id, kind string, xmlBytes []byte, value any, errMsg, prefix, indent string) XmlEncodeCase {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		fail(err)
+	}
+	c := XmlEncodeCase{ID: id, Kind: kind, Value: raw, Error: errMsg, Prefix: prefix, Indent: indent}
+	if xmlBytes != nil {
+		c.XMLHex = hx(xmlBytes)
+	}
+	return c
+}
+
+func generateXmlEncodes() []XmlEncodeCase {
+	indentCmt, err := xml.MarshalIndent(xmlCmt{Msg: "hi"}, "", "  ")
+	if err != nil {
+		fail(err)
+	}
+	indentInner, err := xml.MarshalIndent(xmlWrap{Inner: "<x>1</x>"}, "", "  ")
+	if err != nil {
+		fail(err)
+	}
+	dashErr := ""
+	if _, err := xml.Marshal(xmlCmt{Msg: "a--b"}); err != nil {
+		dashErr = err.Error()
+	} else {
+		fail(fmt.Errorf("expected comment -- error"))
+	}
+	return []XmlEncodeCase{
+		encodeCase("comment-hi", "comment", mustXML(xmlCmt{Msg: "hi"}), map[string]any{"msg": "hi"}, "", "", ""),
+		encodeCase("comment-empty", "comment", mustXML(xmlCmt{Msg: ""}), map[string]any{"msg": ""}, "", "", ""),
+		encodeCase("comment-spaces", "comment", mustXML(xmlCmt{Msg: " hi "}), map[string]any{"msg": " hi "}, "", "", ""),
+		encodeCase("comment-enddash", "comment", mustXML(xmlCmt{Msg: "hi-"}), map[string]any{"msg": "hi-"}, "", "", ""),
+		encodeCase("comment-xml", "comment", mustXML(xmlCmt{Msg: "<x>"}), map[string]any{"msg": "<x>"}, "", "", ""),
+		encodeCase("comment-amp", "comment", mustXML(xmlCmt{Msg: "a&b"}), map[string]any{"msg": "a&b"}, "", "", ""),
+		encodeCase("comment-dash", "comment", nil, map[string]any{"msg": "a--b"}, dashErr, "", ""),
+		encodeCase("inner-xy", "inner", mustXML(xmlWrap{Inner: "<x>1</x><y>2</y>"}), map[string]any{"inner": "<x>1</x><y>2</y>"}, "", "", ""),
+		encodeCase("inner-empty", "inner", mustXML(xmlWrap{Inner: ""}), map[string]any{"inner": ""}, "", "", ""),
+		encodeCase("inner-text", "inner", mustXML(xmlWrap{Inner: "raw & <notag>"}), map[string]any{"inner": "raw & <notag>"}, "", "", ""),
+		encodeCase("inner-comment", "inner", mustXML(xmlWrap{Inner: "<!--z-->"}), map[string]any{"inner": "<!--z-->"}, "", "", ""),
+		encodeCase("mix-order", "mix", mustXML(xmlMix{A: "1", Msg: "c", Inner: "<z/>", B: "2"}), map[string]any{"a": "1", "msg": "c", "inner": "<z/>", "b": "2"}, "", "", ""),
+		encodeCase("comment-indent", "comment", indentCmt, map[string]any{"msg": "hi"}, "", "", "  "),
+		encodeCase("inner-indent", "inner", indentInner, map[string]any{"inner": "<x>1</x>"}, "", "", "  "),
+	}
 }
 
 func generateXmlDecodes() []XmlDecodeCase {
@@ -457,6 +522,11 @@ func verifyXml(packet XmlVerifyPacket) {
 			}
 		case "flags":
 			var v xmlFlags
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "mix":
+			var v xmlMix
 			if err := xml.Unmarshal(raw, &v); err != nil {
 				fail(fmt.Errorf("%s: %v", c.ID, err))
 			}
