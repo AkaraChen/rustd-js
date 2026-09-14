@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -839,6 +839,215 @@ test('gosym pcToFunc/pcToLine vs go tool objdump at each TEXT entry; FuncInfo vs
   assert.equal(helper.base, 'helper');
 
   file.close();
+});
+
+function git(args, opts = {}) {
+  const result = spawnSync('git', args, {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { ...process.env, GIT_AUTHOR_NAME: 'rustd-debugfmt', GIT_AUTHOR_EMAIL: 'fixture@rustd-js.test', GIT_COMMITTER_NAME: 'rustd-debugfmt', GIT_COMMITTER_EMAIL: 'fixture@rustd-js.test' },
+    ...opts,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(' ')} failed: ${result.stderr}${result.stdout}`);
+  }
+  return result;
+}
+
+function parseGoQuoted(raw) {
+  if (!raw) return '';
+  if (raw[0] !== '"' && raw[0] !== '`') return raw;
+  return JSON.parse(raw.includes('\\') || raw.startsWith('"') ? raw : JSON.stringify(raw.slice(1, -1)));
+}
+
+function parseBuildSetting(kv) {
+  let key;
+  let rest;
+  if (kv[0] === '"' || kv[0] === '`') {
+    const end = kv.indexOf(kv[0], 1);
+    assert.ok(end > 0 && kv[end + 1] === '=', `quoted build key: ${kv}`);
+    key = parseGoQuoted(kv.slice(0, end + 1));
+    rest = kv.slice(end + 2);
+  } else {
+    const eq = kv.indexOf('=');
+    assert.ok(eq > 0, `build line missing '=': ${kv}`);
+    key = kv.slice(0, eq);
+    rest = kv.slice(eq + 1);
+  }
+  const value = rest.startsWith('"') || rest.startsWith('`') ? parseGoQuoted(rest) : rest;
+  return { key, value };
+}
+
+function parseModuleCols(cols) {
+  return { path: cols[0] ?? '', version: cols[1] ?? '', sum: cols[2] ?? '' };
+}
+
+function parseGoVersionM(stdout) {
+  const lines = stdout.split('\n');
+  const header = lines[0] ?? '';
+  const colon = header.lastIndexOf(': ');
+  assert.ok(colon > 0, `go version -m header: ${header}`);
+  const info = {
+    goVersion: header.slice(colon + 2),
+    path: '',
+    main: { path: '', version: '', sum: '' },
+    deps: [],
+    settings: [],
+  };
+  let last = null;
+  for (const raw of lines.slice(1)) {
+    if (!raw) continue;
+    const line = raw.startsWith('\t') ? raw.slice(1) : raw;
+    if (!line) continue;
+    if (line.startsWith('path\t')) {
+      info.path = line.slice(5);
+    } else if (line.startsWith('mod\t')) {
+      info.main = parseModuleCols(line.slice(4).split('\t'));
+      last = info.main;
+    } else if (line.startsWith('dep\t')) {
+      const dep = parseModuleCols(line.slice(4).split('\t'));
+      info.deps.push(dep);
+      last = dep;
+    } else if (line.startsWith('=>\t')) {
+      assert.ok(last, `replacement with no module: ${line}`);
+      last.replace = parseModuleCols(line.slice(3).split('\t'));
+      last = null;
+    } else if (line.startsWith('build\t')) {
+      info.settings.push(parseBuildSetting(line.slice(6)));
+    }
+  }
+  return info;
+}
+
+function quoteBuildKey(key) {
+  return key.length === 0 || /[= \t\r\n"`]/.test(key);
+}
+
+function quoteBuildValue(value) {
+  return /[ \t\r\n"`]/.test(value);
+}
+
+function formatModuleLines(word, m) {
+  if (m.replace) {
+    return [`${word}\t${m.path}\t${m.version}`, ...formatModuleLines('=>', m.replace), ''];
+  }
+  return [`${word}\t${m.path}\t${m.version}\t${m.sum ?? ''}`];
+}
+
+function formatBuildInfoBody(info) {
+  const lines = [];
+  if (info.path) lines.push(`path\t${info.path}`);
+  if (info.main?.path || info.main?.version) lines.push(...formatModuleLines('mod', info.main));
+  for (const dep of info.deps ?? []) lines.push(...formatModuleLines('dep', dep));
+  for (const s of info.settings ?? []) {
+    const key = quoteBuildKey(s.key) ? JSON.stringify(s.key) : s.key;
+    const value = quoteBuildValue(s.value) ? JSON.stringify(s.value) : s.value;
+    lines.push(`build\t${key}=${value}`);
+  }
+  return lines;
+}
+
+function buildVcsHello() {
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-buildinfo-'));
+  mkdirSync(join(dir, 'leaf'));
+  writeFileSync(join(dir, 'go.mod'), `module rustd-debugfmt-gofixtures
+
+go 1.24
+
+require example.com/leaf v0.0.0
+replace example.com/leaf => ./leaf
+`);
+  writeFileSync(join(dir, 'leaf/go.mod'), 'module example.com/leaf\n\ngo 1.24\n');
+  writeFileSync(join(dir, 'leaf/leaf.go'), 'package leaf\n\nfunc Version() string { return "leaf" }\n');
+  writeFileSync(join(dir, 'main.go'), `package main
+
+import (
+	"fmt"
+	"example.com/leaf"
+)
+
+var version = "dev"
+
+type Box struct {
+	Label string
+}
+
+//go:noinline
+func (b *Box) Name() string { return b.Label }
+
+func helper(n int) int {
+	if n < 2 {
+		return n
+	}
+	return helper(n-1) + helper(n-2)
+}
+
+//go:noinline
+func opaque() int { return 3 }
+
+func inlineAdd(a, b int) int { return a + b }
+
+func inlineMul(a, b int) int { return inlineAdd(a, 1) + a*b }
+
+func main() {
+	box := &Box{Label: version}
+	x := opaque()
+	fmt.Println(box.Name(), helper(8), inlineMul(x, x+1), leaf.Version())
+}
+`);
+  git(['init', '-q'], { cwd: dir });
+  git(['add', '.'], { cwd: dir });
+  git(['commit', '-qm', 'fixture'], { cwd: dir });
+  const revision = git(['rev-parse', 'HEAD'], { cwd: dir }).stdout.trim();
+  const out = join(dir, 'hello');
+  const built = go(['build', '-buildvcs=true', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+    cwd: dir,
+    env: { ...process.env, GOWORK: 'off', CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'amd64' },
+  });
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+  return { dir, out, revision };
+}
+
+test('buildInfo() vs go version -m line equality for goVersion/path/main/deps/settings (issue #18 §4.5)', () => {
+  assert.equal(process.arch, 'x64');
+  const { out, revision } = buildVcsHello();
+  const version = go(['version', '-m', out]);
+  assert.equal(version.status, 0, version.stderr);
+  const expected = parseGoVersionM(version.stdout);
+
+  const file = open(out);
+  const info = file.buildInfo();
+  file.close();
+  assert.ok(info, 'Go binary must expose buildinfo');
+
+  assert.equal(info.goVersion, expected.goVersion);
+  assert.equal(info.path, expected.path);
+  assert.deepEqual(info.main, expected.main);
+  assert.deepEqual(info.deps, expected.deps);
+  assert.deepEqual(info.settings, expected.settings);
+
+  const header = (version.stdout.split('\n')[0] ?? '');
+  assert.equal(header.slice(header.lastIndexOf(': ') + 2), info.goVersion);
+  const gotBody = formatBuildInfoBody(info);
+  const wantBody = version.stdout
+    .split('\n')
+    .slice(1)
+    .filter((raw) => raw.length > 0)
+    .map((raw) => (raw.startsWith('\t') ? raw.slice(1) : raw));
+  while (wantBody.length && wantBody[wantBody.length - 1] === '') wantBody.pop();
+  while (gotBody.length && gotBody[gotBody.length - 1] === '') gotBody.pop();
+  assert.deepEqual(gotBody, wantBody);
+
+  const byKey = Object.fromEntries(info.settings.map((s) => [s.key, s.value]));
+  assert.equal(byKey['vcs.revision'], revision);
+  assert.match(byKey['-ldflags'] ?? '', /main\.version=1\.2\.3/);
+  assert.equal(info.deps.length, 1);
+  assert.equal(info.deps[0].path, 'example.com/leaf');
+  assert.equal(info.deps[0].replace?.path, './leaf');
+
+  const fromFile = readBuildInfoFile(out);
+  assert.deepEqual(fromFile, info);
 });
 
 void UnsupportedFeatureError;
