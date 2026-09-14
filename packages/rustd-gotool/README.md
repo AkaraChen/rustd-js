@@ -5,11 +5,12 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 4 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
-`go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`, plus
-`GoParseError.list` / `partialFile` error recovery vs Go. `go/format` / `gofmt`,
-`go/constant`, and `go/build/constraint` are **not** in this release. API is
-`0.x` and unstable.
+Checkpoint 5 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+`go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
+`GoParseError` recovery, plus §4.8 edges (empty, comments-only, illegal UTF-8,
+unclosed comment/string, nested parens, `_` type parameters). `go/format` /
+`gofmt`, `go/constant`, and `go/build/constraint` are **not** in this release.
+API is `0.x` and unstable.
 
 ```js
 import {
@@ -60,14 +61,18 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   magnitude, plus top-level `decls.length`. Error *wording* is recorded when it
   differs (`test/parse-error-msg-diffs.json`; AllErrors same-offset permutation
   only in this checkpoint) and is not a pass/fail criterion.
+- Nesting depth is capped at 1024 (`exceeded max nesting depth`) so a native
+  thread cannot stack-overflow. Go's `go/parser` allows 1e5 because goroutine
+  stacks grow. Inputs Go still accepts past 1024 levels are reported as parse
+  errors here. `go/format` is still deferred.
 - `ast.Fprint` is the debug printer, not `gofmt`. `go/format` is not shipped.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **667,672 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **667,608 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 667672 Sep 14 18:00 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 667608 Sep 14 18:28 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```

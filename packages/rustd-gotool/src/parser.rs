@@ -16,7 +16,9 @@ pub const SKIP_OBJECT_RESOLUTION: u32 = 1 << 6;
 const BASIC: i32 = 0;
 const LABEL_OK: i32 = 1;
 const RANGE_OK: i32 = 2;
-const MAX_NEST: i32 = 100_000;
+// Go's go/parser uses 1e5 because goroutine stacks grow. Native thread
+// stacks do not, so we cap lower and still report the same error string.
+const MAX_NEST: i32 = 1_024;
 
 struct ParseErr {
     filename: String,
@@ -46,6 +48,7 @@ struct Parser {
     imports: Vec<Rc<Spec>>,
     nest_lev: i32,
     bailed: bool,
+    nest_overflow: bool,
 }
 
 fn push<T>(slot: &mut Option<Vec<T>>, x: T) {
@@ -75,6 +78,7 @@ impl Parser {
             imports: Vec::new(),
             nest_lev: 0,
             bailed: false,
+            nest_overflow: false,
         };
         p.next()?;
         Ok(p)
@@ -85,6 +89,8 @@ impl Parser {
         if self.nest_lev > MAX_NEST {
             self.error(self.pos, "exceeded max nesting depth")?;
             self.bailed = true;
+            self.nest_overflow = true;
+            return Err(Error::from_reason("exceeded max nesting depth"));
         }
         Ok(())
     }
@@ -2825,7 +2831,11 @@ pub fn parse_source(fset: &FileSet, filename: String, src: &[u8], mode: u32, as_
     let file = fset.add_file(filename, -1, src.len() as i64)?;
     let mut p = Parser::init(file, src, mode)?;
     if as_expr {
-        let expr = p.parse_rhs().ok();
+        let expr = match p.parse_rhs() {
+            Ok(e) => Some(e),
+            Err(_) if p.nest_overflow => None,
+            Err(e) => return Err(e),
+        };
         if p.tok == token::SEMICOLON && p.lit == "\n" {
             let _ = p.next();
         }
@@ -2840,7 +2850,11 @@ pub fn parse_source(fset: &FileSet, filename: String, src: &[u8], mode: u32, as_
                 .collect(),
         });
     }
-    let mut ast = p.parse_file()?;
+    let mut ast = match p.parse_file() {
+        Ok(f) => f,
+        Err(_) if p.nest_overflow => None,
+        Err(e) => return Err(e),
+    };
     let base = p.file.base_i32()?;
     let size = p.file.size_i32()?;
     if let Some(f) = ast.as_mut() {

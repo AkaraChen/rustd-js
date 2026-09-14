@@ -102,6 +102,8 @@ func main() {
 	verifyParseFlag := flag.Bool("verify-parse", false, "verify a parser packet read from stdin")
 	parseErrorsFlag := flag.Bool("parse-errors", false, "dump go/parser error-recovery fixtures")
 	verifyParseErrorsFlag := flag.Bool("verify-parse-errors", false, "verify a parse-error packet read from stdin")
+	parseEdgesFlag := flag.Bool("parse-edges", false, "dump go/parser issue #28 §4.8 boundary fixtures")
+	verifyParseEdgesFlag := flag.Bool("verify-parse-edges", false, "verify a parse-edge packet read from stdin")
 	flag.Parse()
 	if *verifyScanFlag {
 		verifyScan(os.Stdin)
@@ -113,6 +115,23 @@ func main() {
 	}
 	if *verifyParseErrorsFlag {
 		verifyParseErrors(os.Stdin)
+		return
+	}
+	if *verifyParseEdgesFlag {
+		verifyParseEdges(os.Stdin)
+		return
+	}
+	if *parseEdgesFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpParseEdges(writer)
 		return
 	}
 	if *parseErrorsFlag {

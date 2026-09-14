@@ -226,6 +226,124 @@ func verifyParseErrors(r io.Reader) {
 	fmt.Printf("Go verified %d gotool-parse-errors cases\n", len(packet.Cases))
 }
 
+type ParseEdgeCase struct {
+	ID        string     `json:"id"`
+	Filename  string     `json:"filename"`
+	SrcB64    string     `json:"srcB64"`
+	Mode      uint       `json:"mode"`
+	Kind      string     `json:"kind"`
+	Fprint    string     `json:"fprint"`
+	Errors    []ParseErr `json:"errors"`
+	DeclCount int        `json:"declCount"`
+	NilFile   bool       `json:"nilFile"`
+}
+
+type ParseEdgePacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Cases   []ParseEdgeCase `json:"cases"`
+}
+
+func nestParens(n int) []byte {
+	src := []byte("package p\nvar x = ")
+	for i := 0; i < n; i++ {
+		src = append(src, '(')
+	}
+	src = append(src, '1')
+	for i := 0; i < n; i++ {
+		src = append(src, ')')
+	}
+	src = append(src, '\n')
+	return src
+}
+
+func dumpParseEdgeCase(id, filename, kind string, src []byte, mode parser.Mode) ParseEdgeCase {
+	c := dumpParseCase(id, filename, kind, src, mode)
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, src, mode)
+	declCount := 0
+	if f != nil {
+		declCount = len(f.Decls)
+	}
+	return ParseEdgeCase{
+		ID:        c.ID,
+		Filename:  c.Filename,
+		SrcB64:    c.SrcB64,
+		Mode:      c.Mode,
+		Kind:      c.Kind,
+		Fprint:    c.Fprint,
+		Errors:    errorList(err),
+		DeclCount: declCount,
+		NilFile:   f == nil,
+	}
+}
+
+func parseEdgeCorpus() []ParseEdgeCase {
+	mode := parseModes()
+	illegal := append([]byte("package p\n"), 0xff, 0xfe)
+	illegalIdent := append([]byte("package p\nvar "), 0xff)
+	illegalIdent = append(illegalIdent, []byte("x int\n")...)
+	return []ParseEdgeCase{
+		dumpParseEdgeCase("empty", "empty.go", "file", []byte(""), mode),
+		dumpParseEdgeCase("comments-only", "comments-only.go", "file", []byte("// only\n/* still only */\n"), mode),
+		dumpParseEdgeCase("illegal-utf8", "illegal-utf8.go", "file", illegal, mode),
+		dumpParseEdgeCase("illegal-utf8-ident", "illegal-utf8-ident.go", "file", illegalIdent, mode),
+		dumpParseEdgeCase("unclosed-comment", "unclosed-comment.go", "file", []byte("package p\n/* unclosed\n"), mode),
+		dumpParseEdgeCase("unclosed-string", "unclosed-string.go", "file", []byte("package p\nvar s = \"hi\n"), mode),
+		dumpParseEdgeCase("underscore-tparam", "underscore-tparam.go", "file", []byte("package p\nfunc F[_ any]() {}\n"), mode),
+		dumpParseEdgeCase("deep-nest-32", "deep-nest-32.go", "file", nestParens(32), mode),
+	}
+}
+
+func dumpParseEdges(writer io.Writer) {
+	packet := ParseEdgePacket{Schema: 1, Package: "gotool-parse-edges", Go: "go1.24.13", Cases: parseEdgeCorpus()}
+	enc := json.NewEncoder(writer)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyParseEdges(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 64<<20))
+	dec.DisallowUnknownFields()
+	var packet ParseEdgePacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool-parse-edges" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid parse-edge packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		src, err := base64.StdEncoding.DecodeString(c.SrcB64)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s src: %w", i, c.ID, err))
+		}
+		got := dumpParseEdgeCase(c.ID, c.Filename, c.Kind, src, parser.Mode(c.Mode))
+		// Synthetic empty *ast.File (package-clause failure) includes a Scope
+		// that SkipObjectResolution success paths leave nil. Error cases compare
+		// positions and decl counts, not Fprint.
+		if len(got.Errors) == 0 && got.Fprint != c.Fprint {
+			fail(fmt.Errorf("mismatch case %d id=%s fprint\n-- go --\n%s\n-- packet --\n%s", i, c.ID, got.Fprint, c.Fprint))
+		}
+		if got.DeclCount != c.DeclCount || got.NilFile != c.NilFile || len(got.Errors) != len(c.Errors) {
+			fail(fmt.Errorf("mismatch case %d id=%s decls/nil/count go=(%d,%v,%d) packet=(%d,%v,%d)",
+				i, c.ID, got.DeclCount, got.NilFile, len(got.Errors), c.DeclCount, c.NilFile, len(c.Errors)))
+		}
+		for j := range got.Errors {
+			if !sameParseErrPos(got.Errors[j], c.Errors[j]) {
+				fail(fmt.Errorf("mismatch case %d id=%s error[%d] pos go=%+v packet=%+v", i, c.ID, j, got.Errors[j], c.Errors[j]))
+			}
+		}
+	}
+	fmt.Printf("Go verified %d gotool-parse-edges cases\n", len(packet.Cases))
+}
+
 func verifyParse(r io.Reader) {
 	dec := json.NewDecoder(io.LimitReader(r, 64<<20))
 	dec.DisallowUnknownFields()
