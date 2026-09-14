@@ -1,0 +1,677 @@
+{
+  "schema": 1,
+  "package": "iotest",
+  "goVersion": "go1.24.13",
+  "sequences": [
+    {
+      "id": "oneByte/hello/buf0",
+      "wrap": "oneByte",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 0,
+      "calls": [
+        {
+          "n": 0,
+          "err": "",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "oneByte/hello/buf1",
+      "wrap": "oneByte",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 1,
+      "calls": [
+        {
+          "n": 1,
+          "err": "",
+          "hex": "48"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "65"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "2c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "20"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "57"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "72"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "oneByte/hello/buf3",
+      "wrap": "oneByte",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 3,
+      "calls": [
+        {
+          "n": 1,
+          "err": "",
+          "hex": "48"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "65"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "2c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "20"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "57"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "72"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "oneByte/hello/buf16",
+      "wrap": "oneByte",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 16,
+      "calls": [
+        {
+          "n": 1,
+          "err": "",
+          "hex": "48"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "65"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "2c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "20"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "57"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "72"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "oneByte/empty/buf5",
+      "wrap": "oneByte",
+      "contentHex": "",
+      "bufSize": 5,
+      "calls": [
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "half/hello/buf0",
+      "wrap": "half",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 0,
+      "calls": [
+        {
+          "n": 0,
+          "err": "",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "half/hello/buf1",
+      "wrap": "half",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 1,
+      "calls": [
+        {
+          "n": 1,
+          "err": "",
+          "hex": "48"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "65"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "2c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "20"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "57"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "72"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "half/hello/buf2",
+      "wrap": "half",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 2,
+      "calls": [
+        {
+          "n": 1,
+          "err": "",
+          "hex": "48"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "65"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "2c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "20"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "57"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6f"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "72"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "6c"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "half/hello/buf8",
+      "wrap": "half",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 8,
+      "calls": [
+        {
+          "n": 4,
+          "err": "",
+          "hex": "48656c6c"
+        },
+        {
+          "n": 4,
+          "err": "",
+          "hex": "6f2c2057"
+        },
+        {
+          "n": 4,
+          "err": "",
+          "hex": "6f726c64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "half/empty/buf5",
+      "wrap": "half",
+      "contentHex": "",
+      "bufSize": 5,
+      "calls": [
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "dataErr/hello/buf3",
+      "wrap": "dataErr",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 3,
+      "calls": [
+        {
+          "n": 3,
+          "err": "",
+          "hex": "48656c"
+        },
+        {
+          "n": 3,
+          "err": "",
+          "hex": "6c6f2c"
+        },
+        {
+          "n": 3,
+          "err": "",
+          "hex": "20576f"
+        },
+        {
+          "n": 3,
+          "err": "",
+          "hex": "726c64"
+        },
+        {
+          "n": 1,
+          "err": "EOF",
+          "hex": "21"
+        }
+      ]
+    },
+    {
+      "id": "dataErr/hello/buf16",
+      "wrap": "dataErr",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 16,
+      "calls": [
+        {
+          "n": 13,
+          "err": "EOF",
+          "hex": "48656c6c6f2c20576f726c6421"
+        }
+      ]
+    },
+    {
+      "id": "dataErr/empty/buf5",
+      "wrap": "dataErr",
+      "contentHex": "",
+      "bufSize": 5,
+      "calls": [
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "dataErr/scripted-last-err/buf8",
+      "wrap": "dataErr",
+      "contentHex": "6162636465",
+      "bufSize": 8,
+      "calls": [
+        {
+          "n": 3,
+          "err": "",
+          "hex": "616263"
+        },
+        {
+          "n": 2,
+          "err": "io failure",
+          "hex": "6465"
+        }
+      ]
+    },
+    {
+      "id": "dataErr/scripted-data-eof/buf8",
+      "wrap": "dataErr",
+      "contentHex": "6162",
+      "bufSize": 8,
+      "calls": [
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "err/io-failure/buf8",
+      "wrap": "err",
+      "contentHex": "",
+      "bufSize": 8,
+      "calls": [
+        {
+          "n": 0,
+          "err": "io failure",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "err/eof/buf8",
+      "wrap": "err",
+      "contentHex": "",
+      "bufSize": 8,
+      "calls": [
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "err/nil/buf8",
+      "wrap": "err",
+      "contentHex": "",
+      "bufSize": 8,
+      "calls": [
+        {
+          "n": 0,
+          "err": "",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "err/io-failure/buf0",
+      "wrap": "err",
+      "contentHex": "",
+      "bufSize": 0,
+      "calls": [
+        {
+          "n": 0,
+          "err": "io failure",
+          "hex": ""
+        }
+      ]
+    },
+    {
+      "id": "identity/hello/buf4",
+      "wrap": "identity",
+      "contentHex": "48656c6c6f2c20576f726c6421",
+      "bufSize": 4,
+      "calls": [
+        {
+          "n": 4,
+          "err": "",
+          "hex": "48656c6c"
+        },
+        {
+          "n": 4,
+          "err": "",
+          "hex": "6f2c2057"
+        },
+        {
+          "n": 4,
+          "err": "",
+          "hex": "6f726c64"
+        },
+        {
+          "n": 1,
+          "err": "",
+          "hex": "21"
+        },
+        {
+          "n": 0,
+          "err": "EOF",
+          "hex": ""
+        }
+      ]
+    }
+  ],
+  "testReader": [
+    {
+      "id": "bytes/ok",
+      "contentHex": "4e6f77206973207468652074696d6520666f7220616c6c20676f6f6420676f70686572732e",
+      "ok": true,
+      "error": ""
+    },
+    {
+      "id": "bytes/short-source",
+      "contentHex": "4e6f77206973207468652074696d6520666f7220616c6c20676f6f6420676f70686572732e",
+      "ok": false,
+      "error": "ReadAll(small amounts) = \"Now is the\"\n\twant \"Now is the time for all good gophers.\""
+    },
+    {
+      "id": "oneByte/content-mismatch",
+      "contentHex": "4e6f77206973207468652074696d6520666f7220616c6c20676f6f6420676f70686572732e78",
+      "ok": false,
+      "error": "ReadAll(small amounts) = \"Now is the time for all good gophers.\"\n\twant \"Now is the time for all good gophers.x\""
+    }
+  ]
+}
