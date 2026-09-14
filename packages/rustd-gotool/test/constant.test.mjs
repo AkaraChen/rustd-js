@@ -541,6 +541,101 @@ test('JS Float BinaryOp extras → native computes → Go verifies; corruptions 
   })).status, 0);
 });
 
+function evaluateFUn(c) {
+  const vy = makeCmpVal(c.formY, c.yx, c.yy, c.ys);
+  const r = constUnaryOp(TOKEN[c.op], vy, 0);
+  const [f, f64Exact] = constFloat64Val(r);
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    sign: constSign(r),
+    f64Bits: f64BitsHex(f),
+    f64Exact,
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant Float UnaryOp fixtures; native matches every case', () => {
+  const generated = go(['-constant-float-unary']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-float-unary-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go Float UnaryOp fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-float-unary');
+  assert.ok(fixture.cases.length >= 2 * 32, `too few cases: ${fixture.cases.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateFUn(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.sign, c.sign, `${c.id} sign`);
+    assert.equal(got.f64Bits, c.f64Bits, `${c.id} f64Bits`);
+    assert.equal(got.f64Exact, c.f64Exact, `${c.id} f64Exact`);
+    assert.equal(got.opTok, TOKEN[c.op], `${c.id} opTok`);
+  }
+});
+
+test('JS Float UnaryOp extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { form: 'int', x: '0', y: '0', s: '0' },
+    { form: 'int', x: '1', y: '0', s: '0' },
+    { form: 'int', x: '-1', y: '0', s: '0' },
+    { form: 'quo', x: '1', y: '2', s: '0' },
+    { form: 'quo', x: '2', y: '4', s: '0' },
+    { form: 'quo', x: '-1', y: '2', s: '0' },
+    { form: 'quo', x: '22', y: '7', s: '0' },
+    { form: 'shift-quo', x: '1', y: '0', s: '53' },
+  ];
+  const ops = ['ADD', 'SUB'];
+  const cases = [];
+  for (const op of ops) {
+    for (let i = 0; i < extras.length; i++) {
+      cases.push(evaluateFUn({
+        id: `js-fun-${op}-${i}`,
+        op,
+        opTok: TOKEN[op],
+        formY: extras[i].form, yx: extras[i].x, yy: extras[i].y, ys: extras[i].s,
+      }));
+    }
+  }
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-float-unary', cases };
+  const verified = go(['-verify-constant-float-unary'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified \d+ gotool constant-float-unary cases/);
+  const broken = structuredClone(packet);
+  broken.cases[1].exact = 'not-a-number';
+  const rejected = go(['-verify-constant-float-unary'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 1/);
+  assert.notEqual(go(['-verify-constant-float-unary'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-float-unary', cases: [],
+  })).status, 0);
+});
+
+test('constUnaryOp Float: +1/2 is 1/2; -1/2 is -1/2; integer-valued Float stays Float; XOR throws', () => {
+  const half = constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n));
+  const one = constMakeInt64(1n);
+  const pos = constUnaryOp(TOKEN.ADD, half, 0);
+  assert.equal(pos.kind, 'Float');
+  assert.equal(pos.toString(), '1/2');
+  assert.equal(constCompare(pos, half), 0);
+  const neg = constUnaryOp(TOKEN.SUB, half, 0);
+  assert.equal(neg.kind, 'Float');
+  assert.equal(neg.toString(), '-1/2');
+  assert.equal(constCompare(neg, half), -1);
+  const sum = constBinaryOp(TOKEN.ADD, half, half);
+  assert.equal(sum.kind, 'Float');
+  assert.equal(constUnaryOp(TOKEN.ADD, sum, 0).kind, 'Float');
+  assert.equal(constUnaryOp(TOKEN.ADD, sum, 0).toString(), '1');
+  assert.equal(constUnaryOp(TOKEN.SUB, sum, 0).toString(), '-1');
+  assert.equal(constUnaryOp(TOKEN.SUB, constUnaryOp(TOKEN.SUB, half, 0), 0).toString(), '1/2');
+  assert.equal(constUnaryOp(TOKEN.ADD, one, 0).kind, 'Int');
+  const unk = constBinaryOp(TOKEN.QUO, half, constMakeInt64(0n));
+  assert.equal(constUnaryOp(TOKEN.SUB, unk, 0).kind, 'Unknown');
+  assert.throws(() => constUnaryOp(TOKEN.XOR, half, 0), /Int/);
+  assert.throws(() => constUnaryOp(TOKEN.XOR, half, 8), /Int/);
+});
+
 test('constBinaryOp Float: 1/2+1/2 is Float 1; mixed Int+Float; QUO-0 Unknown; REM throws', () => {
   const half = constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n));
   const twoOverFour = constBinaryOp(TOKEN.QUO, constMakeInt64(2n), constMakeInt64(4n));

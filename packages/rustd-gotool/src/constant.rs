@@ -467,36 +467,54 @@ fn as_shift_count(s: &BigInt) -> Result<u32> {
     Ok(n as u32)
 }
 
-/// Int ADD/SUB/XOR. `prec` is Go's XOR width in bits; 0 means unlimited (two's complement).
+/// Int ADD/SUB/XOR. Float ADD/SUB via `big.Rat` (identity / `Neg`). XOR requires Int.
+/// `prec` is Go's XOR width in bits; 0 means unlimited (two's complement).
 #[napi]
 pub fn const_unary_op(op: i32, y: &GoConstValue, prec: i64) -> Result<GoConstValue> {
     let prec = as_prec(prec)?;
-    if y.kind == "Unknown" {
-        return match op {
-            token::ADD | token::SUB | token::XOR => Ok(make_unknown()),
-            _ => Err(Error::new(
-                Status::InvalidArg,
-                "gotool: constUnaryOp op must be ADD, SUB, or XOR",
-            )),
-        };
-    }
-    let yi = as_int(y, "y")?;
-    match op {
-        token::ADD => Ok(make_int(yi.clone())),
-        token::SUB => Ok(make_int(-yi)),
-        token::XOR => {
-            let mut z = yi.clone().not();
-            if prec > 0 {
-                let high = num_bigint::BigInt::from(-1).shl(prec as usize);
-                z = z.bitand(&high.not());
-            }
-            Ok(make_int(z))
-        }
-        _ => Err(Error::new(
+    if !matches!(op, token::ADD | token::SUB | token::XOR) {
+        return Err(Error::new(
             Status::InvalidArg,
             "gotool: constUnaryOp op must be ADD, SUB, or XOR",
-        )),
+        ));
     }
+    if y.kind == "Unknown" {
+        return Ok(make_unknown());
+    }
+    if is_int_kind(y) {
+        let yi = as_int(y, "y")?;
+        return match op {
+            token::ADD => Ok(make_int(yi.clone())),
+            token::SUB => Ok(make_int(-yi)),
+            token::XOR => {
+                let mut z = yi.clone().not();
+                if prec > 0 {
+                    let high = num_bigint::BigInt::from(-1).shl(prec as usize);
+                    z = z.bitand(&high.not());
+                }
+                Ok(make_int(z))
+            }
+            _ => unreachable!(),
+        };
+    }
+    if y.kind == "Float" {
+        if op == token::XOR {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constUnaryOp XOR requires Int",
+            ));
+        }
+        let yr = as_rat(y, "y")?;
+        return match op {
+            token::ADD => Ok(make_float(yr)),
+            token::SUB => Ok(make_float(-yr)),
+            _ => unreachable!(),
+        };
+    }
+    Err(Error::new(
+        Status::InvalidArg,
+        "gotool: y must be Int or Float",
+    ))
 }
 
 /// Int SHL/SHR. `s` is Go's `uint` shift count.
