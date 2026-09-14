@@ -56,6 +56,8 @@ function asBytes(value, label) {
 
 const TOKEN = Object.freeze(binding.tokenConstants());
 const SCAN_MODE = Object.freeze(binding.scanModeConstants());
+const PARSE_MODE = Object.freeze(binding.parseModeConstants());
+const FPRINT = Symbol('gotool.fprint');
 
 function tokenLookup(ident) {
   return binding.tokenLookup(asString(ident, 'ident'));
@@ -202,11 +204,101 @@ class Scanner {
   }
 }
 
+class GoParseError extends Error {
+  constructor(list, partialFile, message) {
+    super(message ?? (list[0] ? list[0].msg : 'parse error'));
+    this.name = 'GoParseError';
+    this.list = list;
+    this.partialFile = partialFile ?? null;
+  }
+}
+
+class UnsupportedFeatureError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UnsupportedFeatureError';
+  }
+}
+
+function parseFile(fset, filename, src, mode) {
+  if (!(fset instanceof FileSet)) {
+    throw new TypeError('gotool: fset must be a FileSet');
+  }
+  if (src == null) {
+    throw new UnsupportedFeatureError('gotool: src=null file reads belong to rustd-fs');
+  }
+  const raw = JSON.parse(
+    binding.parseFileNative(fset._n, asString(filename, 'filename'), asBytes(src, 'src'), mode == null ? 0 : asNumber(mode, 'mode')),
+  );
+  if (raw.file) Object.defineProperty(raw.file, FPRINT, { value: raw.fprint, enumerable: false });
+  if (raw.errors && raw.errors.length) {
+    throw new GoParseError(raw.errors, raw.file);
+  }
+  return raw.file;
+}
+
+function parseExpr(fset, expr, mode) {
+  if (!(fset instanceof FileSet)) {
+    throw new TypeError('gotool: fset must be a FileSet');
+  }
+  const raw = JSON.parse(
+    binding.parseExprNative(fset._n, asString(expr, 'expr'), mode == null ? 0 : asNumber(mode, 'mode')),
+  );
+  if (raw.expr) Object.defineProperty(raw.expr, FPRINT, { value: raw.fprint, enumerable: false });
+  if (raw.errors && raw.errors.length) {
+    throw new GoParseError(raw.errors, raw.expr);
+  }
+  return raw.expr;
+}
+
+function astFprint(out, fset, node) {
+  if (!(fset instanceof FileSet)) {
+    throw new TypeError('gotool: fset must be a FileSet');
+  }
+  if (out == null || typeof out.write !== 'function') {
+    throw new TypeError('gotool: astFprint out must have write()');
+  }
+  const text = node == null ? 'nil\n' : node[FPRINT];
+  if (typeof text !== 'string') {
+    throw new TypeError('gotool: astFprint requires a node returned by parseFile or parseExpr');
+  }
+  out.write(Buffer.from(text, 'utf8'));
+}
+
+function astInspect(node, f) {
+  if (typeof f !== 'function') {
+    throw new TypeError('gotool: astInspect callback must be a function');
+  }
+  walk(node, f);
+}
+
+function walk(node, f) {
+  if (node == null || typeof node !== 'object' || typeof node.nodeType !== 'string') return;
+  if (f(node) === false) return;
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, f);
+    } else {
+      walk(value, f);
+    }
+  }
+}
+
+function astIsExported(name) {
+  return tokenIsExported(asString(name, 'name'));
+}
+
+function astNewIdent(name) {
+  const n = asString(name, 'name');
+  return { nodeType: 'Ident', pos: 0, end: n.length, name: n };
+}
+
 module.exports.versionCompare = versionCompare;
 module.exports.versionIsValid = versionIsValid;
 module.exports.versionLang = versionLang;
 module.exports.TOKEN = TOKEN;
 module.exports.SCAN_MODE = SCAN_MODE;
+module.exports.PARSE_MODE = PARSE_MODE;
 module.exports.tokenLookup = tokenLookup;
 module.exports.tokenIsKeyword = tokenIsKeyword;
 module.exports.tokenIsExported = tokenIsExported;
@@ -215,3 +307,11 @@ module.exports.FileSet = FileSet;
 module.exports.GoFile = GoFile;
 module.exports.Scanner = Scanner;
 module.exports.GoScanError = GoScanError;
+module.exports.GoParseError = GoParseError;
+module.exports.UnsupportedFeatureError = UnsupportedFeatureError;
+module.exports.parseFile = parseFile;
+module.exports.parseExpr = parseExpr;
+module.exports.astFprint = astFprint;
+module.exports.astInspect = astInspect;
+module.exports.astIsExported = astIsExported;
+module.exports.astNewIdent = astNewIdent;

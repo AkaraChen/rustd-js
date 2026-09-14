@@ -1,7 +1,12 @@
+use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::collections::HashMap;
 
+mod ast;
+mod codec;
 mod fileset;
+mod parser;
+mod print;
 mod scanner;
 mod token;
 mod unicode_go;
@@ -230,4 +235,96 @@ pub fn scan_mode_constants() -> HashMap<String, u32> {
     let mut m = HashMap::new();
     m.insert("ScanComments".into(), SCAN_COMMENTS);
     m
+}
+
+#[napi]
+pub fn parse_mode_constants() -> HashMap<String, u32> {
+    let mut m = HashMap::new();
+    m.insert("PackageClauseOnly".into(), parser::PACKAGE_CLAUSE_ONLY);
+    m.insert("ImportsOnly".into(), parser::IMPORTS_ONLY);
+    m.insert("ParseComments".into(), parser::PARSE_COMMENTS);
+    m.insert("SkipObjectResolution".into(), parser::SKIP_OBJECT_RESOLUTION);
+    m.insert("AllErrors".into(), parser::ALL_ERRORS);
+    m
+}
+
+#[napi]
+pub fn parse_file_native(
+    fset: &FileSet,
+    filename: String,
+    src: Uint8Array,
+    mode: u32,
+) -> Result<String> {
+    let out = parser::parse_source(fset, filename, src.as_ref(), mode, false)?;
+    let mut json = String::from("{\"file\":");
+    match &out.file {
+        Some(f) => json.push_str(&codec::file_to_json(f)),
+        None => json.push_str("null"),
+    }
+    json.push_str(",\"errors\":[");
+    for (i, (filename, offset, line, column, msg)) in out.errors.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            "{{\"filename\":{},\"offset\":{offset},\"line\":{line},\"column\":{column},\"msg\":{}}}",
+            json_str(filename),
+            json_str(msg)
+        ));
+    }
+    json.push_str("],\"fprint\":");
+    if let Some(f) = &out.file {
+        json.push_str(&json_str(&print::fprint_file(fset, f)?));
+    } else {
+        json.push_str("\"\"");
+    }
+    json.push('}');
+    Ok(json)
+}
+
+#[napi]
+pub fn parse_expr_native(fset: &FileSet, expr: String, mode: u32) -> Result<String> {
+    let src = expr.as_bytes();
+    let out = parser::parse_source(fset, String::new(), src, mode, true)?;
+    let mut json = String::from("{\"expr\":");
+    match &out.expr {
+        Some(e) => json.push_str(&codec::expr_to_json(e)),
+        None => json.push_str("null"),
+    }
+    json.push_str(",\"errors\":[");
+    for (i, (filename, offset, line, column, msg)) in out.errors.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            "{{\"filename\":{},\"offset\":{offset},\"line\":{line},\"column\":{column},\"msg\":{}}}",
+            json_str(filename),
+            json_str(msg)
+        ));
+    }
+    json.push_str("],\"fprint\":");
+    if let Some(e) = &out.expr {
+        json.push_str(&json_str(&print::fprint_expr(fset, e)?));
+    } else {
+        json.push_str("\"\"");
+    }
+    json.push('}');
+    Ok(json)
+}
+
+fn json_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }

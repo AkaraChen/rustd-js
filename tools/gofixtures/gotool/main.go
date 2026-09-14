@@ -98,9 +98,28 @@ func main() {
 	verify := flag.Bool("verify", false, "verify a packet read from stdin")
 	scan := flag.Bool("scan", false, "dump go/scanner fixtures")
 	verifyScanFlag := flag.Bool("verify-scan", false, "verify a scanner packet read from stdin")
+	parseFlag := flag.Bool("parse", false, "dump go/parser ast.Fprint fixtures")
+	verifyParseFlag := flag.Bool("verify-parse", false, "verify a parser packet read from stdin")
 	flag.Parse()
 	if *verifyScanFlag {
 		verifyScan(os.Stdin)
+		return
+	}
+	if *verifyParseFlag {
+		verifyParse(os.Stdin)
+		return
+	}
+	if *parseFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpParse(writer)
 		return
 	}
 	if *scan {

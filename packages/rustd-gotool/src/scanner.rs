@@ -97,7 +97,26 @@ impl Scanner {
 }
 
 impl ScannerState {
-    fn init(&mut self, file: &GoFile, src: &[u8], mode: u32) -> Result<()> {
+    pub(crate) fn new(file: &GoFile, src: &[u8], mode: u32) -> Result<Self> {
+        let mut s = Self {
+            file: file.clone_handle(),
+            dir: String::new(),
+            src: Vec::new(),
+            mode: 0,
+            ch: b' ' as i32,
+            offset: 0,
+            rd_offset: 0,
+            line_offset: 0,
+            insert_semi: false,
+            nl_pos: 0,
+            error_count: 0,
+            pending: Vec::new(),
+        };
+        s.init(file, src, mode)?;
+        Ok(s)
+    }
+
+    pub(crate) fn init(&mut self, file: &GoFile, src: &[u8], mode: u32) -> Result<()> {
         let size = file.inner_size()?;
         if size as usize != src.len() {
             return Err(Error::new(
@@ -199,7 +218,7 @@ impl ScannerState {
         Ok(())
     }
 
-    fn scan(&mut self) -> Result<NativeScanStep> {
+    pub(crate) fn scan(&mut self) -> Result<NativeScanStep> {
         let mut errs = std::mem::take(&mut self.pending);
         loop {
             if self.nl_pos != 0 {

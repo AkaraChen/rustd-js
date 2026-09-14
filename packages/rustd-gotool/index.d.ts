@@ -150,9 +150,104 @@ export class Scanner {
 }
 
 export const SCAN_MODE: { readonly ScanComments: number };
+export const PARSE_MODE: {
+  readonly PackageClauseOnly: number;
+  readonly ImportsOnly: number;
+  readonly ParseComments: number;
+  readonly SkipObjectResolution: number;
+  readonly AllErrors: number;
+};
 
 export class GoScanError extends Error {
   constructor(pos: GoPosition, msg: string);
   readonly pos: GoPosition;
   readonly msg: string;
 }
+
+export class UnsupportedFeatureError extends Error {
+  constructor(message: string);
+}
+
+export interface GoParseErrorItem {
+  filename: string;
+  offset: number;
+  line: number;
+  column: number;
+  msg: string;
+}
+
+export class GoParseError extends Error {
+  constructor(list: GoParseErrorItem[], partialFile: GoAstFile | GoAstExpr | null, message?: string);
+  readonly list: GoParseErrorItem[];
+  readonly partialFile: GoAstFile | GoAstExpr | null;
+}
+
+export interface GoAstNode {
+  nodeType: string;
+  pos: number;
+  end: number;
+}
+
+export interface GoIdent extends GoAstNode {
+  nodeType: 'Ident';
+  name: string;
+}
+
+export interface GoComment extends GoAstNode {
+  nodeType: 'Comment';
+  slash: number;
+  text: string;
+}
+
+export interface GoCommentGroup extends GoAstNode {
+  nodeType: 'CommentGroup';
+  list: GoComment[];
+}
+
+export interface GoBasicLit extends GoAstNode {
+  nodeType: 'BasicLit';
+  valuePos: number;
+  kind: number;
+  value: string;
+}
+
+export interface GoImportSpec extends GoAstNode {
+  nodeType: 'ImportSpec';
+  doc: GoCommentGroup | null;
+  name: GoIdent | null;
+  path: GoBasicLit;
+  comment: GoCommentGroup | null;
+  endPos: number;
+}
+
+export interface GoAstFile extends GoAstNode {
+  nodeType: 'File';
+  name: GoIdent;
+  decls: GoAstDecl[] | null;
+  imports: GoImportSpec[] | null;
+  comments: GoCommentGroup[] | null;
+  doc: GoCommentGroup | null;
+  package: number;
+  fileStart: number;
+  fileEnd: number;
+  unresolved: GoIdent[] | null;
+}
+
+export type GoAstExpr = GoAstNode;
+export type GoAstDecl = GoAstNode;
+
+export interface ByteSink {
+  write(chunk: Uint8Array): unknown;
+}
+
+export function parseFile(
+  fset: FileSet,
+  filename: string,
+  src: Uint8Array | null,
+  mode?: number,
+): GoAstFile;
+export function parseExpr(fset: FileSet, expr: string, mode?: number): GoAstExpr;
+export function astFprint(out: ByteSink, fset: FileSet, node: GoAstNode): void;
+export function astInspect(node: GoAstNode, f: (n: GoAstNode) => boolean | void): void;
+export function astIsExported(name: string): boolean;
+export function astNewIdent(name: string): GoIdent;

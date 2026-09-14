@@ -5,14 +5,15 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 2 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
-`go/version` plus `go/token` (`FileSet` / `Pos` / `TOKEN`) and `go/scanner`.
-Parser, printer, `go/constant`, and `go/build/constraint` are **not** in this
-release. API is `0.x` and unstable.
+Checkpoint 3 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+`go/version`, `go/token`, `go/scanner`, plus `go/parser` and `ast.Fprint`.
+`go/format` / `gofmt`, `go/constant`, and `go/build/constraint` are **not**
+in this release. API is `0.x` and unstable.
 
 ```js
 import {
   versionLang, FileSet, Scanner, TOKEN, SCAN_MODE,
+  PARSE_MODE, parseFile, astFprint,
 } from 'rustd-gotool';
 
 versionLang('go1.21rc2'); // "go1.21"
@@ -26,6 +27,10 @@ for (;;) {
   if (tok === TOKEN.EOF) break;
   console.log(file.position(pos), tok, lit);
 }
+
+const ast = parseFile(fset, 'p.go', src, PARSE_MODE.ParseComments | PARSE_MODE.SkipObjectResolution);
+const chunks = [];
+astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 ```
 
 ## Differences from Go
@@ -45,13 +50,18 @@ for (;;) {
   (not XID_Start / XID_Continue).
 - `//line` relative paths are cleaned with slash-separated `path.Clean` rules
   (Unix `filepath` semantics).
-- No `go/parser`, `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
+- `parseFile` / `parseExpr` skip identifier resolution (`File.Scope`,
+  `Ident.Obj`, `File.Unresolved` are always `null`), matching Go's
+  recommended `SkipObjectResolution`.
+- Parse errors throw `GoParseError` with `list` and `partialFile`.
+- `ast.Fprint` is the debug printer, not `gofmt`. `go/format` is not shipped.
+- No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **461,272 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **667,672 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 461272 Sep 14 17:24 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 667672 Sep 14 18:00 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```

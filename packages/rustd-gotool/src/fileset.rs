@@ -106,6 +106,18 @@ impl GoFile {
         Ok(fix_offset(p - f.base, f.size))
     }
 
+    pub(crate) fn line_of(&self, p: i32) -> Result<i32> {
+        Ok(self.position_of(p, true)?.line as i32)
+    }
+
+    pub(crate) fn base_i32(&self) -> Result<i32> {
+        Ok(lock(&self.file)?.base)
+    }
+
+    pub(crate) fn size_i32(&self) -> Result<i32> {
+        Ok(lock(&self.file)?.size)
+    }
+
     pub(crate) fn position_of(&self, p: i32, adjusted: bool) -> Result<GoPosition> {
         if p == 0 {
             return Ok(GoPosition::default());
@@ -214,6 +226,13 @@ impl FileSet {
     #[napi]
     pub fn position(&self, pos: i64) -> Result<GoPosition> {
         self.position_for(pos, true)
+    }
+
+    pub(crate) fn format_pos(&self, pos: i32) -> Result<String> {
+        if pos == 0 {
+            return Ok("-".into());
+        }
+        Ok(format_go_position(&self.position_for(i64::from(pos), true)?))
     }
 
     #[napi]
@@ -466,6 +485,27 @@ fn find_file(set: &FileSetData, p: i32) -> Option<&Arc<Mutex<FileData>>> {
 
 fn lock_base(f: &Mutex<FileData>) -> i32 {
     f.lock().map(|g| g.base).unwrap_or(i32::MAX)
+}
+
+pub fn format_go_position(p: &GoPosition) -> String {
+    if p.line <= 0 {
+        if p.filename.is_empty() {
+            "-".into()
+        } else {
+            p.filename.clone()
+        }
+    } else {
+        let mut s = p.filename.clone();
+        if !s.is_empty() {
+            s.push(':');
+        }
+        s.push_str(&p.line.to_string());
+        if p.column > 0 {
+            s.push(':');
+            s.push_str(&p.column.to_string());
+        }
+        s
+    }
 }
 
 pub fn is_exported(name: &str) -> bool {

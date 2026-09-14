@@ -85,6 +85,7 @@ pub const TILDE: i32 = 88;
 
 pub const KEYWORD_BEG: i32 = 60;
 pub const KEYWORD_END: i32 = 86;
+pub const LOWEST_PREC: i32 = 0;
 
 pub fn lookup(ident: &str) -> i32 {
     match ident {
@@ -119,6 +120,25 @@ pub fn lookup(ident: &str) -> i32 {
 
 pub fn is_keyword_tok(tok: i32) -> bool {
     KEYWORD_BEG < tok && tok < KEYWORD_END
+}
+
+pub fn is_literal(tok: i32) -> bool {
+    IDENT <= tok && tok <= STRING
+}
+
+pub fn is_operator(tok: i32) -> bool {
+    (ADD <= tok && tok <= COLON) || tok == TILDE
+}
+
+pub fn precedence(tok: i32) -> i32 {
+    match tok {
+        LOR => 1,
+        LAND => 2,
+        EQL | NEQ | LSS | LEQ | GTR | GEQ => 3,
+        ADD | SUB | OR | XOR => 4,
+        MUL | QUO | REM | SHL | SHR | AND | AND_NOT => 5,
+        _ => LOWEST_PREC,
+    }
 }
 
 pub fn token_string(tok: i32) -> String {
