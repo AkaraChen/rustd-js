@@ -5,27 +5,31 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 10 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 11 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
 / `constBinaryOp` / `constUnaryOp` / `constShift` vs Go `MakeInt64` /
 `Int64Val` / `Compare` / `Sign` / `BitLen` / `BinaryOp` including AND_NOT /
-`UnaryOp` ADD/SUB/XOR / `Shift` SHL/SHR).
-`go/format` / `gofmt`, Float/Complex/`MakeFromLiteral`, and
+`UnaryOp` ADD/SUB/XOR / `Shift` SHL/SHR) and Int/Float `constToString` /
+`constFloat64Val` vs Go `StringVal` / `Float64Val`.
+`go/format` / `gofmt`, Complex/`MakeFromLiteral`/Bool/String, and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
 ```js
 import {
   versionLang, FileSet, Scanner, TOKEN, SCAN_MODE,
   PARSE_MODE, parseFile, astFprint,
-  constMakeInt64, constCompare, constToInt, constBinaryOp, constUnaryOp, constShift, TOKEN,
+  constMakeInt64, constCompare, constToInt, constToString, constFloat64Val,
+  constBinaryOp, constUnaryOp, constShift, TOKEN,
 } from 'rustd-gotool';
 
 versionLang('go1.21rc2'); // "go1.21"
 constMakeInt64(-42n).kind; // "Int"
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constToInt(constMakeInt64(1n)); // [1n, true]
+constToString(constMakeInt64(1n)); // ["", false] — Int is not a Go string constant
+constFloat64Val(constMakeInt64(1n)); // [1, true]
 constBinaryOp(TOKEN.ADD, constMakeInt64(1n), constMakeInt64(2n)).toString(); // "3"
 constUnaryOp(TOKEN.XOR, constMakeInt64(0n), 8).toString(); // "255"
 constShift(TOKEN.SHL, constMakeInt64(1n), 63n).toString(); // "9223372036854775808"
@@ -91,18 +95,22 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `constShift` is Int SHL/SHR; `s` must be a non-negative bigint in
   `0..1000000` (JS mapping of Go's unbounded `uint` to avoid native OOM).
   `constToInt` is Go `Int64Val`: `[value, true]` when the Int fits in int64;
-  otherwise `[low64-with-sign, false]` (Go's `big.Int.Int64` wrapping). `GoConstValue#toString` is decimal for Int and `ExactString` (`n` or
+  otherwise `[low64-with-sign, false]` (Go's `big.Int.Int64` wrapping).
+  `constToString` is Go `StringVal` with panic mapped to `ok=false`: Int/Float
+  are `["", false]`; Unknown is `["", true]`. `constFloat64Val` is Go
+  `Float64Val` (IEEE bits + exact flag; Unknown is `[0, false]`).
+  `GoConstValue#toString` is decimal for Int and `ExactString` (`n` or
   `n/d`) for Float from QUO, not Go's 512-bit `String()` approximation.
   QUO/REM by zero returns `Unknown` instead of panicking. `constCompare` /
-  `constBitLen` throw on non-Int. Float+Float, Complex, `MakeFromLiteral`,
-  Bool/String, and `constToString`/`constFloat64Val` stay later.
+  `constBitLen` throw on non-Int. Float+Float compare, Complex, `MakeFromLiteral`,
+  and Bool/String stay later.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **738,168 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **743,080 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 738168 Sep 14 22:15 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 743080 Sep 14 22:36 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```

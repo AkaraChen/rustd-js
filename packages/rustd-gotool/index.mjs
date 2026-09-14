@@ -6,6 +6,8 @@ export const {
   GoConstValue,
   constMakeInt64,
   constToInt,
+  constToString,
+  constFloat64Val,
   constCompare,
   constSign,
   constBitLen,

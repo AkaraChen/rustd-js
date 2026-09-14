@@ -7,6 +7,8 @@ import {
   GoConstValue,
   constMakeInt64,
   constToInt,
+  constToString,
+  constFloat64Val,
   constCompare,
   constSign,
   constBitLen,
@@ -293,6 +295,111 @@ test('constUnaryOp/constShift Unknown, invalid op/prec/s, AND_NOT vs SHL BinaryO
   assert.throws(() => constShift(TOKEN.SHL, one, -1n), /0\.\.1000000/);
   assert.throws(() => constShift(TOKEN.SHL, one, 1), TypeError);
   assert.throws(() => constBinaryOp(TOKEN.SHL, one, one), /ADD/);
+});
+
+function f64BitsHex(n) {
+  const buf = new ArrayBuffer(8);
+  new Float64Array(buf)[0] = n;
+  return new BigUint64Array(buf)[0].toString(16).padStart(16, '0');
+}
+
+function evaluateVal(c) {
+  let r;
+  if (c.form === 'int') r = constMakeInt64(BigInt(c.x));
+  else if (c.form === 'quo') r = constBinaryOp(TOKEN.QUO, constMakeInt64(BigInt(c.x)), constMakeInt64(BigInt(c.y)));
+  else if (c.form === 'shift') r = constShift(TOKEN.SHL, constMakeInt64(BigInt(c.x)), BigInt(c.s));
+  else if (c.form === 'shift-quo') {
+    r = constBinaryOp(
+      TOKEN.QUO,
+      constMakeInt64(BigInt(c.x)),
+      constShift(TOKEN.SHL, constMakeInt64(1n), BigInt(c.s)),
+    );
+  } else if (c.form === 'unknown') r = constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+  else throw new Error(`unknown form ${c.form}`);
+  const [toString, toStringOk] = constToString(r);
+  const [f, f64Exact] = constFloat64Val(r);
+  return {
+    ...c,
+    kind: r.kind,
+    toString,
+    toStringOk,
+    f64Bits: f64BitsHex(f),
+    f64Exact,
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant Int/Float StringVal+Float64Val fixtures; native matches every case', () => {
+  const generated = go(['-constant-val']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-val-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go StringVal/Float64Val fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-int-float-val');
+  assert.ok(fixture.cases.length >= 17 + 17 * 16, `too few cases: ${fixture.cases.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateVal(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.toString, c.toString, `${c.id} toString`);
+    assert.equal(got.toStringOk, c.toStringOk, `${c.id} toStringOk`);
+    assert.equal(got.f64Bits, c.f64Bits, `${c.id} f64Bits`);
+    assert.equal(got.f64Exact, c.f64Exact, `${c.id} f64Exact`);
+  }
+});
+
+test('JS StringVal/Float64Val extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [0n, 1n, -1n, 3n, (1n << 53n) - 1n, 1n << 53n, (1n << 63n) - 1n, -(1n << 63n)];
+  const cases = [];
+  for (let i = 0; i < extras.length; i++) {
+    cases.push(evaluateVal({
+      id: `js-val-int-${i}`, form: 'int', x: extras[i].toString(), y: '0', s: '0',
+    }));
+  }
+  for (const y of [1n, -1n, 3n, 7n]) {
+    for (let i = 0; i < extras.length; i++) {
+      cases.push(evaluateVal({
+        id: `js-val-quo-${i}-${y}`, form: 'quo', x: extras[i].toString(), y: y.toString(), s: '0',
+      }));
+    }
+  }
+  for (const s of [0n, 1n, 53n, 64n]) {
+    cases.push(evaluateVal({
+      id: `js-val-shl-${s}`, form: 'shift', x: '1', y: '0', s: s.toString(),
+    }));
+    cases.push(evaluateVal({
+      id: `js-val-quo-shl-${s}`, form: 'shift-quo', x: '1', y: '0', s: s.toString(),
+    }));
+  }
+  cases.push(evaluateVal({ id: 'js-val-unknown', form: 'unknown', x: '1', y: '0', s: '0' }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-int-float-val', cases };
+  const verified = go(['-verify-constant-val'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified \d+ gotool constant-int-float-val cases/);
+  const broken = structuredClone(packet);
+  broken.cases[1].f64Bits = 'ffffffffffffffff';
+  const rejected = go(['-verify-constant-val'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 1/);
+  assert.notEqual(go(['-verify-constant-val'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-int-float-val', cases: [],
+  })).status, 0);
+});
+
+test('constToString Int/Float is not StringVal; Unknown is empty+ok; Float64Val signed zero', () => {
+  const one = constMakeInt64(1n);
+  const z = constMakeInt64(0n);
+  assert.deepEqual(constToString(one), ['', false]);
+  assert.deepEqual(constToString(constBinaryOp(TOKEN.QUO, one, constMakeInt64(2n))), ['', false]);
+  const unk = constBinaryOp(TOKEN.QUO, one, z);
+  assert.equal(unk.kind, 'Unknown');
+  assert.deepEqual(constToString(unk), ['', true]);
+  assert.deepEqual(constFloat64Val(unk), [0, false]);
+  const [zero, zeroExact] = constFloat64Val(z);
+  assert.equal(zero, 0);
+  assert.equal(Object.is(zero, -0), false);
+  assert.equal(zeroExact, true);
+  assert.throws(() => constToString(1), TypeError);
+  assert.throws(() => constFloat64Val(null), TypeError);
 });
 
 test('constMakeInt64 rejects non-bigint and values outside int64', () => {
