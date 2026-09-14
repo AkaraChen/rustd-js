@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { deflateSync } from 'node:zlib';
 import {
   sniff, open, openBytes, readBuildInfoFile, ElfFile, PeFile,
   BinaryFormatError, FileClosedError, BlockedRegionError, UnsupportedFeatureError,
@@ -1519,6 +1520,7 @@ function elf64leNamedSections(parts) {
     writeElf64LeShdr(buf, shoff + (2 + i) * shentsize, {
       name: nameOff[part.name],
       type: 1,
+      flags: part.flags ?? 0n,
       offset: BigInt(part.offset),
       size: BigInt(part.data.length),
       addralign: 1n,
@@ -1668,6 +1670,118 @@ test('issue #18 §4.7: LineReader next() after EndSequence yields the next seque
   assert.equal(end2.endSequence, true);
   assert.equal(reader.next(), null);
   file.close();
+});
+
+const SHF_COMPRESSED = 0x800n;
+
+function dwarfPlainSections() {
+  const abbrev = Buffer.from([
+    1, 0x11, 1, 0x10, 0x17, 0, 0,
+    2, 0x13, 0, 0x03, 0x08, 0x47, 0x13, 0, 0,
+    0,
+  ]);
+  const infoBody = Buffer.alloc(27);
+  infoBody.writeUInt16LE(4, 0);
+  infoBody.writeUInt32LE(0, 2);
+  infoBody[6] = 8;
+  infoBody[7] = 1;
+  infoBody.writeUInt32LE(0, 8);
+  infoBody[12] = 2;
+  infoBody[13] = 0x41;
+  infoBody[14] = 0;
+  infoBody.writeUInt32LE(23, 15);
+  infoBody[19] = 2;
+  infoBody[20] = 0x42;
+  infoBody[21] = 0;
+  infoBody.writeUInt32LE(16, 22);
+  infoBody[26] = 0;
+  const info = Buffer.alloc(4 + infoBody.length);
+  info.writeUInt32LE(infoBody.length, 0);
+  infoBody.copy(info, 4);
+  return { abbrev, info, line: dwarfLineTwoSequences() };
+}
+
+function gnuZdebug(plain, declaredSize) {
+  const payload = deflateSync(plain);
+  const header = Buffer.alloc(12);
+  header.write('ZLIB', 0);
+  header.writeBigUInt64BE(BigInt(declaredSize), 4);
+  return Buffer.concat([header, payload]);
+}
+
+function elfChdrZlib(plain, declaredSize) {
+  const payload = deflateSync(plain);
+  const hdr = Buffer.alloc(24);
+  hdr.writeUInt32LE(1, 0);
+  hdr.writeUInt32LE(0, 4);
+  hdr.writeBigUInt64LE(BigInt(declaredSize), 8);
+  hdr.writeBigUInt64LE(1n, 16);
+  return Buffer.concat([hdr, payload]);
+}
+
+function assertCompressedMismatch(bytes) {
+  const file = openBytes(bytes);
+  assert.throws(
+    () => file.dwarf(),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'compressed');
+      assert.match(String(err.message), /declared/);
+      return true;
+    },
+  );
+  file.close();
+}
+
+test('issue #18 §4.7: matching .zdebug_info / SHF_COMPRESSED inflate to the GNU/ELF declared size', () => {
+  const { abbrev, info, line } = dwarfPlainSections();
+  const zdebug = openBytes(elf64leNamedSections([
+    { name: '.debug_abbrev', data: abbrev },
+    { name: '.zdebug_info', data: gnuZdebug(info, info.length) },
+    { name: '.debug_line', data: line },
+  ]));
+  assert.equal(zdebug.section('.zdebug_info')?.compressed, true);
+  const zDwarf = zdebug.dwarf();
+  assert.ok(zDwarf);
+  assert.equal(zDwarf.entries().length, 3);
+  zdebug.close();
+
+  const shf = openBytes(elf64leNamedSections([
+    { name: '.debug_abbrev', data: abbrev },
+    { name: '.debug_info', data: elfChdrZlib(info, info.length), flags: SHF_COMPRESSED },
+    { name: '.debug_line', data: line },
+  ]));
+  assert.equal(shf.section('.debug_info')?.compressed, true);
+  const sDwarf = shf.dwarf();
+  assert.ok(sDwarf);
+  assert.equal(sDwarf.entries().length, 3);
+  shf.close();
+});
+
+test('issue #18 §4.7: zdebug / SHF_COMPRESSED uncompressed size mismatch is BinaryFormatError', () => {
+  const { abbrev, info, line } = dwarfPlainSections();
+  assert.ok(info.length > 4);
+
+  assertCompressedMismatch(elf64leNamedSections([
+    { name: '.debug_abbrev', data: abbrev },
+    { name: '.zdebug_info', data: gnuZdebug(info, info.length + 8) },
+    { name: '.debug_line', data: line },
+  ]));
+  assertCompressedMismatch(elf64leNamedSections([
+    { name: '.debug_abbrev', data: abbrev },
+    { name: '.zdebug_info', data: gnuZdebug(info, Math.max(1, info.length - 4)) },
+    { name: '.debug_line', data: line },
+  ]));
+  assertCompressedMismatch(elf64leNamedSections([
+    { name: '.debug_abbrev', data: abbrev },
+    { name: '.debug_info', data: elfChdrZlib(info, info.length + 16), flags: SHF_COMPRESSED },
+    { name: '.debug_line', data: line },
+  ]));
+  assertCompressedMismatch(elf64leNamedSections([
+    { name: '.debug_abbrev', data: abbrev },
+    { name: '.debug_info', data: elfChdrZlib(info, Math.max(1, info.length - 4)), flags: SHF_COMPRESSED },
+    { name: '.debug_line', data: line },
+  ]));
 });
 
 void UnsupportedFeatureError;

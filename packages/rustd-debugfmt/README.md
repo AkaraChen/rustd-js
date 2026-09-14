@@ -10,9 +10,11 @@ Addresses, offsets, and sizes are `bigint`. `open(path)` maps the file with
 ## Differences from Go
 
 - Compressed `.zdebug_*` / `SHF_COMPRESSED` debug sections are inflated with
-  `miniz_oxide` (zlib) when loading DWARF. `SectionInfo.data()` still throws
-  `UnsupportedFeatureError` for compressed non-debug payloads until
-  `rustd-compress` is a shared rust crate. Zstd-compressed DWARF is unsupported.
+  `miniz_oxide` (zlib) when loading DWARF. Inflated length must equal the GNU
+  `ZLIB` 8-byte size or ELF `ch_size` (`BinaryFormatError` kind `compressed`).
+  `SectionInfo.data()` still throws `UnsupportedFeatureError` for compressed
+  non-debug payloads until `rustd-compress` is a shared rust crate.
+  Zstd-compressed DWARF is unsupported.
 - `iterateEntries` currently walks a materialized DIE list (same pattern as
   `iterateSymbols`). A lazy gimli cursor is a follow-up if DIE counts demand it.
 - `gosym().pcToLine` returns the physical `pclntab` function in `fn` and the
@@ -61,7 +63,7 @@ Local Linux x64 GNU release (Rust 1.97.1, overflow-checks, strip):
 
 ```text
 $ ls -l packages/rustd-debugfmt/*.node
--rwxrwxr-x 1 akrc akrc 729056 Sep 14 20:04 packages/rustd-debugfmt/rustd-debugfmt.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 729904 Sep 14 20:18 packages/rustd-debugfmt/rustd-debugfmt.linux-x64-gnu.node
 ```
 
-729,056 bytes / 2,000,000 cap.
+729,904 bytes / 2,000,000 cap.

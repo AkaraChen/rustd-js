@@ -113,8 +113,12 @@ fn section_bytes(
     let raw = section
         .data()
         .map_err(|e| format_err("dwarf", 0, e))?;
-    if is_compressed(section) || section.name().map(|n| n.contains("zdebug")).unwrap_or(false) {
-        return decompress_debug(raw, is_64, endian, max);
+    let gnu_zdebug = section
+        .name()
+        .map(|n| n.starts_with(".zdebug_"))
+        .unwrap_or(false);
+    if is_compressed(section) || gnu_zdebug {
+        return decompress_debug(raw, is_64, endian, max, gnu_zdebug);
     }
     if section.size() > max {
         return Err(fail(
@@ -139,34 +143,37 @@ fn u64_endian(b: [u8; 8], endian: object::Endianness) -> u64 {
     }
 }
 
-fn decompress_debug(raw: &[u8], is_64: bool, endian: object::Endianness, max: u64) -> Result<Vec<u8>> {
-    if raw.starts_with(b"ZLIB") && raw.len() >= 12 {
-        let size = u64::from_be_bytes(raw[4..12].try_into().unwrap());
-        if size > max {
-            return Err(fail("BlockedRegionError", "uncompressed debug section exceeds maxSectionBytes"));
+fn decompress_debug(
+    raw: &[u8],
+    is_64: bool,
+    endian: object::Endianness,
+    max: u64,
+    gnu_zdebug: bool,
+) -> Result<Vec<u8>> {
+    if gnu_zdebug {
+        if raw.len() < 12 || !raw.starts_with(b"ZLIB") {
+            return Err(format_err("compressed", 0, "truncated zdebug header"));
         }
-        return inflate(&raw[12..]);
+        let size = u64::from_be_bytes(raw[4..12].try_into().unwrap());
+        return inflate_declared(&raw[12..], size, max);
     }
     let (ch_type, ch_size, header) = if is_64 {
         if raw.len() < 24 {
-            return Err(format_err("dwarf", 0, "truncated ELF compression header"));
+            return Err(format_err("compressed", 0, "truncated ELF compression header"));
         }
         let ch_type = u32_endian(raw[0..4].try_into().unwrap(), endian);
         let ch_size = u64_endian(raw[8..16].try_into().unwrap(), endian);
         (ch_type, ch_size, 24usize)
     } else {
         if raw.len() < 12 {
-            return Err(format_err("dwarf", 0, "truncated ELF compression header"));
+            return Err(format_err("compressed", 0, "truncated ELF compression header"));
         }
         let ch_type = u32_endian(raw[0..4].try_into().unwrap(), endian);
         let ch_size = u64::from(u32_endian(raw[4..8].try_into().unwrap(), endian));
         (ch_type, ch_size, 12usize)
     };
-    if ch_size > max {
-        return Err(fail("BlockedRegionError", "uncompressed debug section exceeds maxSectionBytes"));
-    }
     match ch_type {
-        1 => inflate(&raw[header..]),
+        1 => inflate_declared(&raw[header..], ch_size, max),
         2 => Err(fail("UnsupportedFeatureError", "zstd compressed DWARF")),
         other => Err(fail(
             "UnsupportedFeatureError",
@@ -175,8 +182,49 @@ fn decompress_debug(raw: &[u8], is_64: bool, endian: object::Endianness, max: u6
     }
 }
 
-fn inflate(src: &[u8]) -> Result<Vec<u8>> {
-    miniz_oxide::inflate::decompress_to_vec_zlib(src).map_err(|e| format_err("dwarf", 0, format!("zlib: {e:?}")))
+fn size_mismatch(got: Option<u64>, declared: u64) -> Error {
+    match got {
+        Some(got) => format_err(
+            "compressed",
+            0,
+            format!("uncompressed size {got} != declared {declared}"),
+        ),
+        None => format_err(
+            "compressed",
+            0,
+            format!("uncompressed size exceeds declared {declared}"),
+        ),
+    }
+}
+
+fn inflate_declared(src: &[u8], expected: u64, max: u64) -> Result<Vec<u8>> {
+    if expected > max {
+        return Err(fail(
+            "BlockedRegionError",
+            "uncompressed debug section exceeds maxSectionBytes",
+        ));
+    }
+    let limit = match usize::try_from(expected.max(1)) {
+        Ok(n) => n,
+        Err(_) => {
+            return Err(fail(
+                "BlockedRegionError",
+                "uncompressed debug section exceeds maxSectionBytes",
+            ))
+        }
+    };
+    match miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(src, limit) {
+        Ok(out) => {
+            if out.len() as u64 != expected {
+                return Err(size_mismatch(Some(out.len() as u64), expected));
+            }
+            Ok(out)
+        }
+        Err(e) if e.status == miniz_oxide::inflate::TINFLStatus::HasMoreOutput => {
+            Err(size_mismatch(None, expected))
+        }
+        Err(e) => Err(format_err("dwarf", 0, format!("zlib: {e:?}"))),
+    }
 }
 
 fn slice_to_string(slice: Slice<'_>) -> String {
