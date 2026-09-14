@@ -3,6 +3,7 @@ mod parse;
 mod perl_groups;
 mod print;
 mod regexp;
+mod simplify;
 mod unicode_tables;
 
 use napi::bindgen_prelude::*;
@@ -12,6 +13,7 @@ use regexp::{
     cap_names, dump_fixed, max_cap, regexp_string, tree_json, CLASS_NL, DOT_NL, FOLD_CASE, LITERAL, MATCH_NL, NON_GREEDY,
     ONE_LINE, PERL, PERL_X, POSIX, SIMPLE, UNICODE_GROUPS, WAS_DOLLAR,
 };
+use simplify::simplify;
 
 #[napi(object)]
 pub struct ParseRow {
@@ -32,6 +34,26 @@ pub fn syntax_parse(pattern: String, flags: u32) -> Result<ParseRow> {
             max_cap: max_cap(&nodes, id),
             cap_names: cap_names(&nodes, id),
         }),
+        Err(err) => Err(Error::new(
+            Status::InvalidArg,
+            format!("SyntaxError:{}:{}:{}", err.code, err.expr, err.message()),
+        )),
+    }
+}
+
+#[napi]
+pub fn syntax_simplify(pattern: String, flags: u32) -> Result<ParseRow> {
+    match parse(&pattern, flags as u16) {
+        Ok((mut nodes, id)) => {
+            let sid = simplify(&mut nodes, id);
+            Ok(ParseRow {
+                dump: dump_fixed(&nodes, sid),
+                printed: regexp_string(&nodes, sid),
+                json: tree_json(&nodes, sid),
+                max_cap: max_cap(&nodes, sid),
+                cap_names: cap_names(&nodes, sid),
+            })
+        }
         Err(err) => Err(Error::new(
             Status::InvalidArg,
             format!("SyntaxError:{}:{}:{}", err.code, err.expr, err.message()),

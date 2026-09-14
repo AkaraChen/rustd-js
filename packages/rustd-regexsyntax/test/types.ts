@@ -1,10 +1,12 @@
-import { OP, FLAGS, syntaxParse, flagsToString, SyntaxRegexp } from '../index.js';
+import { OP, FLAGS, syntaxParse, syntaxSimplify, flagsToString, SyntaxRegexp } from '../index.js';
 
 const re: SyntaxRegexp = syntaxParse('a(b)', FLAGS.Perl);
 const op: number = re.op;
 const dump: string = re.dump();
 const printed: string = re.toString();
 const names: string[] = re.capNames();
+const simple: SyntaxRegexp = re.simplify();
+const simple2: SyntaxRegexp = syntaxSimplify('a{2,}', FLAGS.Perl);
 const flagText: string = flagsToString(FLAGS.Perl | FLAGS.FoldCase);
 const n: number = OP.Literal + FLAGS.Perl;
 
@@ -17,6 +19,8 @@ const wrong: number = dump;
 void op;
 void printed;
 void names;
+void simple;
+void simple2;
 void flagText;
 void n;
 void wrong;

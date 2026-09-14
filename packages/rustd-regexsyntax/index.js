@@ -104,12 +104,14 @@ function native(fn) {
 }
 
 class SyntaxRegexp {
-  constructor(row) {
+  constructor(row, pattern, flags) {
     this._dump = row.dump;
     this._printed = row.printed;
     this._json = JSON.parse(row.json);
     this._maxCap = row.maxCap;
     this._capNames = row.capNames;
+    this._pattern = pattern;
+    this._flags = flags;
   }
 
   get op() { return this._json.op; }
@@ -131,6 +133,13 @@ class SyntaxRegexp {
     if (!(other instanceof SyntaxRegexp)) return false;
     return this._dump === other._dump && this._printed === other._printed;
   }
+
+  simplify() {
+    if (typeof this._pattern !== 'string') {
+      throw new TypeError('regexsyntax: simplify requires a parsed SyntaxRegexp');
+    }
+    return syntaxSimplify(this._pattern, this._flags);
+  }
 }
 
 function wrapNode(json) {
@@ -150,7 +159,17 @@ function syntaxParse(pattern, flags) {
   if (typeof flags !== 'number' || !Number.isInteger(flags)) {
     throw new TypeError('regexsyntax: flags must be an integer');
   }
-  return new SyntaxRegexp(native(() => binding.syntaxParse(pattern, flags >>> 0)));
+  return new SyntaxRegexp(native(() => binding.syntaxParse(pattern, flags >>> 0)), pattern, flags);
+}
+
+function syntaxSimplify(pattern, flags) {
+  if (typeof pattern !== 'string') {
+    throw new TypeError('regexsyntax: pattern must be a string');
+  }
+  if (typeof flags !== 'number' || !Number.isInteger(flags)) {
+    throw new TypeError('regexsyntax: flags must be an integer');
+  }
+  return new SyntaxRegexp(native(() => binding.syntaxSimplify(pattern, flags >>> 0)), pattern, flags);
 }
 
 module.exports = {
@@ -159,5 +178,6 @@ module.exports = {
   SyntaxError,
   SyntaxRegexp,
   syntaxParse,
+  syntaxSimplify,
   flagsToString,
 };

@@ -58,7 +58,9 @@ export class SyntaxRegexp {
   maxCap(): number;
   capNames(): string[];
   equal(other: SyntaxRegexp): boolean;
+  simplify(): SyntaxRegexp;
 }
 
 export function syntaxParse(pattern: string, flags: number): SyntaxRegexp;
+export function syntaxSimplify(pattern: string, flags: number): SyntaxRegexp;
 export function flagsToString(flags: number): string;
