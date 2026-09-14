@@ -9,6 +9,7 @@ export const {
   constCompare,
   constSign,
   constBitLen,
+  constBinaryOp,
   TOKEN,
   SCAN_MODE,
   PARSE_MODE,

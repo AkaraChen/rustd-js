@@ -9,6 +9,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi8"] }
 napi-derive = "3"
+num-bigint = { version = "0.4.6", default-features = false, features = ["std"] }
+num-rational = { version = "0.4.2", default-features = false, features = ["num-bigint", "num-bigint-std", "std"] }
 
 [build-dependencies]
 napi-build = "2"

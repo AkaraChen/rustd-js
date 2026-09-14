@@ -106,7 +106,26 @@ func main() {
 	verifyParseEdgesFlag := flag.Bool("verify-parse-edges", false, "verify a parse-edge packet read from stdin")
 	constantFlag := flag.Bool("constant", false, "dump go/constant Int/MakeInt64 fixtures")
 	verifyConstantFlag := flag.Bool("verify-constant", false, "verify a constant-int packet read from stdin")
+	constantBinFlag := flag.Bool("constant-binop", false, "dump go/constant Int BinaryOp fixtures")
+	verifyConstantBinFlag := flag.Bool("verify-constant-binop", false, "verify a constant-int-binop packet read from stdin")
 	flag.Parse()
+	if *verifyConstantBinFlag {
+		verifyConstantBin(os.Stdin)
+		return
+	}
+	if *constantBinFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantBin(writer)
+		return
+	}
 	if *verifyConstantFlag {
 		verifyConstant(os.Stdin)
 		return

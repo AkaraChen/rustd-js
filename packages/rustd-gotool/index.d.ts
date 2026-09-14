@@ -4,16 +4,23 @@ export function versionIsValid(x: string): boolean;
 /** Language version, e.g. "go1.21rc2" → "go1.21". Invalid input → "". */
 export function versionLang(x: string): string;
 
-/** Opaque `go/constant.Value` (issue #28). This checkpoint only constructs Int via constMakeInt64. */
+/** Opaque `go/constant.Value` (issue #28). Int via constMakeInt64 / constBinaryOp. */
 export class GoConstValue {
   readonly kind: 'Bool' | 'String' | 'Int' | 'Float' | 'Complex' | 'Unknown';
+  /** `constant.Value.String()` for Int; `"unknown"` for Unknown. */
+  toString(): string;
 }
 export function constMakeInt64(v: bigint): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
-/** Integer ordering: -1 / 0 / 1. This checkpoint only compares Int values. */
+/** Integer ordering: -1 / 0 / 1. Throws if either operand is not Int. */
 export function constCompare(x: GoConstValue, y: GoConstValue): number;
 export function constSign(v: GoConstValue): number;
 export function constBitLen(v: GoConstValue): number;
+/**
+ * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR.
+ * QUO of Ints is Float (`n` / `n/d` ExactString). QUO/REM by zero → Unknown.
+ */
+export function constBinaryOp(op: number, x: GoConstValue, y: GoConstValue): GoConstValue;
 
 export const TOKEN: {
   readonly ILLEGAL: number;

@@ -8,6 +8,7 @@ import {
   constCompare,
   constSign,
   constBitLen,
+  constBinaryOp,
   TOKEN,
   SCAN_MODE,
   PARSE_MODE,
@@ -32,6 +33,8 @@ const [ival, iok]: [bigint, boolean] = constToInt(cv);
 const icmp: number = constCompare(cv, constMakeInt64(0n));
 const isign: number = constSign(cv);
 const ibits: number = constBitLen(cv);
+const badd: GoConstValue = constBinaryOp(TOKEN.ADD, cv, constMakeInt64(1n));
+const bstr: string = badd.toString();
 const cmp: number = versionCompare('go1.21', 'go1.21.0');
 const ok: boolean = versionIsValid('go1.21rc2');
 const lang: string = versionLang('go1.21rc2');
@@ -58,6 +61,8 @@ const id = astNewIdent('Fmt');
 const exported: boolean = astIsExported(id.name);
 // @ts-expect-error MakeInt64 takes bigint
 constMakeInt64(1);
+// @ts-expect-error BinaryOp operands are GoConstValue
+constBinaryOp(TOKEN.ADD, 1n, cv);
 // @ts-expect-error versions are strings, not numbers
 versionCompare(1, 2);
 // @ts-expect-error IsValid takes a string
@@ -66,4 +71,4 @@ versionIsValid(1);
 versionLang(1);
 // @ts-expect-error compare does not return boolean
 const wrong: boolean = versionCompare('go1', 'go1.1');
-void [cv, kind, ival, iok, icmp, isign, ibits, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
+void [cv, kind, ival, iok, icmp, isign, ibits, badd, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];

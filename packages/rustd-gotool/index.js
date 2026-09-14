@@ -47,6 +47,9 @@ class GoConstValue {
   get kind() {
     return this._n.kind;
   }
+  toString() {
+    return binding.constString(this._n);
+  }
 }
 
 function asConst(value, label) {
@@ -71,6 +74,11 @@ function constSign(v) {
 }
 function constBitLen(v) {
   return binding.constBitLen(asConst(v, 'v')._n);
+}
+function constBinaryOp(op, x, y) {
+  return new GoConstValue(
+    binding.constBinaryOp(asNumber(op, 'op'), asConst(x, 'x')._n, asConst(y, 'y')._n),
+  );
 }
 
 function asNumber(value, label) {
@@ -342,6 +350,7 @@ module.exports.constToInt = constToInt;
 module.exports.constCompare = constCompare;
 module.exports.constSign = constSign;
 module.exports.constBitLen = constBitLen;
+module.exports.constBinaryOp = constBinaryOp;
 module.exports.TOKEN = TOKEN;
 module.exports.SCAN_MODE = SCAN_MODE;
 module.exports.PARSE_MODE = PARSE_MODE;
