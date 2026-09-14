@@ -81,7 +81,7 @@ export class MultipartReader {
   write(chunk: Uint8Array): void
   nextPart(): MultipartPart | null
   nextRawPart(): MultipartPart | null
-  /** Go `ReadForm`. Part-count default 1000 (`maxParts` / `multipartmaxparts`). File spill and maxMemory accounting stay later. */
+  /** Go `ReadForm`. Part-count default 1000 (`maxParts` / `multipartmaxparts`). Non-file values use Go `maxMemory + 10MB`. File spill stays later. */
   readForm(maxMemory: number): MultipartForm
 }
 export class MultipartPart {

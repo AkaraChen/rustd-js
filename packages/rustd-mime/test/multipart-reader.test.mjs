@@ -855,6 +855,62 @@ test('readForm maxParts=3 matches GODEBUG multipartmaxparts=3', () => {
   );
 });
 
+test('readForm maxMemory header cap vs Go (name=x, 100-byte value)', () => {
+  const body = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name="x"\r\n\r\n' + '1'.repeat(100) + '\r\n--b--\r\n',
+  );
+  const failAt = 638 - (10 << 20);
+  const goFail = goReadForm(body, 'b', failAt - 1);
+  assert.equal(goFail.error, 'multipart: message too large');
+  assert.throws(() => nativeReadForm('b', body, failAt - 1), MessageTooLargeError);
+  const goOk = goReadForm(body, 'b', failAt);
+  const form = nativeReadForm('b', body, failAt);
+  assertFormValuesMatch(form, goOk);
+  assert.equal(form.value.x[0].length, 100);
+  const goZero = goReadForm(body, 'b', 0);
+  assertFormValuesMatch(nativeReadForm('b', body, 0), goZero);
+});
+
+test('readForm maxMemory value body vs Go (largetext 1024 bytes)', () => {
+  const body = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name="largetext"\r\n\r\n' + '1'.repeat(1024) + '\r\n--b--\r\n',
+  );
+  const failAt = 1233 - (10 << 20);
+  const goFail = goReadForm(body, 'b', failAt - 1);
+  assert.equal(goFail.error, 'multipart: message too large');
+  assert.throws(() => nativeReadForm('b', body, failAt - 1), (err) => {
+    assert.ok(err instanceof MessageTooLargeError);
+    assert.equal(err.message, 'multipart: message too large');
+    return true;
+  });
+  const goOk = goReadForm(body, 'b', failAt);
+  const form = nativeReadForm('b', body, failAt);
+  assertFormValuesMatch(form, goOk);
+  assert.equal(form.value.largetext[0], '1'.repeat(1024));
+});
+
+test('readForm maxMemory two values vs Go (hello/world)', () => {
+  const body = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name="a"\r\n\r\nhello\r\n--b\r\nContent-Disposition: form-data; name="b"\r\n\r\nworld\r\n--b--\r\n',
+  );
+  const failAt = 844 - (10 << 20);
+  const goFail = goReadForm(body, 'b', failAt - 1);
+  assert.equal(goFail.error, 'multipart: message too large');
+  assert.throws(() => nativeReadForm('b', body, failAt - 1), MessageTooLargeError);
+  const goOk = goReadForm(body, 'b', failAt);
+  const form = nativeReadForm('b', body, failAt);
+  assertFormValuesMatch(form, goOk);
+  assert.equal(form.value.a[0], 'hello');
+  assert.equal(form.value.b[0], 'world');
+});
+
+test('readForm maxMemory=-10MiB is MessageTooLargeError vs Go', () => {
+  const body = Buffer.from('--b\r\nContent-Disposition: form-data; name="x"\r\n\r\nhello\r\n--b--\r\n');
+  const go = goReadForm(body, 'b', -(10 << 20));
+  assert.equal(go.error, 'multipart: message too large');
+  assert.throws(() => nativeReadForm('b', body, -(10 << 20)), MessageTooLargeError);
+});
+
 test('readForm 1000 files succeeds vs Go; 1001 is MessageTooLargeError', () => {
   const w1000 = new MultipartWriter({ boundary: 'b' });
   for (let i = 0; i < 1000; i++) {
