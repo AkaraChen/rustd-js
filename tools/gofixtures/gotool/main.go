@@ -106,7 +106,45 @@ func main() {
 	verifyParseEdgesFlag := flag.Bool("verify-parse-edges", false, "verify a parse-edge packet read from stdin")
 	constantFlag := flag.Bool("constant", false, "dump go/constant Int/MakeInt64 fixtures")
 	verifyConstantFlag := flag.Bool("verify-constant", false, "verify a constant-int packet read from stdin")
+	constantBinFlag := flag.Bool("constant-binop", false, "dump go/constant Int BinaryOp fixtures")
+	verifyConstantBinFlag := flag.Bool("verify-constant-binop", false, "verify a constant-int-binop packet read from stdin")
+	constantUSFlag := flag.Bool("constant-unary-shift", false, "dump go/constant Int UnaryOp/AND_NOT/Shift fixtures")
+	verifyConstantUSFlag := flag.Bool("verify-constant-unary-shift", false, "verify a constant-int-unary-shift packet read from stdin")
 	flag.Parse()
+	if *verifyConstantUSFlag {
+		verifyConstantUnaryShift(os.Stdin)
+		return
+	}
+	if *constantUSFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantUnaryShift(writer)
+		return
+	}
+	if *verifyConstantBinFlag {
+		verifyConstantBin(os.Stdin)
+		return
+	}
+	if *constantBinFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantBin(writer)
+		return
+	}
 	if *verifyConstantFlag {
 		verifyConstant(os.Stdin)
 		return
