@@ -113,7 +113,7 @@ defaultRand(); // auto-seeded ChaCha8; same instance on later calls
 
 `defaultRand()` is a PRNG seeded from `crypto.getRandomValues`. It is **not** a CSPRNG and must not be used for tokens, keys, nonces, or session IDs.
 
-`state()` / `randFromState()` bytes match Go `encoding.BinaryMarshaler` / `BinaryUnmarshaler` exactly, including the ChaCha8 `"readbuf:"` prefix when a Go `Read` left unconsumed bytes.
+`state()` / `randFromState()` bytes match Go `encoding.BinaryMarshaler` / `BinaryUnmarshaler` exactly, including the ChaCha8 `"readbuf:"` prefix when a Go `Read` left unconsumed bytes. Checkpoint 8 covers the reverse direction: JS `state()` bytes fed to Go `UnmarshalBinary` continue the same PCG/ChaCha8 `Uint64` stream (`test/rand_js_to_go.test.mjs`).
 
 ## Not a CSPRNG
 
