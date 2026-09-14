@@ -528,5 +528,108 @@ test('LineReader vs readelf --debug-dump=decodedline at function entry+mid PCs; 
   file.close();
 });
 
+function parseGoNmSize(text) {
+  const letter = {
+    T: 'text',
+    t: 'text',
+    D: 'data',
+    d: 'data',
+    B: 'bss',
+    b: 'bss',
+    R: 'rodata',
+    r: 'rodata',
+    U: 'undefined',
+    u: 'undefined',
+    F: 'file',
+    f: 'file',
+    _: 'file',
+  };
+  const rows = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 4) continue;
+    const [addr, size, code] = parts;
+    const name = parts.slice(3).join(' ');
+    const kind = letter[code];
+    if (!kind) continue;
+    rows.push({
+      name,
+      value: BigInt(`0x${addr}`),
+      size: BigInt(size),
+      kind,
+      code,
+    });
+  }
+  return rows;
+}
+
+function tupleKey(row) {
+  return JSON.stringify([row.name, row.value.toString(), row.size.toString(), row.kind]);
+}
+
+test('symbols() vs go tool nm -size set equality on linux/amd64 (issue #18 §4.2)', () => {
+  assert.equal(process.arch, 'x64');
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-nm-'));
+  const out = join(dir, 'hello');
+  const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+    cwd: join(pkg, 'gofixtures'),
+    env: { ...process.env, GOWORK: 'off', CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'amd64' },
+  });
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+
+  const nm = go(['tool', 'nm', '-size', out]);
+  assert.equal(nm.status, 0, nm.stderr);
+  const nmRows = parseGoNmSize(nm.stdout);
+  assert.ok(nmRows.some((r) => r.name === 'main.main'), 'go tool nm lists main.main');
+
+  const file = open(out);
+  const ours = file.symbols().map((s) => ({
+    name: s.name,
+    value: s.value,
+    size: s.size,
+    kind: s.kind,
+  }));
+  file.close();
+
+  const nmSet = new Set(nmRows.map(tupleKey));
+  const ourSet = new Set(ours.map(tupleKey));
+  const onlyNm = [...nmSet].filter((k) => !ourSet.has(k)).slice(0, 12);
+  const onlyOurs = [...ourSet].filter((k) => !nmSet.has(k)).slice(0, 12);
+  assert.equal(ourSet.size, nmSet.size, `count ours=${ourSet.size} nm=${nmSet.size}`);
+  assert.equal(onlyNm.length, 0, `only nm: ${onlyNm.join('\n')}`);
+  assert.equal(onlyOurs.length, 0, `only ours: ${onlyOurs.join('\n')}`);
+
+  const objdump = spawnSync('objdump', ['-t', out], {
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: 30000,
+  });
+  assert.equal(objdump.status, 0, objdump.stderr);
+  const objdumpNames = new Set();
+  for (const line of objdump.stdout.split('\n')) {
+    const m = line.match(/^[0-9a-f]+\s+\S.*\s(\S+)$/i);
+    if (m) objdumpNames.add(m[1]);
+  }
+  const nmNames = new Set(nmRows.map((r) => r.name));
+  const ourNames = new Set(ours.map((r) => r.name));
+  const objdumpOnly = [...objdumpNames].filter((n) => !nmNames.has(n) && !ourNames.has(n));
+  const nmNotObjdump = [...nmNames].filter((n) => !objdumpNames.has(n));
+  // Second source: record disagreements; do not prefer objdump over go tool nm.
+  console.log(
+    JSON.stringify({
+      objdumpVsNm: {
+        objdumpNames: objdumpNames.size,
+        nmNames: nmNames.size,
+        objdumpOnlySample: objdumpOnly.slice(0, 8),
+        nmNotObjdumpSample: nmNotObjdump.slice(0, 8),
+        objdumpOnlyCount: objdumpOnly.length,
+        nmNotObjdumpCount: nmNotObjdump.length,
+      },
+    }),
+  );
+});
+
 void UnsupportedFeatureError;
 void root;

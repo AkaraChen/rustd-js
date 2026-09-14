@@ -939,22 +939,53 @@ fn symbol_kind(file: &object::File<'_>, sym: &object::Symbol<'_, '_>) -> String 
     if sym.is_undefined() {
         return "undefined".into();
     }
+    if sym.is_common() {
+        return "bss".into();
+    }
+    // STT_FILE / SHN_ABS: go tool nm emits `_` (`?` lowercased). Issue #18 maps F to `file`.
+    if sym.kind() == SymbolKind::File {
+        return "file".into();
+    }
+    if let SymbolSection::Section(index) = sym.section() {
+        if let Ok(section) = file.section_by_index(index) {
+            if let SectionFlags::Elf { sh_flags } = section.flags() {
+                return elf_nm_kind(sh_flags);
+            }
+            return match section.kind() {
+                SectionKind::Text => "text".into(),
+                SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => "rodata".into(),
+                SectionKind::UninitializedData | SectionKind::Common => "bss".into(),
+                _ => fallback_symbol_kind(sym),
+            };
+        }
+    }
+    fallback_symbol_kind(sym)
+}
+
+/// Match `cmd/internal/objfile` ELF codes: ALLOC|EXEC→T, ALLOC→R, ALLOC|WRITE→D.
+/// `.bss` is SHF_ALLOC|SHF_WRITE, so go tool nm reports `D`/`d`, not `B`.
+fn elf_nm_kind(sh_flags: u64) -> String {
+    let write = sh_flags & 0x1 != 0;
+    let alloc = sh_flags & 0x2 != 0;
+    let exec = sh_flags & 0x4 != 0;
+    if alloc && exec {
+        return "text".into();
+    }
+    if alloc && !write {
+        return "rodata".into();
+    }
+    if alloc && write {
+        return "data".into();
+    }
+    "unknown".into()
+}
+
+fn fallback_symbol_kind(sym: &object::Symbol<'_, '_>) -> String {
     match sym.kind() {
         SymbolKind::Text => "text".into(),
         SymbolKind::File => "file".into(),
         SymbolKind::Section => "section".into(),
-        SymbolKind::Data | SymbolKind::Tls => {
-            if let SymbolSection::Section(index) = sym.section() {
-                if let Ok(section) = file.section_by_index(index) {
-                    return match section.kind() {
-                        SectionKind::UninitializedData | SectionKind::Common => "bss".into(),
-                        SectionKind::ReadOnlyData | SectionKind::ReadOnlyString => "rodata".into(),
-                        _ => "data".into(),
-                    };
-                }
-            }
-            "data".into()
-        }
+        SymbolKind::Data | SymbolKind::Tls => "data".into(),
         SymbolKind::Unknown | SymbolKind::Label => "unknown".into(),
         _ => "unknown".into(),
     }

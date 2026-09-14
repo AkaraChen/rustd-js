@@ -29,6 +29,10 @@ Addresses, offsets, and sizes are `bigint`. `open(path)` maps the file with
 - Section type names are Go `SHT_*` tokens when `object` exposes an ELF type;
   otherwise they fall back to `object::SectionKind`.
 - Non-UTF-8 names use Unicode replacement rather than `bstr`.
+- ELF `symbols()[].kind` follows `go tool nm` / `cmd/internal/objfile`:
+  `SHN_UNDEF`→`undefined`, `SHN_COMMON`→`bss`, `SHF_ALLOC|EXEC`→`text`,
+  `SHF_ALLOC`→`rodata`, `SHF_ALLOC|WRITE`→`data` (including `.bss`; GNU `nm`
+  would use `B`). `STT_FILE` is `file` (go tool nm prints `_`).
 
 ## Format matrix (this slice)
 
