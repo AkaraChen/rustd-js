@@ -134,6 +134,155 @@ test('truncated copy of a real ELF is a format error', () => {
   assert.throws(() => openBytes(cut), BinaryFormatError);
 });
 
+function elf64leFields(bytes) {
+  assert.ok(bytes.length >= 64, 'ELF64 Ehdr');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  assert.equal(bytes[0], 0x7f);
+  assert.equal(bytes[4], 2);
+  assert.equal(bytes[5], 1);
+  return {
+    shoff: Number(view.getBigUint64(40, true)),
+    shentsize: view.getUint16(58, true),
+    shnum: view.getUint16(60, true),
+  };
+}
+
+function writeElf64LeShdr(buf, at, { name = 0, type = 0, flags = 0n, addr = 0n, offset = 0n, size = 0n, link = 0, info = 0, addralign = 0n, entsize = 0n }) {
+  buf.writeUInt32LE(name, at);
+  buf.writeUInt32LE(type, at + 4);
+  buf.writeBigUInt64LE(flags, at + 8);
+  buf.writeBigUInt64LE(addr, at + 16);
+  buf.writeBigUInt64LE(offset, at + 24);
+  buf.writeBigUInt64LE(size, at + 32);
+  buf.writeUInt32LE(link, at + 40);
+  buf.writeUInt32LE(info, at + 44);
+  buf.writeBigUInt64LE(addralign, at + 48);
+  buf.writeBigUInt64LE(entsize, at + 56);
+}
+
+/** 1KiB ELF64 LE: NULL + .shstrtab + one SHT_PROGBITS extra section. */
+function elf64leTiny({ extraName, extraOffset, extraSize, extraType = 1 }) {
+  const shstr = Buffer.from(`\0.shstrtab\0${extraName}\0`);
+  const shnum = 3;
+  const shoff = 64;
+  const shentsize = 64;
+  const strOff = shoff + shnum * shentsize;
+  const fileLen = 1024;
+  assert.ok(strOff + shstr.length <= fileLen);
+  const buf = Buffer.alloc(fileLen);
+  buf.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
+  buf.writeUInt16LE(1, 16); // ET_REL
+  buf.writeUInt16LE(62, 18); // EM_X86_64
+  buf.writeUInt32LE(1, 20);
+  buf.writeBigUInt64LE(0n, 24);
+  buf.writeBigUInt64LE(0n, 32);
+  buf.writeBigUInt64LE(BigInt(shoff), 40);
+  buf.writeUInt32LE(0, 48);
+  buf.writeUInt16LE(64, 52);
+  buf.writeUInt16LE(0, 54);
+  buf.writeUInt16LE(0, 56);
+  buf.writeUInt16LE(shentsize, 58);
+  buf.writeUInt16LE(shnum, 60);
+  buf.writeUInt16LE(1, 62);
+  writeElf64LeShdr(buf, shoff, {});
+  writeElf64LeShdr(buf, shoff + shentsize, {
+    name: 1,
+    type: 3,
+    offset: BigInt(strOff),
+    size: BigInt(shstr.length),
+    addralign: 1n,
+  });
+  writeElf64LeShdr(buf, shoff + 2 * shentsize, {
+    name: 11,
+    type: extraType,
+    offset: extraOffset,
+    size: extraSize,
+    addralign: 1n,
+  });
+  shstr.copy(buf, strOff);
+  return { bytes: new Uint8Array(buf), shoff, shentsize, shnum, fileLen };
+}
+
+test('issue #18 §4.7: truncate at each ELF section header → BinaryFormatError, no OOB', () => {
+  const path = buildHello();
+  const full = readFileSync(path);
+  const { shoff, shentsize, shnum } = elf64leFields(full);
+  assert.equal(shentsize, 64);
+  assert.ok(shnum >= 2, `shnum=${shnum}`);
+  assert.ok(shoff + shnum * shentsize <= full.length);
+
+  let cuts = 0;
+  for (let i = 0; i < shnum; i += 1) {
+    const at = shoff + i * shentsize;
+    const cut = full.subarray(0, at);
+    assert.throws(
+      () => openBytes(cut),
+      (err) => {
+        assert.ok(err instanceof BinaryFormatError, String(err));
+        assert.equal(err.kind, 'truncated', `header ${i} kind=${err.kind} offset=${err.offset}`);
+        assert.equal(err.offset, BigInt(at), `header ${i} offset ${err.offset} != ${at}`);
+        return true;
+      },
+    );
+    cuts += 1;
+  }
+  assert.equal(cuts, shnum);
+
+  const tiny = elf64leTiny({ extraName: '.ok', extraOffset: 0n, extraSize: 16n });
+  for (let i = 0; i < tiny.shnum; i += 1) {
+    const at = tiny.shoff + i * tiny.shentsize;
+    assert.throws(
+      () => openBytes(tiny.bytes.subarray(0, at)),
+      (err) => {
+        assert.ok(err instanceof BinaryFormatError, String(err));
+        assert.equal(err.kind, 'truncated');
+        assert.equal(err.offset, BigInt(at));
+        return true;
+      },
+    );
+  }
+});
+
+test('issue #18 §4.7: sh_offset+sh_size past EOF is BinaryFormatError; 4GiB sh_size is BlockedRegionError', () => {
+  const overflow = elf64leTiny({
+    extraName: '.overflow',
+    extraOffset: BigInt(1024 - 8),
+    extraSize: 32n,
+  });
+  const overflowFile = openBytes(overflow.bytes);
+  const overflowSec = overflowFile.section('.overflow');
+  assert.ok(overflowSec);
+  assert.equal(overflowSec.size, 32n);
+  assert.throws(
+    () => overflowSec.data(),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'truncated');
+      return true;
+    },
+  );
+  overflowFile.close();
+
+  const bomb = elf64leTiny({
+    extraName: '.bomb',
+    extraOffset: 0n,
+    extraSize: 0x1_0000_0000n,
+  });
+  assert.equal(bomb.bytes.length, 1024);
+  const rssBefore = process.memoryUsage().rss;
+  const bombFile = openBytes(bomb.bytes);
+  const bombSec = bombFile.section('.bomb');
+  assert.ok(bombSec);
+  assert.equal(bombSec.size, 0x1_0000_0000n);
+  assert.throws(() => bombSec.data(), BlockedRegionError);
+  const rssAfter = process.memoryUsage().rss;
+  assert.ok(
+    rssAfter - rssBefore < 64 * 1024 * 1024,
+    `rss grew ${rssAfter - rssBefore} after 4GiB sh_size data()`,
+  );
+  bombFile.close();
+});
+
 test('Java CAFEBABE is not sniffed as Mach-O fat', () => {
   const java = Uint8Array.of(0xca, 0xfe, 0xba, 0xbe, 0x00, 0x00, 0x00, 0x3d);
   assert.equal(sniff(java), null);

@@ -310,6 +310,10 @@ fn open_shared(source: Source, size: u64, max_section_bytes: u64, base: u64) -> 
             Kind::Plan9 => {
                 plan9::parse(slice).map_err(|e| format_err("plan9", 0, e))?;
             }
+            Kind::Elf => {
+                crate::elf::validate_section_headers(slice)?;
+                parse_object(slice)?;
+            }
             _ => {
                 parse_object(slice)?;
             }
@@ -684,6 +688,18 @@ impl NativeBinaryFile {
                         section.size()
                     ),
                 ));
+            }
+            if let Some((offset, size)) = section.file_range() {
+                let end = offset.checked_add(size).ok_or_else(|| {
+                    format_err("overflow", offset, "sh_offset + sh_size overflow")
+                })?;
+                if end > bytes.len() as u64 {
+                    return Err(format_err(
+                        "truncated",
+                        offset,
+                        "sh_offset + sh_size exceeds file",
+                    ));
+                }
             }
             if is_compressed(&section) {
                 return Err(fail(
