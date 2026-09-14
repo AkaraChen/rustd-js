@@ -67,3 +67,18 @@ $ ls -l packages/rustd-debugfmt/*.node
 ```
 
 729,904 bytes / 2,000,000 cap.
+
+## Performance (issue #18 §4.8)
+
+Open a real `go build` ELF grown to ≥100MB with a sparse tail (so file size is
+not conflated with symbol-table work), `open(path)` mmap, and
+`iterateSymbols` over every symbol:
+
+- median wall time **< 300ms**
+- peak RSS growth **< 20% of the file size** (mmap + header/symbol parse; the
+  sparse tail must not become resident)
+
+Measured on this worktree after checkpoint 14 (Linux x64, Node 24.20.0,
+104,857,600-byte padded ELF, 2302 symbols): median **12.8ms**, RSS growth
+**15,241,216** bytes / 20,971,520 cap. See `test/debugfmt.test.mjs`
+(`issue #18 §4.8`). Five-platform prebuilds stay later.

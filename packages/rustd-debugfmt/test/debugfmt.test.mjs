@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, truncateSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -1782,6 +1782,76 @@ test('issue #18 §4.7: zdebug / SHF_COMPRESSED uncompressed size mismatch is Bin
     { name: '.debug_info', data: elfChdrZlib(info, Math.max(1, info.length - 4)), flags: SHF_COMPRESSED },
     { name: '.debug_line', data: line },
   ]));
+});
+
+function procKb(field) {
+  try {
+    const text = readFileSync('/proc/self/status', 'utf8');
+    const m = text.match(new RegExp(`^${field}:\\s+(\\d+)\\s+kB`, 'm'));
+    if (m) return Number(m[1]) * 1024;
+  } catch {
+    /* non-Linux */
+  }
+  return process.memoryUsage().rss;
+}
+
+function rssBytes() {
+  return procKb('VmRSS');
+}
+
+function hwmBytes() {
+  return procKb('VmHWM');
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+test('issue #18 §4.8: mmap-open ≥100MB Go binary, enumerate symbols, median <300ms, RSS <20%', { timeout: 60000 }, () => {
+  const src = buildHello();
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-100mb-'));
+  const large = join(dir, 'hello-100mb');
+  copyFileSync(src, large);
+  const minBytes = 100 * 1024 * 1024;
+  if (statSync(large).size < minBytes) truncateSync(large, minBytes);
+  const fileBytes = statSync(large).size;
+  assert.ok(fileBytes >= minBytes, `padded Go ELF is ${fileBytes} bytes`);
+
+  const probe = open(large);
+  assert.equal(probe.kind, 'elf');
+  assert.equal(probe.size, BigInt(fileBytes));
+  let expected = 0;
+  probe.iterateSymbols(() => {
+    expected += 1;
+  });
+  probe.close();
+  assert.ok(expected > 0, 'Go binary must expose at least one symbol');
+
+  const times = [];
+  const rss0 = rssBytes();
+  const hwm0 = hwmBytes();
+  let peakRss = rss0;
+  for (let i = 0; i < 9; i++) {
+    const t0 = performance.now();
+    const file = open(large);
+    let n = 0;
+    file.iterateSymbols(() => {
+      n += 1;
+    });
+    file.close();
+    times.push(performance.now() - t0);
+    assert.equal(n, expected);
+    peakRss = Math.max(peakRss, rssBytes());
+  }
+  const rss1 = rssBytes();
+  const hwm1 = hwmBytes();
+  const grew = Math.max(0, rss1 - rss0, peakRss - rss0, hwm1 - hwm0);
+  const cap = Math.floor(fileBytes * 0.2);
+  const med = median(times);
+  assert.ok(med < 300, `symbol enumerate median ${med.toFixed(2)}ms, want <300ms (runs=${times.map((t) => t.toFixed(1)).join(',')})`);
+  assert.ok(grew < cap, `RSS grew ${grew} bytes (rss0=${rss0} peak=${peakRss} rss1=${rss1} hwmΔ=${hwm1 - hwm0}), want <20% of ${fileBytes} (${cap})`);
 });
 
 void UnsupportedFeatureError;
