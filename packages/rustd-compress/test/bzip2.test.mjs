@@ -124,17 +124,56 @@ test('Go hello-9 truncation at every offset matches native error text', () => {
   assert.ok(errors >= 50, `hello-9-trunc errors ${errors}`);
 });
 
-test('bzip2DecompressStream yields the same bytes', async () => {
+test('bzip2DecompressStream matches one-shot and Bzip2Decompressor across splits', async () => {
   const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
-  const happy = packet.bzip.find((c) => c.id === 'lcg4k-9');
+  const ids = ['hello-1', 'hello-9', 'concat-hello', 'lcg4k-9'];
+  for (const id of ids) {
+    const fixture = packet.bzip.find((c) => c.id === id);
+    assert.ok(fixture, id);
+    const data = Buffer.from(fixture.compressedB64, 'base64');
+    const expected = bzip2Decompress(data);
+    assert.equal(sha(expected), fixture.sha256, `${id} one-shot`);
+    for (const size of [1, 2, 3, 7, 64, 1024, data.length]) {
+      const classChunks = [];
+      const dec = new Bzip2Decompressor();
+      for (let i = 0; i < data.length; i += size) {
+        dec.write(data.subarray(i, i + size));
+        for (;;) {
+          const part = dec.read();
+          if (!part.length) break;
+          classChunks.push(part);
+        }
+      }
+      dec.end();
+      for (;;) {
+        const part = dec.read();
+        if (!part.length) break;
+        classChunks.push(part);
+      }
+      assert.equal(sha(Buffer.concat(classChunks)), sha(expected), `${id} class split ${size}`);
+
+      async function* chunks() {
+        for (let i = 0; i < data.length; i += size) {
+          yield data.subarray(i, i + size);
+        }
+      }
+      const streamChunks = [];
+      for await (const part of bzip2DecompressStream(chunks())) streamChunks.push(part);
+      assert.equal(sha(Buffer.concat(streamChunks)), sha(expected), `${id} stream split ${size}`);
+    }
+  }
+});
+
+test('bzip2DecompressStream truncated input throws Bzip2FormatError', async () => {
+  const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const happy = packet.bzip.find((c) => c.id === 'hello-9');
   const data = Buffer.from(happy.compressedB64, 'base64');
   async function* chunks() {
-    yield data.subarray(0, 10);
-    yield data.subarray(10);
+    yield data.subarray(0, 2);
   }
-  const out = [];
-  for await (const part of bzip2DecompressStream(chunks())) out.push(part);
-  assert.equal(sha(Buffer.concat(out)), happy.sha256);
+  await assert.rejects(async () => {
+    for await (const part of bzip2DecompressStream(chunks())) void part;
+  }, Bzip2FormatError);
 });
 
 test('reset reuses a decompressor', () => {
