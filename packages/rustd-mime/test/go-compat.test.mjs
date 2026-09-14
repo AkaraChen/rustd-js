@@ -116,7 +116,12 @@ test('JS generates quoted-printable and media types → Go verifies', () => {
     formatted: formatMediaType(c.type, c.params ?? {}),
   }));
   const headers = fixture.headers.map((c) => ({ in: c.in, out: decoder.decodeHeader(c.in) }));
-  const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers };
+  const ext = fixture.ext.map((c) => ({
+    ext: c.ext,
+    type: typeByExtension(c.ext),
+    exts: c.type ? [...extensionsByType(c.type)].sort() : [],
+  }));
+  const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers, ext };
   const verified = go(['-verify'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
   assert.match(verified.stdout, /Go verified \d+ mime cases/);

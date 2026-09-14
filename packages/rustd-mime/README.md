@@ -12,6 +12,8 @@ Checkpoint 4: `python3` `quopri` encode/decode vs `quotedPrintable*`, and Go `Pa
 
 Checkpoint 5: `curl -H Content-Type` against a local Node HTTP server; the wire header equals the `-H` value, `parseMediaType` of that header matches the original, and Go `ParseMediaType` verifies the same strings (issue #9 §4.2 third-party). Multipart `curl -F` still waits on `rustd-net`.
 
+Checkpoint 6: `loadSystemMimeTypes` custom `mime.types` / `globs2` (Go `loadMimeFile` / `loadMimeGlobsFile` rules, including `text/` charset default and first-weight-wins) plus unix default paths vs Go `TypeByExtension` / `ExtensionsByType`. Default `loadSystemMimeTypes()` matches Go 1.24 `initMimeUnix` (stop after the first readable globs2). Multipart still waits on `rustd-net`.
+
 ## Differences from Go
 
 - **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.
@@ -23,9 +25,9 @@ Checkpoint 5: `curl -H Content-Type` against a local Node HTTP server; the wire 
 
 ## Size
 
-Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14): **457,464 bytes** / 2,000,000.
+Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14): **456,776 bytes** / 2,000,000.
 
 ```text
 $ ls -l packages/rustd-mime/*.node
--rwxrwxr-x 1 akrc akrc 457464 Sep 14 16:23 packages/rustd-mime/rustd-mime.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 456776 Sep 14 18:01 packages/rustd-mime/rustd-mime.linux-x64-gnu.node
 ```

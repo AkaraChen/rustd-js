@@ -78,19 +78,34 @@ fn ensure(tables: &mut Option<Tables>) -> &mut Tables {
 }
 
 fn init_unix(tables: &mut Tables) {
+    let _ = load_unix_defaults(tables);
+}
+
+fn load_unix_defaults(tables: &mut Tables) -> u32 {
     for filename in GLOBS {
-        if load_mime_globs_file(tables, filename).is_ok() {
-            return;
+        if let Ok(n) = load_mime_globs_file(tables, filename) {
+            return n;
         }
     }
+    let mut n = 0;
     for filename in TYPE_FILES {
-        load_mime_file(tables, filename);
+        n += load_mime_file(tables, filename);
+    }
+    n
+}
+
+fn load_one_path(tables: &mut Tables, path: &str) -> u32 {
+    if path.ends_with("globs2") {
+        load_mime_globs_file(tables, path).unwrap_or(0)
+    } else {
+        load_mime_file(tables, path)
     }
 }
 
-fn load_mime_globs_file(tables: &mut Tables, filename: &str) -> Result<(), ()> {
+fn load_mime_globs_file(tables: &mut Tables, filename: &str) -> Result<u32, ()> {
     let file = File::open(filename).map_err(|_| ())?;
     let reader = BufReader::new(file);
+    let mut n = 0u32;
     for line in reader.lines().map_while(Result::ok) {
         let fields: Vec<&str> = line.split(':').collect();
         if fields.len() < 3 || fields[0].is_empty() || fields[2].len() < 3 {
@@ -108,9 +123,11 @@ fn load_mime_globs_file(tables: &mut Tables, filename: &str) -> Result<(), ()> {
         if tables.mime_types.contains_key(extension) {
             continue;
         }
-        let _ = set_extension_type(tables, extension, fields[1]);
+        if set_extension_type(tables, extension, fields[1]).is_ok() {
+            n += 1;
+        }
     }
-    Ok(())
+    Ok(n)
 }
 
 fn load_mime_file(tables: &mut Tables, filename: &str) -> u32 {
@@ -198,17 +215,8 @@ pub fn add_extension_type(ext: &str, typ: &str) -> Result<(), String> {
 pub fn load_system_mime_types(paths: Option<Vec<String>>) -> u32 {
     let mut guard = TABLES.lock().expect("mime type table");
     let tables = ensure(&mut guard);
-    let mut n = 0u32;
-    let default: Vec<String> = GLOBS.iter().chain(TYPE_FILES.iter()).map(|s| (*s).to_string()).collect();
-    let list = paths.unwrap_or(default);
-    for path in list {
-        if path.ends_with("globs2") {
-            if load_mime_globs_file(tables, &path).is_ok() {
-                n += 1;
-            }
-        } else {
-            n += load_mime_file(tables, &path);
-        }
+    match paths {
+        None => load_unix_defaults(tables),
+        Some(list) => list.iter().map(|path| load_one_path(tables, path)).sum(),
     }
-    n
 }

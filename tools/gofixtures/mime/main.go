@@ -490,12 +490,18 @@ func formatCases() []FormatCase {
 }
 
 func extCases() []ExtCase {
-	exts := []string{".txt", ".html", ".HTML", ".json", ".wasm", ".png", ".unknownext", ".tar.gz", ".js"}
+	exts := []string{
+		".txt", ".html", ".HTML", ".htm", ".json", ".wasm", ".png", ".PNG",
+		".unknownext", ".tar.gz", ".js", ".mjs", ".css", ".gif", ".jpg", ".jpeg",
+		".JPG", ".pdf", ".svg", ".xml", ".webp", ".avif", ".zip", ".tar", ".gz",
+		".mp3", ".mp4", ".ogg", ".woff", ".woff2", ".ttf", ".md", ".csv", ".rs",
+		".go", ".c", ".h", ".sh", ".py", ".rb", ".php", ".BIN",
+	}
 	var out []ExtCase
 	for _, ext := range exts {
 		typ := mime.TypeByExtension(ext)
-		got, _ := mime.ExtensionsByType(typ)
-		if got == nil {
+		got, err := mime.ExtensionsByType(typ)
+		if err != nil || got == nil {
 			got = []string{}
 		}
 		sort.Strings(got)
@@ -519,7 +525,7 @@ func main() {
 		if packet.Schema != 1 || packet.Package != "mime" {
 			fail(fmt.Errorf("invalid packet"))
 		}
-		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers) == 0 {
+		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext) == 0 {
 			fail(fmt.Errorf("empty cases"))
 		}
 		for _, c := range packet.Parse {
@@ -594,7 +600,34 @@ func main() {
 				fail(fmt.Errorf("header mismatch %q", c.In))
 			}
 		}
-		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers))
+		for _, c := range packet.Ext {
+			typ := mime.TypeByExtension(c.Ext)
+			if typ != c.Type {
+				fail(fmt.Errorf("ext mismatch %q: got %q want %q", c.Ext, typ, c.Type))
+			}
+			if c.Type == "" {
+				continue
+			}
+			got, err := mime.ExtensionsByType(c.Type)
+			if err != nil {
+				fail(fmt.Errorf("exts %q: %v", c.Type, err))
+			}
+			if got == nil {
+				got = []string{}
+			}
+			sort.Strings(got)
+			want := append([]string(nil), c.Exts...)
+			sort.Strings(want)
+			if len(got) != len(want) {
+				fail(fmt.Errorf("exts count %q: got %v want %v", c.Type, got, want))
+			}
+			for i := range got {
+				if got[i] != want[i] {
+					fail(fmt.Errorf("exts %q: got %v want %v", c.Type, got, want))
+				}
+			}
+		}
+		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext))
 		return
 	}
 	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Headers: headerCases(), Format: formatCases(), Ext: extCases()}
