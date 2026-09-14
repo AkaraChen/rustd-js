@@ -1,0 +1,1 @@
+{ "extends": "../../tsconfig.base.json", "include": ["index.d.ts", "generated-names.d.ts", "test/types.ts"] }
