@@ -66,10 +66,14 @@ func results(pkg string, data []byte, incremental bool) map[string]string {
 }
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 func main() {
-	pkg := flag.String("pkg", "template", "template or checksum")
+	pkg := flag.String("pkg", "template", "template, checksum, or archive")
 	out := flag.String("out", "", "output JSON file; stdout by default")
 	verify := flag.Bool("verify", false, "verify a packet read from stdin")
 	flag.Parse()
+	if *pkg == "archive" {
+		runArchive(*out, *verify)
+		return
+	}
 	if *pkg != "template" && *pkg != "checksum" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
