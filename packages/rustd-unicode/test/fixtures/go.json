@@ -39218,247 +39218,288 @@
         "hex": "",
         "r": 65533,
         "size": 0,
-        "valid": true
+        "valid": true,
+        "recodeHex": ""
       },
       {
         "hex": "00",
         "r": 0,
         "size": 1,
-        "valid": true
+        "valid": true,
+        "recodeHex": "00"
       },
       {
         "hex": "7f",
         "r": 127,
         "size": 1,
-        "valid": true
+        "valid": true,
+        "recodeHex": "7f"
       },
       {
         "hex": "80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd"
       },
       {
         "hex": "c0 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd"
       },
       {
         "hex": "c1 bf",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd"
       },
       {
         "hex": "c2 80",
         "r": 128,
         "size": 2,
-        "valid": true
+        "valid": true,
+        "recodeHex": "c2 80"
       },
       {
         "hex": "df bf",
         "r": 2047,
         "size": 2,
-        "valid": true
+        "valid": true,
+        "recodeHex": "df bf"
       },
       {
         "hex": "c2 7f",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd 7f"
       },
       {
         "hex": "c2 c0",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd"
       },
       {
         "hex": "df 00",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd 00"
       },
       {
         "hex": "e0 80 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "e0 9f bf",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "e0 a0 80",
         "r": 2048,
         "size": 3,
-        "valid": true
+        "valid": true,
+        "recodeHex": "e0 a0 80"
       },
       {
         "hex": "e0 a0 7f",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd 7f"
       },
       {
         "hex": "e1 00 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd 00 ef bf bd"
       },
       {
         "hex": "e1",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd"
       },
       {
         "hex": "ed 9f bf",
         "r": 55295,
         "size": 3,
-        "valid": true
+        "valid": true,
+        "recodeHex": "ed 9f bf"
       },
       {
         "hex": "ed a0 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "ed bf bf",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "ed a0",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd"
       },
       {
         "hex": "ee 80 80",
         "r": 57344,
         "size": 3,
-        "valid": true
+        "valid": true,
+        "recodeHex": "ee 80 80"
       },
       {
         "hex": "ef bf bf",
         "r": 65535,
         "size": 3,
-        "valid": true
+        "valid": true,
+        "recodeHex": "ef bf bf"
       },
       {
         "hex": "ef bf bd",
         "r": 65533,
         "size": 3,
-        "valid": true
+        "valid": true,
+        "recodeHex": "ef bf bd"
       },
       {
         "hex": "f0 80 80 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "f0 8f bf bf",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "f0 90 80 80",
         "r": 65536,
         "size": 4,
-        "valid": true
+        "valid": true,
+        "recodeHex": "f0 90 80 80"
       },
       {
         "hex": "f0",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd"
       },
       {
         "hex": "f0 90",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd"
       },
       {
         "hex": "f0 90 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "f0 90 80 7f",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd 7f"
       },
       {
         "hex": "f4 8f bf bf",
         "r": 1114111,
         "size": 4,
-        "valid": true
+        "valid": true,
+        "recodeHex": "f4 8f bf bf"
       },
       {
         "hex": "f4 90 80 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "f5 80 80 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "f8 80 80 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "80 80 80",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd ef bf bd"
       },
       {
         "hex": "ff",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd"
       },
       {
         "hex": "c2",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd"
       },
       {
         "hex": "e0 a0",
         "r": 65533,
         "size": 1,
-        "valid": false
+        "valid": false,
+        "recodeHex": "ef bf bd ef bf bd"
       },
       {
         "hex": "f0 9f 98 80",
         "r": 128512,
         "size": 4,
-        "valid": true
+        "valid": true,
+        "recodeHex": "f0 9f 98 80"
       },
       {
         "hex": "ef bf bd",
         "r": 65533,
         "size": 3,
-        "valid": true
+        "valid": true,
+        "recodeHex": "ef bf bd"
       }
     ],
     "runeLen": [
@@ -39514,7 +39555,13 @@
         65533,
         3
       ]
-    ]
+    ],
+    "roundTrip": {
+      "allValidLen": 4382592,
+      "allValidChecksum": 2088655199,
+      "allValidRecodeEqual": true,
+      "allValidRecodeChecksum": 2088655199
+    }
   },
   "utf16": {
     "encode": [
@@ -39764,6 +39811,10 @@
   "randomUtf8": {
     "len": 1048576,
     "valid": false,
-    "runeCount": 1009370
+    "runeCount": 1009370,
+    "recodeLen": 1950032,
+    "recodeChecksum": 2701185412,
+    "recodeValid": true,
+    "recodeRuneCount": 1009370
   }
 }

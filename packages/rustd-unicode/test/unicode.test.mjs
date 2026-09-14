@@ -217,6 +217,34 @@ function fromHex(hex) {
   return Uint8Array.from(hex.split(' ').map((b) => Number.parseInt(b, 16)));
 }
 
+function toHex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+function recode(bytes) {
+  const chunks = [];
+  let total = 0;
+  for (const { r } of utf8Runes(bytes)) {
+    const enc = utf8EncodeRune(r);
+    chunks.push(enc);
+    total += enc.length;
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function checksumBytes(bytes) {
+  let h = 2166136261;
+  h = mix32(h, bytes.length >>> 0);
+  for (let i = 0; i < bytes.length; i++) h = mix32(h, bytes[i]);
+  return h >>> 0;
+}
+
 test('utf8 DecodeRune single-byte 0x00..0xFF matches Go', () => {
   for (const [b, r, size] of go.utf8.singleByte) {
     const got = utf8DecodeRune(Uint8Array.of(b));
@@ -273,6 +301,8 @@ test('utf8 structural samples, RuneLen, Valid, round-trip', () => {
     assert.equal(got.r, sample.r, sample.hex);
     assert.equal(got.size, sample.size, sample.hex);
     assert.equal(utf8Valid(bytes), sample.valid, sample.hex);
+    assert.equal(toHex(recode(bytes)), sample.recodeHex, `recode ${sample.hex}`);
+    if (sample.valid) assert.deepEqual([...recode(bytes)], [...bytes], `identity ${sample.hex}`);
   }
   for (const [r, n] of go.utf8.runeLen) {
     assert.equal(utf8RuneLen(r), n, `RuneLen ${r}`);
@@ -383,7 +413,28 @@ test('utf16 full codepoint + surrogate-pair DecodeRune vs Go checksums', () => {
   assert.equal(pairH, full.decodeRuneSurrChecksum);
 });
 
-test('1 MiB LCG byte stream: Valid and RuneCount match Go and do not hang', () => {
+test('utf8 legal encode(decode(x))==x for every valid rune; concat checksum vs Go', () => {
+  const rt = go.utf8.roundTrip;
+  const all = new Uint8Array(rt.allValidLen);
+  let offset = 0;
+  for (let r = 0; r <= 0x10ffff; r++) {
+    if (!utf8ValidRune(r)) continue;
+    const enc = utf8EncodeRune(r);
+    const again = recode(enc);
+    assert.deepEqual([...again], [...enc], `roundtrip U+${r.toString(16)}`);
+    all.set(enc, offset);
+    offset += enc.length;
+  }
+  assert.equal(offset, rt.allValidLen);
+  assert.equal(checksumBytes(all), rt.allValidChecksum);
+  const redone = recode(all);
+  assert.equal(rt.allValidRecodeEqual, true);
+  assert.equal(redone.length, all.length);
+  assert.equal(checksumBytes(redone), rt.allValidRecodeChecksum);
+  assert.deepEqual(redone, all);
+});
+
+test('1 MiB LCG byte stream: Valid, RuneCount, and recode match Go and do not hang', () => {
   let x = 1;
   const buf = new Uint8Array(go.randomUtf8.len);
   for (let i = 0; i < buf.length; i++) {
@@ -392,6 +443,12 @@ test('1 MiB LCG byte stream: Valid and RuneCount match Go and do not hang', () =
   }
   assert.equal(utf8Valid(buf), go.randomUtf8.valid);
   assert.equal(utf8RuneCount(buf), go.randomUtf8.runeCount);
+  const redone = recode(buf);
+  assert.equal(redone.length, go.randomUtf8.recodeLen);
+  assert.equal(checksumBytes(redone), go.randomUtf8.recodeChecksum);
+  assert.equal(utf8Valid(redone), go.randomUtf8.recodeValid);
+  assert.equal(utf8RuneCount(redone), go.randomUtf8.recodeRuneCount);
+  assert.equal(utf8RuneCount(redone), utf8RuneCount(buf));
 });
 
 test('typed-array slices and independent encode output', () => {
