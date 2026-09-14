@@ -53,6 +53,22 @@ alone. `utf16Decode` replaces lone surrogates with U+FFFD; `codePointAt`
 preserves them. `TextDecoder` replaces illegal UTF-8 by default; `utf8Valid`
 reports false.
 
+## Generate
+
+Tables and fixtures come from `tools/gentables` on **Go 1.24.13**
+(`unicode.Version == "15.0.0"`). Re-running the generator must not change
+committed files:
+
+```text
+$ cd packages/rustd-unicode
+$ GOWORK=off mise exec go@1.24.13 -- go run -C tools/gentables .
+generated 245 range table names, unicode 15.0.0, go go1.24.13
+$ git diff --exit-code -- src/generated.rs generated-names.d.ts test/fixtures
+```
+
+Same assertion as `pnpm generate:check` (from this package directory). Do not
+regenerate with a different Go toolchain; `goVersion` is part of the fixture.
+
 ## Size
 
 Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **511,224 bytes** (issue cap 2 MB).

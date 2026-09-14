@@ -79,6 +79,7 @@ function inRuns(runs, r) {
 test('unicode version matches Go 15.0.0', () => {
   assert.equal(unicodeVersion, '15.0.0');
   assert.equal(go.version, '15.0.0');
+  assert.equal(go.goVersion, 'go1.24.13');
 });
 
 test('range table names equal Go exported *RangeTable set', () => {
