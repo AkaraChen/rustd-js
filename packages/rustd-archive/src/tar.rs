@@ -172,6 +172,84 @@ fn format_pax_record(k: &str, v: &str) -> String {
     record
 }
 
+/// Parse a PAX timestamp (`%d.%d`) the same way Go `archive/tar.parsePAXTime` does.
+/// Returns milliseconds since Unix epoch (sub-millisecond fraction kept in the f64).
+fn parse_pax_time_ms(s: &str) -> Result<f64> {
+    const MAX_NANO_DIGITS: usize = 9;
+    let (ss, sn) = match s.split_once('.') {
+        Some((a, b)) => (a, b),
+        None => (s, ""),
+    };
+    let secs: i64 = ss
+        .parse()
+        .map_err(|_| FormatError::tar(0, "archive/tar: invalid tar header"))?;
+    if sn.is_empty() {
+        return Ok(secs as f64 * 1000.0);
+    }
+    if !sn.bytes().all(|c| c.is_ascii_digit()) {
+        return Err(FormatError::tar(0, "archive/tar: invalid tar header"));
+    }
+    let mut nano = sn.to_string();
+    if nano.len() < MAX_NANO_DIGITS {
+        nano.extend(std::iter::repeat('0').take(MAX_NANO_DIGITS - nano.len()));
+    } else {
+        nano.truncate(MAX_NANO_DIGITS);
+    }
+    let nsecs: i64 = nano
+        .parse()
+        .map_err(|_| FormatError::tar(0, "archive/tar: invalid tar header"))?;
+    let nsecs = if ss.starts_with('-') { -nsecs } else { nsecs };
+    let (secs, nsecs) = normalize_unix(secs, nsecs);
+    // Match Go `Time.UnixMilli`: integer milliseconds, sub-ms discarded.
+    Ok(secs as f64 * 1000.0 + (nsecs / 1_000_000) as f64)
+}
+
+fn normalize_unix(mut secs: i64, mut nsecs: i64) -> (i64, i64) {
+    const E9: i64 = 1_000_000_000;
+    if nsecs < 0 || nsecs >= E9 {
+        let n = nsecs / E9;
+        secs += n;
+        nsecs -= n * E9;
+        if nsecs < 0 {
+            nsecs += E9;
+            secs -= 1;
+        }
+    }
+    (secs, nsecs)
+}
+
+/// Format milliseconds as Go `archive/tar.formatPAXTime` (`time.UnixMilli`).
+fn format_pax_time_ms(ms: f64) -> String {
+    let msec = ms.trunc() as i64;
+    let mut secs = msec / 1000;
+    let mut nsecs = (msec % 1000) * 1_000_000;
+    if nsecs < 0 {
+        secs -= 1;
+        nsecs += 1_000_000_000;
+    }
+    if nsecs == 0 {
+        return format!("{secs}");
+    }
+    let (sign, secs_fmt, nsecs_fmt) = if secs < 0 {
+        ("-", -(secs + 1), -(nsecs - 1_000_000_000))
+    } else {
+        ("", secs, nsecs)
+    };
+    format!("{sign}{secs_fmt}.{nsecs_fmt:09}")
+        .trim_end_matches('0')
+        .to_string()
+}
+
+fn mtime_needs_pax(mtime_ms: Option<f64>) -> bool {
+    let Some(ms) = mtime_ms else {
+        return false;
+    };
+    let msec = ms.trunc() as i64;
+    let secs = msec / 1000;
+    let nsecs = (msec % 1000) * 1_000_000;
+    nsecs != 0 || secs < 0 || secs > 0o77777777777
+}
+
 fn parse_pax(body: &[u8]) -> Result<BTreeMap<String, String>> {
     let mut map = BTreeMap::new();
     let mut s = std::str::from_utf8(body).map_err(|_| FormatError::tar(0, "archive/tar: invalid tar header"))?;
@@ -212,6 +290,7 @@ fn needs_pax(e: &Entry) -> bool {
         || !e.name.is_ascii()
         || !e.linkname.is_ascii()
         || !e.pax.is_empty()
+        || mtime_needs_pax(e.mtime_ms)
 }
 
 fn split_ustar(name: &str) -> Option<(String, String)> {
@@ -306,6 +385,11 @@ pub fn create(entries: &[Entry]) -> Result<Vec<u8>> {
         if e.gname.len() > 31 {
             pax.insert("gname".into(), e.gname.clone());
         }
+        if mtime_needs_pax(e.mtime_ms) {
+            if let Some(ms) = e.mtime_ms {
+                pax.entry("mtime".into()).or_insert_with(|| format_pax_time_ms(ms));
+            }
+        }
         if !pax.is_empty() || needs_pax(e) {
             if e.name.len() > 100 {
                 pax.entry("path".into()).or_insert_with(|| e.name.clone());
@@ -335,8 +419,15 @@ fn apply_pax(e: &mut Entry, pax: &BTreeMap<String, String>) -> Result<()> {
             "uid" => e.uid = v.parse().map_err(|_| FormatError::tar(0, "archive/tar: invalid tar header"))?,
             "gid" => e.gid = v.parse().map_err(|_| FormatError::tar(0, "archive/tar: invalid tar header"))?,
             "mtime" => {
-                let secs: f64 = v.parse().unwrap_or(0.0);
-                e.mtime_ms = Some(secs * 1000.0);
+                if !v.is_empty() {
+                    e.mtime_ms = Some(parse_pax_time_ms(v)?);
+                }
+            }
+            "atime" | "ctime" => {
+                if !v.is_empty() {
+                    parse_pax_time_ms(v)?;
+                }
+                e.pax.insert(k.clone(), v.clone());
             }
             _ => {
                 e.pax.insert(k.clone(), v.clone());
