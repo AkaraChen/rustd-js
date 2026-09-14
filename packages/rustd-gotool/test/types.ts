@@ -5,6 +5,8 @@ import {
   GoConstValue,
   constMakeInt64,
   constToInt,
+  constToString,
+  constFloat64Val,
   constCompare,
   constSign,
   constBitLen,
@@ -32,7 +34,10 @@ import {
 const cv: GoConstValue = constMakeInt64(-42n);
 const kind: GoConstValue['kind'] = cv.kind;
 const [ival, iok]: [bigint, boolean] = constToInt(cv);
+const [sval, sok]: [string, boolean] = constToString(cv);
+const [fval, fok]: [number, boolean] = constFloat64Val(cv);
 const icmp: number = constCompare(cv, constMakeInt64(0n));
+const fcmp: number = constCompare(constBinaryOp(TOKEN.QUO, cv, constMakeInt64(2n)), cv);
 const isign: number = constSign(cv);
 const ibits: number = constBitLen(cv);
 const badd: GoConstValue = constBinaryOp(TOKEN.ADD, cv, constMakeInt64(1n));
@@ -65,6 +70,10 @@ const id = astNewIdent('Fmt');
 const exported: boolean = astIsExported(id.name);
 // @ts-expect-error MakeInt64 takes bigint
 constMakeInt64(1);
+// @ts-expect-error StringVal operand is GoConstValue
+constToString(1);
+// @ts-expect-error Float64Val operand is GoConstValue
+constFloat64Val(1);
 // @ts-expect-error BinaryOp operands are GoConstValue
 constBinaryOp(TOKEN.ADD, 1n, cv);
 // @ts-expect-error UnaryOp operand is GoConstValue
@@ -79,4 +88,4 @@ versionIsValid(1);
 versionLang(1);
 // @ts-expect-error compare does not return boolean
 const wrong: boolean = versionCompare('go1', 'go1.1');
-void [cv, kind, ival, iok, icmp, isign, ibits, badd, uxor, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
+void [cv, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, isign, ibits, badd, uxor, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];

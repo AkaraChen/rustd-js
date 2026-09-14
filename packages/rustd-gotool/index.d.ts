@@ -12,7 +12,11 @@ export class GoConstValue {
 }
 export function constMakeInt64(v: bigint): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
-/** Integer ordering: -1 / 0 / 1. Throws if either operand is not Int. */
+/** Go `StringVal`. Int/Float would panic → `["", false]`; Unknown → `["", true]`. */
+export function constToString(v: GoConstValue): [string, boolean];
+/** Go `Float64Val` for Int/Float/Unknown. Bits match IEEE-754; Unknown is `[0, false]`. */
+export function constFloat64Val(v: GoConstValue): [number, boolean];
+/** Int/Float ordering via Go `Compare` (`big.Rat.Cmp`): -1 / 0 / 1. Throws on Unknown. */
 export function constCompare(x: GoConstValue, y: GoConstValue): number;
 export function constSign(v: GoConstValue): number;
 export function constBitLen(v: GoConstValue): number;

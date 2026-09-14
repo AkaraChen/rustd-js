@@ -66,6 +66,14 @@ function constToInt(v) {
   const r = binding.constToInt(asConst(v, 'v')._n);
   return [r.value, r.ok];
 }
+function constToString(v) {
+  const r = binding.constToString(asConst(v, 'v')._n);
+  return [r.value, r.ok];
+}
+function constFloat64Val(v) {
+  const r = binding.constFloat64Val(asConst(v, 'v')._n);
+  return [r.value, r.ok];
+}
 function constCompare(x, y) {
   return binding.constCompare(asConst(x, 'x')._n, asConst(y, 'y')._n);
 }
@@ -363,6 +371,8 @@ module.exports.versionLang = versionLang;
 module.exports.GoConstValue = GoConstValue;
 module.exports.constMakeInt64 = constMakeInt64;
 module.exports.constToInt = constToInt;
+module.exports.constToString = constToString;
+module.exports.constFloat64Val = constFloat64Val;
 module.exports.constCompare = constCompare;
 module.exports.constSign = constSign;
 module.exports.constBitLen = constBitLen;

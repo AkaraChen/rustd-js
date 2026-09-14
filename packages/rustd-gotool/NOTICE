@@ -1,8 +1,9 @@
 rustd-gotool includes a Go lexer, FileSet, parser, ast.Fprint
 printer, and go/constant Int arithmetic whose control flow and error
 conditions are derived from the Go standard library packages go/token,
-go/scanner, go/parser, go/ast, and go/constant (BSD-3-Clause, The Go
-Authors).
+go/scanner, go/parser, go/ast, go/constant, and math/big (BSD-3-Clause,
+The Go Authors). Float64Val uses the same round-to-even quotient algorithm
+as `math/big.Rat.Float64`.
 
 Unicode identifier tables (Letter / Digit / Upper range tables) are
 generated from Go 1.24.13 unicode data.

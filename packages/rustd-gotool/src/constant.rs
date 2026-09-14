@@ -87,6 +87,116 @@ fn sign_i32(s: Sign) -> i32 {
 
 /// Go `(*big.Int).Int64`: low 64 bits of the absolute value, then apply sign.
 /// Exact iff the value fits in int64 (`makeInt` → `int64Val`).
+fn ldexp(x: f64, exp: i32) -> f64 {
+    x * 2f64.powi(exp)
+}
+
+/// Go `math/big.quotToFloat64`: nearest f64 of non-negative a/b, round-half-to-even.
+fn quot_to_float64(a: &num_bigint::BigInt, b: &num_bigint::BigInt) -> (f64, bool) {
+    const MSIZE: i32 = 52;
+    const MSIZE1: i32 = 53;
+    const MSIZE2: i32 = 54;
+    const EBIAS: i32 = 1023;
+    const EMIN: i32 = 1 - EBIAS;
+
+    let alen = i32::try_from(a.bits()).unwrap_or(i32::MAX);
+    if alen == 0 {
+        return (0.0, true);
+    }
+    let blen = i32::try_from(b.bits()).unwrap_or(i32::MAX);
+    if blen == 0 {
+        return (f64::INFINITY, false);
+    }
+    let mut exp = alen - blen;
+    let mut a2 = a.clone();
+    let mut b2 = b.clone();
+    let shift = MSIZE2 - exp;
+    if shift > 0 {
+        a2 <<= shift as usize;
+    } else if shift < 0 {
+        b2 <<= (-shift) as usize;
+    }
+    let q = &a2 / &b2;
+    let r = &a2 % &b2;
+    let mut mantissa = u64::try_from(&q).unwrap_or(0);
+    let mut have_rem = r.sign() != Sign::NoSign;
+    if mantissa >> MSIZE2 == 1 {
+        if mantissa & 1 == 1 {
+            have_rem = true;
+        }
+        mantissa >>= 1;
+        exp += 1;
+    }
+    if EMIN - MSIZE <= exp && exp <= EMIN {
+        let sh = (EMIN - (exp - 1)) as u32;
+        let lostbits = mantissa & ((1u64 << sh) - 1);
+        have_rem = have_rem || lostbits != 0;
+        mantissa >>= sh;
+        exp = 2 - EBIAS;
+    }
+    let mut exact = !have_rem;
+    if mantissa & 1 != 0 {
+        exact = false;
+        if have_rem || mantissa & 2 != 0 {
+            mantissa += 1;
+            if mantissa >= (1u64 << MSIZE2) {
+                mantissa >>= 1;
+                exp += 1;
+            }
+        }
+    }
+    mantissa >>= 1;
+    let f = ldexp(mantissa as f64, exp - MSIZE1);
+    if f.is_infinite() {
+        exact = false;
+    }
+    (f, exact)
+}
+
+fn apply_sign(f: f64, sign: Sign) -> f64 {
+    if sign == Sign::Minus {
+        -f
+    } else {
+        f
+    }
+}
+
+fn abs_int(n: &num_bigint::BigInt) -> num_bigint::BigInt {
+    if n.sign() == Sign::Minus {
+        -n
+    } else {
+        n.clone()
+    }
+}
+
+/// Go `constant.Float64Val` for Int (`int64Val` hardware path, else `intVal` via n/1).
+fn float64_val_int(n: &num_bigint::BigInt) -> (f64, bool) {
+    if let Ok(x) = i64::try_from(n) {
+        let f = x as f64;
+        // Go compares `int64(f) == x`. Out-of-range f64→int64 (including +2^63)
+        // is MinInt64 on gc/amd64 (`CVTTSD2SI`), not Rust's saturating cast.
+        const TWO63: f64 = 9223372036854775808.0;
+        let back_ok = f.is_finite() && {
+            let t = f.trunc();
+            t >= i64::MIN as f64 && t < TWO63 && t as i64 == x
+        };
+        return (f, back_ok);
+    }
+    let (f, exact) = quot_to_float64(&abs_int(n), &num_bigint::BigInt::from(1));
+    (apply_sign(f, n.sign()), exact)
+}
+
+/// Go `(*big.Rat).Float64` (sign from the numerator).
+fn float64_val_rat(r: &BigRational) -> (f64, bool) {
+    let numer = r.numer();
+    let denom = r.denom();
+    if denom.sign() == Sign::NoSign {
+        return (f64::INFINITY, false);
+    }
+    let (f, exact) = quot_to_float64(&abs_int(numer), &abs_int(denom));
+    (apply_sign(f, numer.sign()), exact)
+}
+
 fn int64_val(n: &num_bigint::BigInt) -> (i64, bool) {
     if let Ok(x) = i64::try_from(n) {
         return (x, true);
@@ -108,6 +218,60 @@ pub fn const_make_int64(v: BigInt) -> Result<GoConstValue> {
     Ok(make_int(num_bigint::BigInt::from(i64_from_js_bigint(&v)?)))
 }
 
+#[napi(object)]
+pub struct ConstToStringResult {
+    pub value: String,
+    pub ok: bool,
+}
+
+#[napi(object)]
+pub struct ConstFloat64ValResult {
+    pub value: f64,
+    pub ok: bool,
+}
+
+/// Go `StringVal`: `["", true]` for Unknown; Int/Float would panic → `["", false]`.
+#[napi]
+pub fn const_to_string(v: &GoConstValue) -> ConstToStringResult {
+    match v.kind.as_str() {
+        "Unknown" => ConstToStringResult {
+            value: String::new(),
+            ok: true,
+        },
+        "String" => ConstToStringResult {
+            value: String::new(),
+            ok: false,
+        },
+        _ => ConstToStringResult {
+            value: String::new(),
+            ok: false,
+        },
+    }
+}
+
+/// Go `Float64Val` for Int/Float/Unknown. Unknown is `(0, false)`.
+#[napi]
+pub fn const_float64_val(v: &GoConstValue) -> ConstFloat64ValResult {
+    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref()) {
+        ("Int", Some(n), _) => {
+            let (value, ok) = float64_val_int(n);
+            ConstFloat64ValResult { value, ok }
+        }
+        ("Float", _, Some(r)) => {
+            let (value, ok) = float64_val_rat(r);
+            ConstFloat64ValResult { value, ok }
+        }
+        ("Unknown", _, _) => ConstFloat64ValResult {
+            value: 0.0,
+            ok: false,
+        },
+        _ => ConstFloat64ValResult {
+            value: 0.0,
+            ok: false,
+        },
+    }
+}
+
 #[napi]
 pub fn const_to_int(v: &GoConstValue) -> ConstToIntResult {
     match (v.kind.as_str(), v.int.as_ref()) {
@@ -125,11 +289,28 @@ pub fn const_to_int(v: &GoConstValue) -> ConstToIntResult {
     }
 }
 
+/// Go `match` then `big.Rat.Cmp` for Int/Float (`int64Val`/`intVal`/`ratVal`).
+fn as_rat(v: &GoConstValue, label: &str) -> Result<BigRational> {
+    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref()) {
+        ("Int", Some(n), _) => Ok(BigRational::from_integer(n.clone())),
+        ("Float", _, Some(r)) => Ok(r.clone()),
+        ("Unknown", _, _) => Err(Error::new(
+            Status::InvalidArg,
+            format!("gotool: {label} is Unknown"),
+        )),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            format!("gotool: {label} must be Int or Float"),
+        )),
+    }
+}
+
+/// Go `Compare` for Int/Float: -1 / 0 / 1. Unknown throws.
 #[napi]
 pub fn const_compare(x: &GoConstValue, y: &GoConstValue) -> Result<i32> {
-    let xi = as_int(x, "x")?;
-    let yi = as_int(y, "y")?;
-    Ok(match xi.cmp(yi) {
+    let xr = as_rat(x, "x")?;
+    let yr = as_rat(y, "y")?;
+    Ok(match xr.cmp(&yr) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
