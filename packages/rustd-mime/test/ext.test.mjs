@@ -20,6 +20,33 @@ test('AddExtensionType requires a leading dot and records the mapping', () => {
   assert.ok(extensionsByType('application/x-rustd-mime-test').includes('.rustdmimetest'));
 });
 
+test('AddExtensionType success mapping vs Go (text/* charset=utf-8 default)', () => {
+  addExtensionType('.ck8plain', 'text/plain');
+  assert.equal(typeByExtension('.ck8plain'), 'text/plain; charset=utf-8');
+  assert.equal(typeByExtension('.CK8PLAIN'), 'text/plain; charset=utf-8');
+  assert.ok(extensionsByType('text/plain').includes('.ck8plain'));
+
+  addExtensionType('.ck8utf8', 'text/plain; charset=utf-8');
+  assert.equal(typeByExtension('.ck8utf8'), 'text/plain; charset=utf-8');
+
+  addExtensionType('.ck8latin', 'text/plain; charset=iso-8859-1');
+  assert.equal(typeByExtension('.ck8latin'), 'text/plain; charset=iso-8859-1');
+
+  addExtensionType('.ck8app', 'application/x-ck8');
+  assert.equal(typeByExtension('.ck8app'), 'application/x-ck8');
+
+  addExtensionType('.ck8upper', 'TEXT/PLAIN');
+  assert.equal(typeByExtension('.ck8upper'), 'TEXT/PLAIN');
+
+  addExtensionType('.ck8params', 'text/plain; foo=bar');
+  assert.equal(typeByExtension('.ck8params'), '');
+  assert.ok(extensionsByType('text/plain').includes('.ck8params'));
+
+  addExtensionType('.CK8MIX', 'text/x-ck8-mix');
+  assert.equal(typeByExtension('.CK8MIX'), 'text/x-ck8-mix; charset=utf-8');
+  assert.equal(typeByExtension('.ck8mix'), 'text/x-ck8-mix; charset=utf-8');
+});
+
 test('AddExtensionType error strings match Go (issue #9 §3)', () => {
   const cases = [
     ['no-dot', 'application/x-test', 'mime: extension "no-dot" missing leading dot'],

@@ -108,9 +108,17 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
   for (const c of fixture.headers) {
     assert.equal(decoder.decodeHeader(c.in), c.out, `header ${JSON.stringify(c.in)}`);
   }
+  let success = 0;
   for (const c of fixture.addExt) {
     assert.equal(addExtNative(c.ext, c.type).error, c.error, `addExt ${JSON.stringify(c.ext)} ${JSON.stringify(c.type)}`);
+    if (c.error) {
+      continue;
+    }
+    success += 1;
+    assert.equal(typeByExtension(c.ext), c.stored, `stored ${c.ext}`);
+    assert.equal(typeByExtension(c.ext.toLowerCase()), c.storedLower, `storedLower ${c.ext}`);
   }
+  assert.ok(success >= 20, `addExt success cases ${success}`);
 });
 
 test('JS generates quoted-printable and media types → Go verifies', () => {
@@ -133,9 +141,21 @@ test('JS generates quoted-printable and media types → Go verifies', () => {
   const ext = fixture.ext.map((c) => ({
     ext: c.ext,
     type: typeByExtension(c.ext),
-    exts: c.type ? [...extensionsByType(c.type)].sort() : [],
+    // Keep Go's extension list: this file's addExt success cases mutate the
+    // process-global table, so native ExtensionsByType(text/plain) would
+    // include .ck8* names a fresh Go process does not have.
+    exts: [...(c.exts ?? [])].sort(),
   }));
-  const addExt = fixture.addExt.map((c) => ({ ext: c.ext, type: c.type, error: addExtNative(c.ext, c.type).error }));
+  const addExt = fixture.addExt.map((c) => {
+    const error = addExtNative(c.ext, c.type).error;
+    return {
+      ext: c.ext,
+      type: c.type,
+      error,
+      stored: error ? '' : typeByExtension(c.ext),
+      storedLower: error ? '' : typeByExtension(c.ext.toLowerCase()),
+    };
+  });
   const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers, ext, addExt };
   const verified = go(['-verify'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);

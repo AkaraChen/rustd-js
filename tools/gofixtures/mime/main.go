@@ -10,14 +10,15 @@ import (
 	"mime/quotedprintable"
 	"os"
 	"sort"
+	"strings"
 )
 
 type ParseCase struct {
-	In         string            `json:"in"`
-	MediaType  string            `json:"mediaType"`
-	Params     map[string]string `json:"params"`
-	Error      string            `json:"error"`
-	Formatted  string            `json:"formatted,omitempty"`
+	In        string            `json:"in"`
+	MediaType string            `json:"mediaType"`
+	Params    map[string]string `json:"params"`
+	Error     string            `json:"error"`
+	Formatted string            `json:"formatted,omitempty"`
 }
 
 type QpCase struct {
@@ -30,12 +31,12 @@ type QpCase struct {
 }
 
 type WordCase struct {
-	Charset string `json:"charset"`
-	Src     string `json:"src"`
-	Enc     string `json:"enc"`
-	Encoded string `json:"encoded"`
-	Decoded string `json:"decoded"`
-	Header  string `json:"header,omitempty"`
+	Charset   string `json:"charset"`
+	Src       string `json:"src"`
+	Enc       string `json:"enc"`
+	Encoded   string `json:"encoded"`
+	Decoded   string `json:"decoded"`
+	Header    string `json:"header,omitempty"`
 	HeaderOut string `json:"headerOut,omitempty"`
 }
 
@@ -46,9 +47,11 @@ type ExtCase struct {
 }
 
 type AddExtCase struct {
-	Ext   string `json:"ext"`
-	Type  string `json:"type"`
-	Error string `json:"error"`
+	Ext         string `json:"ext"`
+	Type        string `json:"type"`
+	Error       string `json:"error"`
+	Stored      string `json:"stored"`
+	StoredLower string `json:"storedLower"`
 }
 
 type FormatCase struct {
@@ -517,10 +520,20 @@ func extCases() []ExtCase {
 	return out
 }
 
+func recordAddExt(ext, typ string) AddExtCase {
+	c := AddExtCase{Ext: ext, Type: typ}
+	if err := mime.AddExtensionType(ext, typ); err != nil {
+		c.Error = err.Error()
+	}
+	c.Stored = mime.TypeByExtension(ext)
+	c.StoredLower = mime.TypeByExtension(strings.ToLower(ext))
+	return c
+}
+
 func addExtCases() []AddExtCase {
-	// Error-only: AddExtensionType returns before mutating the global table,
-	// so these can run after extCases() without changing TypeByExtension.
-	specs := [][2]string{
+	// Errors first: they return before mutating the global table, so they can
+	// follow extCases() without changing builtin TypeByExtension results.
+	errorSpecs := [][2]string{
 		{"no-dot", "application/x-test"},
 		{"txt", "text/plain"},
 		{"", "text/plain"},
@@ -539,13 +552,44 @@ func addExtCases() []AddExtCase {
 		{".ck7script", "bogus/<script>alert</script>"},
 		{".ck7after", "bogus/bogus<script>alert</script>"},
 	}
-	out := make([]AddExtCase, 0, len(specs))
-	for _, s := range specs {
-		c := AddExtCase{Ext: s[0], Type: s[1]}
-		if err := mime.AddExtensionType(s[0], s[1]); err != nil {
-			c.Error = err.Error()
-		}
-		out = append(out, c)
+	// Success: text/* without charset gets charset=utf-8 only when the raw
+	// string has a lowercase "text/" prefix; FormatMediaType rewrite of
+	// "text/plain; param=..." can store an empty type (Go 1.24 type.go).
+	successSpecs := [][2]string{
+		{".ck8plain", "text/plain"},
+		{".ck8utf8", "text/plain; charset=utf-8"},
+		{".ck8latin", "text/plain; charset=iso-8859-1"},
+		{".ck8utf8case", "text/plain; charset=UTF-8"},
+		{".CK8MIX", "text/x-ck8-mix"},
+		{".ck8app", "application/x-ck8"},
+		{".ck8params", "text/plain; foo=bar"},
+		{".ck8upper", "TEXT/PLAIN"},
+		{".ck8TextSlash", "TEXT/x-ck8"},
+		{".ck8mixedtype", "Text/plain"},
+		{".ck8space", "text/plain; format=flowed"},
+		{".ck8quoted", "text/plain; title=\"x y\""},
+		{".ck8html", "text/html"},
+		{".ck8js", "text/javascript"},
+		{".ck8xmlc", "text/xml"},
+		{".ck8css", "text/css"},
+		{".ck8csv", "text/csv"},
+		{".ck8md", "text/markdown"},
+		{".ck8apptext", "application/text"},
+		{".ck8prefix", "textplain/foo"},
+		{".CK8DOT.dot", "text/x-ck8-dot"},
+		{".ck8-dash", "text/x-ck8-dash"},
+		{".ck8plus", "application/vnd.api+json"},
+		{".ck8exist", "image/jpeg"},
+		{".ck8json", "application/json"},
+		{".ck8png", "image/png"},
+		{".ck8wasm", "application/wasm"},
+	}
+	out := make([]AddExtCase, 0, len(errorSpecs)+len(successSpecs))
+	for _, s := range errorSpecs {
+		out = append(out, recordAddExt(s[0], s[1]))
+	}
+	for _, s := range successSpecs {
+		out = append(out, recordAddExt(s[0], s[1]))
 	}
 	return out
 }
@@ -673,8 +717,10 @@ func main() {
 			if err != nil {
 				errText = err.Error()
 			}
-			if errText != c.Error {
-				fail(fmt.Errorf("addExt mismatch %q %q: got %q want %q", c.Ext, c.Type, errText, c.Error))
+			stored := mime.TypeByExtension(c.Ext)
+			storedLower := mime.TypeByExtension(strings.ToLower(c.Ext))
+			if errText != c.Error || stored != c.Stored || storedLower != c.StoredLower {
+				fail(fmt.Errorf("addExt mismatch %q %q: got %q/%q/%q want %q/%q/%q", c.Ext, c.Type, errText, stored, storedLower, c.Error, c.Stored, c.StoredLower))
 			}
 		}
 		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt))
