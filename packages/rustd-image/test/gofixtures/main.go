@@ -236,6 +236,57 @@ func timeIters(iters int, fn func()) float64 {
 	return float64(time.Since(start).Nanoseconds()) / 1e6
 }
 
+func runDecode() {
+	if len(os.Args) < 4 {
+		panic("usage: go run ./gofixtures -decode png|jpeg|gif <file>")
+	}
+	kind := os.Args[2]
+	raw, err := os.ReadFile(os.Args[3])
+	if err != nil {
+		panic(err)
+	}
+	r := bytes.NewReader(raw)
+	var cfg image.Config
+	var img image.Image
+	switch kind {
+	case "png":
+		cfg, err = png.DecodeConfig(r)
+		if err != nil {
+			panic(err)
+		}
+		r.Reset(raw)
+		img, err = png.Decode(r)
+	case "jpeg":
+		cfg, err = jpeg.DecodeConfig(r)
+		if err != nil {
+			panic(err)
+		}
+		r.Reset(raw)
+		img, err = jpeg.Decode(r)
+	case "gif":
+		cfg, err = gif.DecodeConfig(r)
+		if err != nil {
+			panic(err)
+		}
+		r.Reset(raw)
+		img, err = gif.Decode(r)
+	default:
+		panic("unknown kind " + kind)
+	}
+	if err != nil {
+		panic(err)
+	}
+	out := map[string]any{
+		"width":      cfg.Width,
+		"height":     cfg.Height,
+		"colorModel": modelName(cfg.ColorModel),
+		"pix":        pixdump(img),
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+		panic(err)
+	}
+}
+
 func runBench() {
 	const w, h, iters = 512, 512, 8
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
@@ -313,6 +364,10 @@ func runBench() {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-bench" {
 		runBench()
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "-decode" {
+		runDecode()
 		return
 	}
 	outDir := "."

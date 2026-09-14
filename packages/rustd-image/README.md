@@ -68,6 +68,11 @@ Adam7, tRNS, 1×1, gray, and fully-transparent. Every truncated prefix of the Go
 1×1 PNG throws `PngFormatError`. JPEG is config-only (IDCT is not pixel-identical). GIF
 `DecodeAll` matches loop/delay/disposal/pixdump on the two-frame fixture.
 
+Reverse (issue #19 §4.2): `pngEncode` at CompressionLevel `0/-1/-2/-3` round-trips
+through Go `png.Decode` with identical RGBA64 pixdump. `jpegEncode` is checked with
+PSNR ≥ 40 dB against the source (not pixel-identical). `gifEncode` bytes decode
+under Go `gif.Decode` to the same pixdump as `gifDecode`.
+
 ```text
 $ ls -l packages/rustd-image/*.node
 -rwxrwxr-x 1 akrc akrc 882856 Sep 14 17:46 packages/rustd-image/rustd-image.linux-x64-gnu.node
