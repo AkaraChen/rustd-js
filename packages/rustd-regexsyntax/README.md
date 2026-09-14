@@ -8,7 +8,7 @@ and Go→JS translation stay out of scope (issue #30).
 Runtime Node >=20; no JavaScript runtime dependencies.
 
 ```js
-import { syntaxParse, syntaxCompile, emptyOpContext, isWordChar, FLAGS, OP, INST_OP, EMPTY_OP } from 'rustd-regexsyntax';
+import { syntaxParse, syntaxCompile, emptyOpContext, isWordChar, FLAGS, OP, INST_OP, EMPTY_OP, ERROR_CODE } from 'rustd-regexsyntax';
 
 const re = syntaxParse('a(b)*c', FLAGS.Perl);
 re.dump();      // cat{lit{a}star{cap{lit{b}}}lit{c}}  (Go parse_test encoding)
@@ -39,7 +39,12 @@ matches Go `syntax.Perl`. `OP` values match Go's `Op` iota (NoMatch starts at 1)
 - `OP` numbering follows Go (`NoMatch = 1`), not the 0-based sketch in issue #29.
 - `INST_OP` / `EMPTY_OP` numbering follows Go iota.
 - Nesting / compiled-size limits match Go (`maxHeight = 1000`, `maxSize` /
-  `maxRunes` budgets).
+  `maxRunes` budgets). `parse` uses an explicit stack for height so 1500-deep
+  `((((…))))` returns `ERROR_CODE.NestingDepth` instead of aborting.
+- `ERROR_CODE` strings match Go `syntax.ErrorCode`. Go 1.24.13 never produces
+  `InternalError` or `InvalidCharClass` from `Parse`. `InvalidUTF8` is produced
+  for invalid UTF-8 bytes in Go; JS `string` values are always valid UTF-8, so
+  that code is exported but not reachable through `syntaxParse`.
 
 ## Size
 

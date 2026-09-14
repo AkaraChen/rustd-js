@@ -85,6 +85,25 @@ const FLAGS = Object.freeze({
   POSIX: binding.flagPosix(),
 });
 
+const ERROR_CODE = Object.freeze({
+  InternalError: 'regexp/syntax: internal error',
+  InvalidCharClass: 'invalid character class',
+  InvalidCharRange: 'invalid character class range',
+  InvalidEscape: 'invalid escape sequence',
+  InvalidNamedCapture: 'invalid named capture',
+  InvalidPerlOp: 'invalid or unsupported Perl syntax',
+  InvalidRepeatOp: 'invalid nested repetition operator',
+  InvalidRepeatSize: 'invalid repeat count',
+  InvalidUTF8: 'invalid UTF-8',
+  MissingBracket: 'missing closing ]',
+  MissingParen: 'missing closing )',
+  MissingRepeatArgument: 'missing argument to repetition operator',
+  TrailingBackslash: 'trailing backslash at end of expression',
+  UnexpectedParen: 'unexpected )',
+  NestingDepth: 'expression nests too deeply',
+  Large: 'expression too large',
+});
+
 const FLAG_NAMES = [
   ['FoldCase', FLAGS.FoldCase],
   ['Literal', FLAGS.Literal],
@@ -112,6 +131,10 @@ function native(fn) {
     return out;
   } catch (cause) {
     const text = String(cause.message ?? cause);
+    if (text.startsWith('SyntaxError\u001e')) {
+      const parts = text.split('\u001e');
+      throw new SyntaxError(parts[3] ?? text, parts[1] ?? '', parts[2] ?? '', { cause });
+    }
     if (text.startsWith('SyntaxError:')) {
       const rest = text.slice('SyntaxError:'.length);
       const first = rest.indexOf(':');
@@ -243,6 +266,7 @@ module.exports = {
   INST_OP,
   EMPTY_OP,
   FLAGS,
+  ERROR_CODE,
   SyntaxError,
   SyntaxRegexp,
   syntaxParse,

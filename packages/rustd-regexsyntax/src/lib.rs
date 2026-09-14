@@ -10,7 +10,7 @@ mod unicode_tables;
 use compile::{compile, dump_prog};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
-use parse::parse;
+use parse::{parse, SyntaxError as ParseError};
 use regexp::{
     cap_names, dump_fixed, max_cap, regexp_string, tree_json, CLASS_NL, DOT_NL, FOLD_CASE, LITERAL, MATCH_NL, NON_GREEDY,
     ONE_LINE, PERL, PERL_X, POSIX, SIMPLE, UNICODE_GROUPS, WAS_DOLLAR,
@@ -36,11 +36,15 @@ pub fn syntax_parse(pattern: String, flags: u32) -> Result<ParseRow> {
             max_cap: max_cap(&nodes, id),
             cap_names: cap_names(&nodes, id),
         }),
-        Err(err) => Err(Error::new(
-            Status::InvalidArg,
-            format!("SyntaxError:{}:{}:{}", err.code, err.expr, err.message()),
-        )),
+        Err(err) => Err(syntax_napi_err(err)),
     }
+}
+
+fn syntax_napi_err(err: ParseError) -> Error {
+    Error::new(
+        Status::InvalidArg,
+        format!("SyntaxError\u{1e}{}\u{1e}{}\u{1e}{}", err.code, err.expr, err.message()),
+    )
 }
 
 #[napi]
@@ -56,10 +60,7 @@ pub fn syntax_simplify(pattern: String, flags: u32) -> Result<ParseRow> {
                 cap_names: cap_names(&nodes, sid),
             })
         }
-        Err(err) => Err(Error::new(
-            Status::InvalidArg,
-            format!("SyntaxError:{}:{}:{}", err.code, err.expr, err.message()),
-        )),
+        Err(err) => Err(syntax_napi_err(err)),
     }
 }
 
@@ -153,10 +154,7 @@ pub fn syntax_compile(pattern: String, flags: u32) -> Result<CompileRow> {
             }),
             Err(err) => Err(Error::new(Status::GenericFailure, err)),
         },
-        Err(err) => Err(Error::new(
-            Status::InvalidArg,
-            format!("SyntaxError:{}:{}:{}", err.code, err.expr, err.message()),
-        )),
+        Err(err) => Err(syntax_napi_err(err)),
     }
 }
 

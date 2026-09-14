@@ -57,6 +57,25 @@ export interface Prog {
   inst: Inst[];
 }
 
+export const ERROR_CODE: {
+  readonly InternalError: 'regexp/syntax: internal error';
+  readonly InvalidCharClass: 'invalid character class';
+  readonly InvalidCharRange: 'invalid character class range';
+  readonly InvalidEscape: 'invalid escape sequence';
+  readonly InvalidNamedCapture: 'invalid named capture';
+  readonly InvalidPerlOp: 'invalid or unsupported Perl syntax';
+  readonly InvalidRepeatOp: 'invalid nested repetition operator';
+  readonly InvalidRepeatSize: 'invalid repeat count';
+  readonly InvalidUTF8: 'invalid UTF-8';
+  readonly MissingBracket: 'missing closing ]';
+  readonly MissingParen: 'missing closing )';
+  readonly MissingRepeatArgument: 'missing argument to repetition operator';
+  readonly TrailingBackslash: 'trailing backslash at end of expression';
+  readonly UnexpectedParen: 'unexpected )';
+  readonly NestingDepth: 'expression nests too deeply';
+  readonly Large: 'expression too large';
+};
+
 export const FLAGS: {
   readonly FoldCase: number;
   readonly Literal: number;
