@@ -54,9 +54,14 @@ allocate a pixel buffer.
 
 ## Size
 
-Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **872,536 bytes** / 3,000,000.
+Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **879,992 bytes** / 3,000,000.
+
+Go `image/png` testdata + pngsuite + generated JPEG/GIF fixtures: **43** files. PNG
+`DecodeConfig` fields and RGBA64 pixdumps match Go, including 1/2/4/8/16-bit,
+Adam7, and tRNS. JPEG is config-only (IDCT is not pixel-identical). GIF
+`DecodeAll` matches loop/delay/disposal/pixdump on the two-frame fixture.
 
 ```text
 $ ls -l packages/rustd-image/*.node
--rwxrwxr-x 1 akrc akrc 872536 Sep 14 16:07 packages/rustd-image/rustd-image.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 879992 Sep 14 16:38 packages/rustd-image/rustd-image.linux-x64-gnu.node
 ```

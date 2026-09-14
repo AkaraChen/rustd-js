@@ -239,11 +239,17 @@ impl Image {
         Ok(self.read_pixel(&pix, x, y))
     }
 
-    fn pix_index(&self, x: i32, y: i32) -> usize {
+    pub(crate) fn pix_index(&self, x: i32, y: i32) -> usize {
         let bpp = self.model.bytes_per_pixel();
         self.offset
             + (y.wrapping_sub(self.rect.min.y) as usize) * self.stride
             + (x.wrapping_sub(self.rect.min.x) as usize) * bpp
+    }
+
+    pub(crate) fn with_pix_mut<R>(&self, f: impl FnOnce(&mut [u8]) -> R) -> Result<R, ImageError> {
+        self.live()?;
+        let mut pix = self.store.bytes.lock().expect("pix lock");
+        Ok(f(&mut pix))
     }
 
     fn read_pixel(&self, pix: &[u8], x: i32, y: i32) -> Rgba16 {

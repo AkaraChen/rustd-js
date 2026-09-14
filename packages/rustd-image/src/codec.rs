@@ -37,26 +37,106 @@ pub fn png_decode_config(buf: &[u8]) -> Result<Config, ImageError> {
     Ok(Config {
         width: info.width,
         height: info.height,
-        color_model: png_model(info.color_type, info.bit_depth, info.trns.is_some()),
+        // Match Go DecodeConfig: tRNS does not change gray/RGB models here.
+        color_model: png_config_model(info.color_type, info.bit_depth),
     })
 }
 
-fn png_model(ct: png::ColorType, depth: png::BitDepth, trns: bool) -> Model {
+fn png_config_model(ct: png::ColorType, depth: png::BitDepth) -> Model {
     match (ct, depth) {
         (png::ColorType::Grayscale, png::BitDepth::Sixteen) => Model::Gray16,
         (png::ColorType::Grayscale, _) => Model::Gray,
         (png::ColorType::GrayscaleAlpha, png::BitDepth::Sixteen) => Model::Nrgba64,
         (png::ColorType::GrayscaleAlpha, _) => Model::Nrgba,
-        (png::ColorType::Rgb, png::BitDepth::Sixteen) => {
-            if trns { Model::Nrgba64 } else { Model::Rgba64 }
-        }
-        (png::ColorType::Rgb, _) => {
-            if trns { Model::Nrgba } else { Model::Rgba }
-        }
+        (png::ColorType::Rgb, png::BitDepth::Sixteen) => Model::Rgba64,
+        (png::ColorType::Rgb, _) => Model::Rgba,
         (png::ColorType::Rgba, png::BitDepth::Sixteen) => Model::Nrgba64,
         (png::ColorType::Rgba, _) => Model::Nrgba,
         (png::ColorType::Indexed, _) => Model::Paletted,
     }
+}
+
+fn bit_depth_u8(d: png::BitDepth) -> u8 {
+    match d {
+        png::BitDepth::One => 1,
+        png::BitDepth::Two => 2,
+        png::BitDepth::Four => 4,
+        png::BitDepth::Eight => 8,
+        png::BitDepth::Sixteen => 16,
+    }
+}
+
+fn scale_gray8(bits: u16, depth: u8) -> u8 {
+    match depth {
+        1 => (bits as u8) * 0xff,
+        2 => (bits as u8) * 0x55,
+        4 => (bits as u8) * 0x11,
+        _ => bits as u8,
+    }
+}
+
+fn unpack_samples(
+    src: &[u8],
+    width: usize,
+    height: usize,
+    depth: u8,
+    channels: usize,
+) -> Result<Vec<u16>, ImageError> {
+    let row_bytes = (width * channels * depth as usize + 7) / 8;
+    let need = row_bytes.saturating_mul(height);
+    if src.len() < need {
+        return Err(ImageError::new(
+            "PngFormatError",
+            format!("png: short frame {} < {need}", src.len()),
+        ));
+    }
+    let mut out = vec![0u16; width * height * channels];
+    for y in 0..height {
+        let row = &src[y * row_bytes..(y + 1) * row_bytes];
+        let mut bit = 0usize;
+        for x in 0..width {
+            for c in 0..channels {
+                out[(y * width + x) * channels + c] = read_bits(row, bit, depth)?;
+                bit += depth as usize;
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn read_bits(row: &[u8], bit: usize, depth: u8) -> Result<u16, ImageError> {
+    if depth == 16 {
+        let i = bit / 8;
+        if i + 1 >= row.len() {
+            return Err(ImageError::new("PngFormatError", "png: short 16-bit sample"));
+        }
+        return Ok(u16::from_be_bytes([row[i], row[i + 1]]));
+    }
+    let i = bit / 8;
+    if i >= row.len() {
+        return Err(ImageError::new("PngFormatError", "png: short packed sample"));
+    }
+    let shift = 8 - depth as usize - (bit % 8);
+    let mask = (1u16 << depth) - 1;
+    Ok((u16::from(row[i]) >> shift) & mask)
+}
+
+fn put_nrgba8(pix: &mut [u8], i: usize, r: u8, g: u8, b: u8, a: u8) {
+    pix[i] = r;
+    pix[i + 1] = g;
+    pix[i + 2] = b;
+    pix[i + 3] = a;
+}
+
+fn put_rgba8(pix: &mut [u8], i: usize, r: u8, g: u8, b: u8, a: u8) {
+    put_nrgba8(pix, i, r, g, b, a);
+}
+
+fn put_nrgba64(pix: &mut [u8], i: usize, r: u16, g: u16, b: u16, a: u16) {
+    pix[i..i + 2].copy_from_slice(&r.to_be_bytes());
+    pix[i + 2..i + 4].copy_from_slice(&g.to_be_bytes());
+    pix[i + 4..i + 6].copy_from_slice(&b.to_be_bytes());
+    pix[i + 6..i + 8].copy_from_slice(&a.to_be_bytes());
 }
 
 pub fn png_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageError> {
@@ -72,63 +152,214 @@ pub fn png_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageErr
     ];
     let output = reader.next_frame(&mut frame).map_err(map_png)?;
     let rect = Rect::new(0, 0, info.width as i32, info.height as i32);
-    let model = png_model(info.color_type, info.bit_depth, info.trns.is_some());
     let w = info.width as usize;
     let h = info.height as usize;
+    let depth = bit_depth_u8(output.bit_depth);
+    let trns = info.trns.as_deref();
+    let samples = unpack_samples(&frame[..output.buffer_size()], w, h, depth, output.color_type.samples())?;
+
     match output.color_type {
-        png::ColorType::Rgba if output.bit_depth == png::BitDepth::Eight => {
-            let img = Image::alloc(if matches!(model, Model::Rgba) { Model::Rgba } else { Model::Nrgba }, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 4;
-                    let c = if matches!(model, Model::Rgba) {
-                        Rgba16::from_rgba8(frame[i], frame[i + 1], frame[i + 2], frame[i + 3])
-                    } else {
-                        Rgba16::from_nrgba8(frame[i], frame[i + 1], frame[i + 2], frame[i + 3])
-                    };
-                    img.set_rgba(x as i32, y as i32, c)?;
+        png::ColorType::Grayscale => {
+            let use_trns = trns.map(|t| t.len() >= 2).unwrap_or(false);
+            if depth == 16 {
+                if use_trns {
+                    let ty = u16::from_be_bytes([trns.unwrap()[0], trns.unwrap()[1]]);
+                    let img = Image::alloc(Model::Nrgba64, rect, None)?;
+                    img.with_pix_mut(|pix| {
+                        for y in 0..h {
+                            for x in 0..w {
+                                let ycol = samples[y * w + x];
+                                let a = if ycol == ty { 0 } else { 0xffff };
+                                let i = img.pix_index(x as i32, y as i32);
+                                put_nrgba64(pix, i, ycol, ycol, ycol, a);
+                            }
+                        }
+                    })?;
+                    Ok(img)
+                } else {
+                    let img = Image::alloc(Model::Gray16, rect, None)?;
+                    img.with_pix_mut(|pix| {
+                        for y in 0..h {
+                            for x in 0..w {
+                                let i = img.pix_index(x as i32, y as i32);
+                                pix[i..i + 2].copy_from_slice(&samples[y * w + x].to_be_bytes());
+                            }
+                        }
+                    })?;
+                    Ok(img)
+                }
+            } else {
+                // Go scales the tRNS gray sample for 1/2/4-bit before comparing.
+                let raw = match trns {
+                    Some(t) if t.len() >= 2 => t[1],
+                    Some(t) if !t.is_empty() => t[0],
+                    _ => 0,
+                };
+                let ty8 = scale_gray8(u16::from(raw), depth);
+                let use_trns8 = trns.map(|t| !t.is_empty()).unwrap_or(false);
+                if use_trns8 {
+                    let img = Image::alloc(Model::Nrgba, rect, None)?;
+                    img.with_pix_mut(|pix| {
+                        for y in 0..h {
+                            for x in 0..w {
+                                let ycol = scale_gray8(samples[y * w + x], depth);
+                                let a = if ycol == ty8 { 0 } else { 0xff };
+                                let i = img.pix_index(x as i32, y as i32);
+                                put_nrgba8(pix, i, ycol, ycol, ycol, a);
+                            }
+                        }
+                    })?;
+                    Ok(img)
+                } else {
+                    let img = Image::alloc(Model::Gray, rect, None)?;
+                    img.with_pix_mut(|pix| {
+                        for y in 0..h {
+                            for x in 0..w {
+                                let i = img.pix_index(x as i32, y as i32);
+                                pix[i] = scale_gray8(samples[y * w + x], depth);
+                            }
+                        }
+                    })?;
+                    Ok(img)
                 }
             }
-            Ok(img)
         }
-        png::ColorType::Rgb if output.bit_depth == png::BitDepth::Eight => {
-            let img = Image::alloc(Model::Rgba, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 3;
-                    img.set_rgba(x as i32, y as i32, Rgba16::from_rgba8(frame[i], frame[i + 1], frame[i + 2], 255))?;
-                }
+        png::ColorType::GrayscaleAlpha => {
+            if depth == 16 {
+                let img = Image::alloc(Model::Nrgba64, rect, None)?;
+                img.with_pix_mut(|pix| {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let o = (y * w + x) * 2;
+                            let ycol = samples[o];
+                            let a = samples[o + 1];
+                            let i = img.pix_index(x as i32, y as i32);
+                            put_nrgba64(pix, i, ycol, ycol, ycol, a);
+                        }
+                    }
+                })?;
+                Ok(img)
+            } else {
+                let img = Image::alloc(Model::Nrgba, rect, None)?;
+                img.with_pix_mut(|pix| {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let o = (y * w + x) * 2;
+                            let ycol = samples[o] as u8;
+                            let a = samples[o + 1] as u8;
+                            let i = img.pix_index(x as i32, y as i32);
+                            put_nrgba8(pix, i, ycol, ycol, ycol, a);
+                        }
+                    }
+                })?;
+                Ok(img)
             }
-            Ok(img)
         }
-        png::ColorType::Grayscale if output.bit_depth == png::BitDepth::Eight => {
-            let img = Image::alloc(Model::Gray, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    img.set_rgba(x as i32, y as i32, Rgba16::from_gray8(frame[y * w + x]))?;
+        png::ColorType::Rgb => {
+            let use_trns = trns.map(|t| t.len() >= 6).unwrap_or(false);
+            if depth == 16 {
+                if use_trns {
+                    let t = trns.unwrap();
+                    let tr = u16::from_be_bytes([t[0], t[1]]);
+                    let tg = u16::from_be_bytes([t[2], t[3]]);
+                    let tb = u16::from_be_bytes([t[4], t[5]]);
+                    let img = Image::alloc(Model::Nrgba64, rect, None)?;
+                    img.with_pix_mut(|pix| {
+                        for y in 0..h {
+                            for x in 0..w {
+                                let o = (y * w + x) * 3;
+                                let r = samples[o];
+                                let g = samples[o + 1];
+                                let b = samples[o + 2];
+                                let a = if r == tr && g == tg && b == tb { 0 } else { 0xffff };
+                                let i = img.pix_index(x as i32, y as i32);
+                                put_nrgba64(pix, i, r, g, b, a);
+                            }
+                        }
+                    })?;
+                    Ok(img)
+                } else {
+                    let img = Image::alloc(Model::Rgba64, rect, None)?;
+                    img.with_pix_mut(|pix| {
+                        for y in 0..h {
+                            for x in 0..w {
+                                let o = (y * w + x) * 3;
+                                let i = img.pix_index(x as i32, y as i32);
+                                put_nrgba64(pix, i, samples[o], samples[o + 1], samples[o + 2], 0xffff);
+                            }
+                        }
+                    })?;
+                    Ok(img)
                 }
+            } else if trns.map(|t| t.len() >= 3).unwrap_or(false) {
+                let t = trns.unwrap();
+                let (tr, tg, tb) = if t.len() >= 6 {
+                    (t[1], t[3], t[5])
+                } else {
+                    (t[0], t[1], t[2])
+                };
+                let img = Image::alloc(Model::Nrgba, rect, None)?;
+                img.with_pix_mut(|pix| {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let o = (y * w + x) * 3;
+                            let r = samples[o] as u8;
+                            let g = samples[o + 1] as u8;
+                            let b = samples[o + 2] as u8;
+                            let a = if r == tr && g == tg && b == tb { 0 } else { 0xff };
+                            let i = img.pix_index(x as i32, y as i32);
+                            put_nrgba8(pix, i, r, g, b, a);
+                        }
+                    }
+                })?;
+                Ok(img)
+            } else {
+                let img = Image::alloc(Model::Rgba, rect, None)?;
+                img.with_pix_mut(|pix| {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let o = (y * w + x) * 3;
+                            let i = img.pix_index(x as i32, y as i32);
+                            put_rgba8(pix, i, samples[o] as u8, samples[o + 1] as u8, samples[o + 2] as u8, 0xff);
+                        }
+                    }
+                })?;
+                Ok(img)
             }
-            Ok(img)
         }
-        png::ColorType::Grayscale if output.bit_depth == png::BitDepth::Sixteen => {
-            let img = Image::alloc(Model::Gray16, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 2;
-                    img.set_rgba(x as i32, y as i32, Rgba16::from_gray16(u16::from_be_bytes([frame[i], frame[i + 1]])))?;
-                }
+        png::ColorType::Rgba => {
+            if depth == 16 {
+                let img = Image::alloc(Model::Nrgba64, rect, None)?;
+                img.with_pix_mut(|pix| {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let o = (y * w + x) * 4;
+                            let i = img.pix_index(x as i32, y as i32);
+                            put_nrgba64(pix, i, samples[o], samples[o + 1], samples[o + 2], samples[o + 3]);
+                        }
+                    }
+                })?;
+                Ok(img)
+            } else {
+                let img = Image::alloc(Model::Nrgba, rect, None)?;
+                img.with_pix_mut(|pix| {
+                    for y in 0..h {
+                        for x in 0..w {
+                            let o = (y * w + x) * 4;
+                            let i = img.pix_index(x as i32, y as i32);
+                            put_nrgba8(
+                                pix,
+                                i,
+                                samples[o] as u8,
+                                samples[o + 1] as u8,
+                                samples[o + 2] as u8,
+                                samples[o + 3] as u8,
+                            );
+                        }
+                    }
+                })?;
+                Ok(img)
             }
-            Ok(img)
-        }
-        png::ColorType::GrayscaleAlpha if output.bit_depth == png::BitDepth::Eight => {
-            let img = Image::alloc(Model::Nrgba, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 2;
-                    img.set_rgba(x as i32, y as i32, Rgba16::from_nrgba8(frame[i], frame[i], frame[i], frame[i + 1]))?;
-                }
-            }
-            Ok(img)
         }
         png::ColorType::Indexed => {
             let pal = info
@@ -143,49 +374,18 @@ pub fn png_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageErr
                         })
                         .collect::<Vec<_>>()
                 })
-                .unwrap_or_default();
+                .unwrap_or_else(|| vec![[0, 0, 0, 255]]);
             let img = Image::alloc(Model::Paletted, rect, Some(pal))?;
-            for y in 0..h {
-                for x in 0..w {
-                    let idx = frame[y * w + x];
-                    let pal = img.palette().unwrap_or(&[]);
-                    if let Some(p) = pal.get(idx as usize) {
-                        img.set_rgba(x as i32, y as i32, Rgba16::from_nrgba8(p[0], p[1], p[2], p[3]))?;
+            img.with_pix_mut(|pix| {
+                for y in 0..h {
+                    for x in 0..w {
+                        let i = img.pix_index(x as i32, y as i32);
+                        pix[i] = samples[y * w + x] as u8;
                     }
                 }
-            }
+            })?;
             Ok(img)
         }
-        png::ColorType::Rgba if output.bit_depth == png::BitDepth::Sixteen => {
-            let img = Image::alloc(Model::Nrgba64, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 8;
-                    let r = u16::from_be_bytes([frame[i], frame[i + 1]]);
-                    let g = u16::from_be_bytes([frame[i + 2], frame[i + 3]]);
-                    let b = u16::from_be_bytes([frame[i + 4], frame[i + 5]]);
-                    let a = u16::from_be_bytes([frame[i + 6], frame[i + 7]]);
-                    let c = if a == 0xffff {
-                        Rgba16 { r, g, b, a }
-                    } else if a == 0 {
-                        Rgba16 { r: 0, g: 0, b: 0, a: 0 }
-                    } else {
-                        Rgba16 {
-                            r: (u32::from(r) * u32::from(a) / 0xffff) as u16,
-                            g: (u32::from(g) * u32::from(a) / 0xffff) as u16,
-                            b: (u32::from(b) * u32::from(a) / 0xffff) as u16,
-                            a,
-                        }
-                    };
-                    img.set_rgba(x as i32, y as i32, c)?;
-                }
-            }
-            Ok(img)
-        }
-        other => Err(ImageError::new(
-            "PngUnsupportedError",
-            format!("png: unsupported output {other:?} {:?}", output.bit_depth),
-        )),
     }
 }
 
@@ -396,7 +596,6 @@ pub fn gif_decode_all(buf: &[u8], max_pixels: Option<u64>) -> Result<GifData, Im
     let mut frames = Vec::new();
     let mut delay = Vec::new();
     let mut disposal = Vec::new();
-    let loop_count = 0i32;
     while let Some(frame) = decoder
         .read_next_frame()
         .map_err(|e| ImageError::new("GifFormatError", e.to_string()))?
@@ -405,13 +604,18 @@ pub fn gif_decode_all(buf: &[u8], max_pixels: Option<u64>) -> Result<GifData, Im
             .palette
             .as_deref()
             .or(global_palette.as_deref());
-        let pal = pal_bytes
+        let mut pal = pal_bytes
             .map(|p| {
                 p.chunks(3)
                     .map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| vec![[0, 0, 0, 255]]);
+        if let Some(t) = frame.transparent {
+            if let Some(slot) = pal.get_mut(t as usize) {
+                slot[3] = 0;
+            }
+        }
         let rect = Rect::new(
             frame.left as i32,
             frame.top as i32,
@@ -444,6 +648,11 @@ pub fn gif_decode_all(buf: &[u8], max_pixels: Option<u64>) -> Result<GifData, Im
             gif::DisposalMethod::Previous => 3,
         });
     }
+    let loop_count = match decoder.repeat() {
+        gif::Repeat::Infinite => 0,
+        gif::Repeat::Finite(0) => -1,
+        gif::Repeat::Finite(n) => i32::from(n),
+    };
     Ok(GifData {
         frames,
         delay,
