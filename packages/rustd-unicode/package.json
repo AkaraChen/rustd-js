@@ -1,0 +1,46 @@
+{
+  "name": "rustd-unicode",
+  "version": "0.1.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.mjs",
+      "require": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.mjs",
+    "index.d.ts",
+    "generated-names.d.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "napi build --platform --release --no-js --dts .generated.d.ts",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "generate": "GOWORK=off mise exec -- go run -C tools/gentables ."
+  },
+  "napi": {
+    "binaryName": "rustd-unicode",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "optionalDependencies": {
+    "rustd-unicode-darwin-arm64": "0.1.0",
+    "rustd-unicode-darwin-x64": "0.1.0",
+    "rustd-unicode-linux-x64-gnu": "0.1.0",
+    "rustd-unicode-linux-arm64-gnu": "0.1.0",
+    "rustd-unicode-win32-x64-msvc": "0.1.0"
+  }
+}
