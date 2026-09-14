@@ -46,6 +46,29 @@ const OP = Object.freeze({
   Alternate: 19,
 });
 
+const INST_OP = Object.freeze({
+  Alt: 0,
+  AltMatch: 1,
+  Capture: 2,
+  EmptyWidth: 3,
+  Match: 4,
+  Fail: 5,
+  Nop: 6,
+  Rune: 7,
+  Rune1: 8,
+  RuneAny: 9,
+  RuneAnyNotNL: 10,
+});
+
+const EMPTY_OP = Object.freeze({
+  BeginLine: 1 << 0,
+  EndLine: 1 << 1,
+  BeginText: 1 << 2,
+  EndText: 1 << 3,
+  WordBoundary: 1 << 4,
+  NoWordBoundary: 1 << 5,
+});
+
 const FLAGS = Object.freeze({
   FoldCase: binding.flagFoldCase(),
   Literal: binding.flagLiteral(),
@@ -140,6 +163,13 @@ class SyntaxRegexp {
     }
     return syntaxSimplify(this._pattern, this._flags);
   }
+
+  compile() {
+    if (typeof this._pattern !== 'string') {
+      throw new TypeError('regexsyntax: compile requires a parsed SyntaxRegexp');
+    }
+    return syntaxCompile(this._pattern, this._flags);
+  }
 }
 
 function wrapNode(json) {
@@ -172,12 +202,36 @@ function syntaxSimplify(pattern, flags) {
   return new SyntaxRegexp(native(() => binding.syntaxSimplify(pattern, flags >>> 0)), pattern, flags);
 }
 
+function syntaxCompile(pattern, flags) {
+  if (typeof pattern !== 'string') {
+    throw new TypeError('regexsyntax: pattern must be a string');
+  }
+  if (typeof flags !== 'number' || !Number.isInteger(flags)) {
+    throw new TypeError('regexsyntax: flags must be an integer');
+  }
+  const row = native(() => binding.syntaxCompile(pattern, flags >>> 0));
+  return {
+    dump: row.dump,
+    start: row.start,
+    numCap: row.numCap,
+    inst: row.inst.map((i) => ({
+      op: i.op,
+      out: i.out,
+      arg: i.arg,
+      rune: i.rune.slice(),
+    })),
+  };
+}
+
 module.exports = {
   OP,
+  INST_OP,
+  EMPTY_OP,
   FLAGS,
   SyntaxError,
   SyntaxRegexp,
   syntaxParse,
   syntaxSimplify,
+  syntaxCompile,
   flagsToString,
 };

@@ -1,3 +1,4 @@
+mod compile;
 mod fold;
 mod parse;
 mod perl_groups;
@@ -6,6 +7,7 @@ mod regexp;
 mod simplify;
 mod unicode_tables;
 
+use compile::{compile, dump_prog};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use parse::parse;
@@ -112,4 +114,48 @@ pub fn flag_perl() -> u32 {
 #[napi]
 pub fn flag_posix() -> u32 {
     POSIX as u32
+}
+
+#[napi(object)]
+pub struct InstRow {
+    pub op: u32,
+    pub out: u32,
+    pub arg: u32,
+    pub rune: Vec<i32>,
+}
+
+#[napi(object)]
+pub struct CompileRow {
+    pub dump: String,
+    pub start: i32,
+    pub num_cap: i32,
+    pub inst: Vec<InstRow>,
+}
+
+#[napi]
+pub fn syntax_compile(pattern: String, flags: u32) -> Result<CompileRow> {
+    match parse(&pattern, flags as u16) {
+        Ok((nodes, id)) => match compile(&nodes, id) {
+            Ok(prog) => Ok(CompileRow {
+                dump: dump_prog(&prog),
+                start: prog.start,
+                num_cap: prog.num_cap,
+                inst: prog
+                    .inst
+                    .into_iter()
+                    .map(|i| InstRow {
+                        op: i.op as u32,
+                        out: i.out,
+                        arg: i.arg,
+                        rune: i.rune,
+                    })
+                    .collect(),
+            }),
+            Err(err) => Err(Error::new(Status::GenericFailure, err)),
+        },
+        Err(err) => Err(Error::new(
+            Status::InvalidArg,
+            format!("SyntaxError:{}:{}:{}", err.code, err.expr, err.message()),
+        )),
+    }
 }

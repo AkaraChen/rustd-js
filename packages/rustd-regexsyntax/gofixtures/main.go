@@ -11,14 +11,24 @@ import (
 	"unicode"
 )
 
+type InstJSON struct {
+	Op   uint8   `json:"op"`
+	Out  uint32  `json:"out"`
+	Arg  uint32  `json:"arg"`
+	Rune []int32 `json:"rune"`
+}
+
 type Case struct {
-	ID      string `json:"id"`
-	Pattern string `json:"pattern"`
-	Flags   uint16 `json:"flags"`
-	Dump    string `json:"dump,omitempty"`
-	Printed string `json:"printed,omitempty"`
-	Error   string `json:"error,omitempty"`
-	Expr    string `json:"expr,omitempty"`
+	ID      string     `json:"id"`
+	Pattern string     `json:"pattern"`
+	Flags   uint16     `json:"flags"`
+	Dump    string     `json:"dump,omitempty"`
+	Printed string     `json:"printed,omitempty"`
+	Start   int        `json:"start,omitempty"`
+	NumCap  int        `json:"numCap,omitempty"`
+	Inst    []InstJSON `json:"inst,omitempty"`
+	Error   string     `json:"error,omitempty"`
+	Expr    string     `json:"expr,omitempty"`
 }
 
 type Packet struct {
@@ -462,14 +472,161 @@ func generateSimplify() Packet {
 	return Packet{Schema: 1, Package: "regexsyntax-simplify", Cases: cases}
 }
 
+func compileTests() []struct{ Regexp, Prog string } {
+	// Copied from Go 1.24.13 src/regexp/syntax/prog_test.go compileTests.
+	return []struct{ Regexp, Prog string }{
+		{"a", `  0	fail
+  1*	rune1 "a" -> 2
+  2	match
+`},
+		{"[A-M][n-z]", `  0	fail
+  1*	rune "AM" -> 2
+  2	rune "nz" -> 3
+  3	match
+`},
+		{"", `  0	fail
+  1*	nop -> 2
+  2	match
+`},
+		{"a?", `  0	fail
+  1	rune1 "a" -> 3
+  2*	alt -> 1, 3
+  3	match
+`},
+		{"a??", `  0	fail
+  1	rune1 "a" -> 3
+  2*	alt -> 3, 1
+  3	match
+`},
+		{"a+", `  0	fail
+  1*	rune1 "a" -> 2
+  2	alt -> 1, 3
+  3	match
+`},
+		{"a+?", `  0	fail
+  1*	rune1 "a" -> 2
+  2	alt -> 3, 1
+  3	match
+`},
+		{"a*", `  0	fail
+  1	rune1 "a" -> 2
+  2*	alt -> 1, 3
+  3	match
+`},
+		{"a*?", `  0	fail
+  1	rune1 "a" -> 2
+  2*	alt -> 3, 1
+  3	match
+`},
+		{"a+b+", `  0	fail
+  1*	rune1 "a" -> 2
+  2	alt -> 1, 3
+  3	rune1 "b" -> 4
+  4	alt -> 3, 5
+  5	match
+`},
+		{"(a+)(b+)", `  0	fail
+  1*	cap 2 -> 2
+  2	rune1 "a" -> 3
+  3	alt -> 2, 4
+  4	cap 3 -> 5
+  5	cap 4 -> 6
+  6	rune1 "b" -> 7
+  7	alt -> 6, 8
+  8	cap 5 -> 9
+  9	match
+`},
+		{"a+|b+", `  0	fail
+  1	rune1 "a" -> 2
+  2	alt -> 1, 6
+  3	rune1 "b" -> 4
+  4	alt -> 3, 6
+  5*	alt -> 1, 3
+  6	match
+`},
+		{"A[Aa]", `  0	fail
+  1*	rune1 "A" -> 2
+  2	rune "A"/i -> 3
+  3	match
+`},
+		{"(?:(?:^).)", `  0	fail
+  1*	empty 4 -> 2
+  2	anynotnl -> 3
+  3	match
+`},
+		{"(?:|a)+", `  0	fail
+  1	nop -> 4
+  2	rune1 "a" -> 4
+  3*	alt -> 1, 2
+  4	alt -> 3, 5
+  5	match
+`},
+		{"(?:|a)*", `  0	fail
+  1	nop -> 4
+  2	rune1 "a" -> 4
+  3	alt -> 1, 2
+  4	alt -> 3, 6
+  5*	alt -> 3, 6
+  6	match
+`},
+	}
+}
+
+func instJSON(p *syntax.Prog) []InstJSON {
+	out := make([]InstJSON, len(p.Inst))
+	for i, inst := range p.Inst {
+		runes := make([]int32, len(inst.Rune))
+		for j, r := range inst.Rune {
+			runes[j] = int32(r)
+		}
+		out[i] = InstJSON{Op: uint8(inst.Op), Out: inst.Out, Arg: inst.Arg, Rune: runes}
+	}
+	return out
+}
+
+func generateCompile() Packet {
+	flags := syntax.Perl
+	var cases []Case
+	for i, tt := range compileTests() {
+		re, err := syntax.Parse(tt.Regexp, flags)
+		c := Case{ID: fmt.Sprintf("p%d", i), Pattern: tt.Regexp, Flags: uint16(flags)}
+		if err != nil {
+			if se, ok := err.(*syntax.Error); ok {
+				c.Error = string(se.Code)
+				c.Expr = se.Expr
+			} else {
+				c.Error = err.Error()
+			}
+			cases = append(cases, c)
+			continue
+		}
+		p, err := syntax.Compile(re)
+		if err != nil {
+			c.Error = err.Error()
+			cases = append(cases, c)
+			continue
+		}
+		c.Dump = p.String()
+		if c.Dump != tt.Prog {
+			fail(fmt.Errorf("%s: Go Compile(%q)=\n%q\nwant\n%q", c.ID, tt.Regexp, c.Dump, tt.Prog))
+		}
+		c.Start = p.Start
+		c.NumCap = p.NumCap
+		c.Inst = instJSON(p)
+		cases = append(cases, c)
+	}
+	return Packet{Schema: 1, Package: "regexsyntax-compile", Cases: cases}
+}
+
 func verify(packet Packet) {
-	if packet.Schema != 1 || (packet.Package != "regexsyntax" && packet.Package != "regexsyntax-simplify") {
+	if packet.Schema != 1 || (packet.Package != "regexsyntax" && packet.Package != "regexsyntax-simplify" && packet.Package != "regexsyntax-compile") {
 		fail(fmt.Errorf("invalid packet"))
 	}
 	if len(packet.Cases) == 0 {
 		fail(fmt.Errorf("empty cases"))
 	}
 	simplify := packet.Package == "regexsyntax-simplify"
+	compilePkg := packet.Package == "regexsyntax-compile"
 	for _, c := range packet.Cases {
 		re, err := syntax.Parse(c.Pattern, syntax.Flags(c.Flags))
 		if c.Error != "" {
@@ -480,6 +637,39 @@ func verify(packet Packet) {
 		}
 		if err != nil {
 			fail(fmt.Errorf("%s: %v", c.ID, err))
+		}
+		if compilePkg {
+			p, err := syntax.Compile(re)
+			if err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if p.String() != c.Dump {
+				fail(fmt.Errorf("%s: dump mismatch want %s got %s", c.ID, c.Dump, p.String()))
+			}
+			if p.Start != c.Start {
+				fail(fmt.Errorf("%s: start want %d got %d", c.ID, c.Start, p.Start))
+			}
+			if p.NumCap != c.NumCap {
+				fail(fmt.Errorf("%s: numCap want %d got %d", c.ID, c.NumCap, p.NumCap))
+			}
+			got := instJSON(p)
+			if len(got) != len(c.Inst) {
+				fail(fmt.Errorf("%s: inst len want %d got %d", c.ID, len(c.Inst), len(got)))
+			}
+			for i := range got {
+				if got[i].Op != c.Inst[i].Op || got[i].Out != c.Inst[i].Out || got[i].Arg != c.Inst[i].Arg {
+					fail(fmt.Errorf("%s: inst[%d] mismatch", c.ID, i))
+				}
+				if len(got[i].Rune) != len(c.Inst[i].Rune) {
+					fail(fmt.Errorf("%s: inst[%d] rune mismatch", c.ID, i))
+				}
+				for j := range got[i].Rune {
+					if got[i].Rune[j] != c.Inst[i].Rune[j] {
+						fail(fmt.Errorf("%s: inst[%d].rune[%d] mismatch", c.ID, i, j))
+					}
+				}
+			}
+			continue
 		}
 		if simplify {
 			re = re.Simplify()
@@ -499,7 +689,7 @@ func main() {
 	out := flag.String("out", "", "output JSON file")
 	verifyFlag := flag.Bool("verify", false, "verify stdin packet")
 	flag.Parse()
-	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" {
+	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
 	if *verifyFlag {
@@ -522,6 +712,9 @@ func main() {
 	packet := generate()
 	if *pkg == "regexsyntax-simplify" {
 		packet = generateSimplify()
+	}
+	if *pkg == "regexsyntax-compile" {
+		packet = generateCompile()
 	}
 	if err := enc.Encode(packet); err != nil {
 		fail(err)

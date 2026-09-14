@@ -20,6 +20,43 @@ export const OP: {
   readonly Alternate: 19;
 };
 
+export const INST_OP: {
+  readonly Alt: 0;
+  readonly AltMatch: 1;
+  readonly Capture: 2;
+  readonly EmptyWidth: 3;
+  readonly Match: 4;
+  readonly Fail: 5;
+  readonly Nop: 6;
+  readonly Rune: 7;
+  readonly Rune1: 8;
+  readonly RuneAny: 9;
+  readonly RuneAnyNotNL: 10;
+};
+
+export const EMPTY_OP: {
+  readonly BeginLine: 1;
+  readonly EndLine: 2;
+  readonly BeginText: 4;
+  readonly EndText: 8;
+  readonly WordBoundary: 16;
+  readonly NoWordBoundary: 32;
+};
+
+export interface Inst {
+  op: number;
+  out: number;
+  arg: number;
+  rune: number[];
+}
+
+export interface Prog {
+  dump: string;
+  start: number;
+  numCap: number;
+  inst: Inst[];
+}
+
 export const FLAGS: {
   readonly FoldCase: number;
   readonly Literal: number;
@@ -59,8 +96,10 @@ export class SyntaxRegexp {
   capNames(): string[];
   equal(other: SyntaxRegexp): boolean;
   simplify(): SyntaxRegexp;
+  compile(): Prog;
 }
 
 export function syntaxParse(pattern: string, flags: number): SyntaxRegexp;
 export function syntaxSimplify(pattern: string, flags: number): SyntaxRegexp;
+export function syntaxCompile(pattern: string, flags: number): Prog;
 export function flagsToString(flags: number): string;
