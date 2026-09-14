@@ -6,6 +6,8 @@ This slice implements media types, the extension table, RFC 2047 encoded-words, 
 
 Checkpoint 2 expands Go fixtures to 200+ `ParseMediaType` cases (Go 1.24 `mediatype_test.go` plus generated parameter variants), Go 1.24 `FormatMediaType` / quoted-printable writer+reader / RFC 2047 `DecodeHeader` tables, TS→Go `formatMediaType` / quoted-printable verify, and 1-byte quoted-printable reads.
 
+Checkpoint 3: `npm pack` of the JS tarball (no `.node` inside) plus a sibling platform tarball, clean-dir `require()` / `import()` load smoke, and recertified linux-x64-gnu `.node` ≤ 2 MB.
+
 ## Differences from Go
 
 - **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.
