@@ -68,16 +68,40 @@ export function cIsInf(x: Complex, sign?: number): boolean;
 export function cIsNaN(x: Complex): boolean;
 
 /**
- * math/rand v2 PCG / ChaCha8 (checkpoint 1) and v1 lagged-Fibonacci `newSource` (checkpoint 2).
+ * math/rand v2 PCG / ChaCha8 and v1 lagged-Fibonacci `newSource` (checkpoint 3).
  * This is a PRNG, not a CSPRNG: do not use for tokens, keys, nonces, or session IDs.
- * Remaining Rand methods (intN, shuffle, Zipf, defaultRand) land in later checkpoints.
+ * Zipf, normFloat64/expFloat64, and defaultRand land in checkpoint 4. `seedDefault` is not exported.
+ *
+ * 64-bit integers are `bigint` (issue #21 shape 1), including `int()` / `uint()` on this 64-bit port.
  */
 export class Rand {
   uint64(): bigint;
+  uint64N(n: bigint): bigint;
+  uint32(): number;
+  uint32N(n: number): number;
+  uint(): bigint;
+  uintN(n: bigint): bigint;
+  int64(): bigint;
+  int64N(n: bigint): bigint;
+  int32(): number;
+  int32N(n: number): number;
+  int(): bigint;
+  intN(n: number): number;
   /** v1 `Int63`. Throws `RangeError` on PCG/ChaCha8. */
   int63(): bigint;
-  /** v1 `Float64` in `[0, 1)`. Throws `RangeError` on PCG/ChaCha8. */
+  int63n(n: bigint): bigint;
+  int31(): number;
+  int31n(n: number): number;
+  intn(n: number): number;
+  uint32v1(): number;
+  float32(): number;
+  /** v2 `Float64` on PCG/ChaCha8; v1 `Float64` on `newSource`. */
   float64(): number;
+  /** Copy-and-shuffle. Not an array → `RangeError` (`invalid argument to Shuffle`). */
+  shuffle<T>(values: T[]): T[];
+  shuffleInPlace(array: Uint32Array | Float64Array): void;
+  /** `perm(0)` is empty; `perm(n<0)` throws. v1 uses `Intn`; v2 uses `Shuffle`. */
+  perm(n: number): Uint32Array;
   /** v1 deterministic `Read`. Throws `RangeError` on PCG/ChaCha8 (v2 has no Read). */
   read(n: number): Uint8Array;
   /** Go `MarshalBinary` bytes: PCG is 20 bytes (`pcg:` + BE hi/lo); ChaCha8 is 48 bytes (`chacha8:` + BE used + LE seed), optionally prefixed with `readbuf:`. v1 `newSource` has no marshal format and throws. */

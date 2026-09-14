@@ -182,6 +182,31 @@ function i64(name, x) {
   return x;
 }
 
+function posInt(name, n, min, max) {
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < min || n > max) {
+    throw new RangeError(`invalid argument to ${name}`);
+  }
+  return n;
+}
+
+function posBig(name, n, allowZero) {
+  const min = allowZero ? 0n : 1n;
+  const max = (1n << 64n) - 1n;
+  if (typeof n !== 'bigint' || n < min || n > max) {
+    throw new RangeError(`invalid argument to ${name}`);
+  }
+  if (!allowZero && n === 0n) throw new RangeError(`invalid argument to ${name}`);
+  return n;
+}
+
+function posI64(name, n) {
+  const max = (1n << 63n) - 1n;
+  if (typeof n !== 'bigint' || n <= 0n || n > max) {
+    throw new RangeError(`invalid argument to ${name}`);
+  }
+  return n;
+}
+
 class Rand {
   constructor(native) {
     this._native = native;
@@ -189,11 +214,114 @@ class Rand {
   uint64() {
     return native(() => this._native.uint64());
   }
+  uint64N(n) {
+    return native(() => this._native.uint64N(posBig('Uint64N', n, false)));
+  }
+  uint32() {
+    return native(() => this._native.uint32()) >>> 0;
+  }
+  uint32N(n) {
+    return native(() => this._native.uint32N(posInt('Uint32N', n, 1, 0xffffffff))) >>> 0;
+  }
+  uint() {
+    return native(() => this._native.uint());
+  }
+  uintN(n) {
+    return native(() => this._native.uintN(posBig('UintN', n, false)));
+  }
+  int64() {
+    return native(() => this._native.int64());
+  }
+  int64N(n) {
+    return native(() => this._native.int64N(posI64('Int64N', n)));
+  }
+  int32() {
+    return native(() => this._native.int32());
+  }
+  int32N(n) {
+    return native(() => this._native.int32N(posInt('Int32N', n, 1, 0x7fffffff)));
+  }
+  int() {
+    return native(() => this._native.int());
+  }
+  intN(n) {
+    if (typeof n !== 'number' || !Number.isSafeInteger(n) || n <= 0) {
+      throw new RangeError('invalid argument to IntN');
+    }
+    return native(() => this._native.intN(n));
+  }
   int63() {
     return native(() => this._native.int63());
   }
+  int63n(n) {
+    return native(() => this._native.int63n(posI64('Int63n', n)));
+  }
+  int31() {
+    return native(() => this._native.int31());
+  }
+  int31n(n) {
+    return native(() => this._native.int31n(posInt('Int31n', n, 1, 0x7fffffff)));
+  }
+  intn(n) {
+    if (typeof n !== 'number' || !Number.isSafeInteger(n) || n <= 0) {
+      throw new RangeError('invalid argument to Intn');
+    }
+    return native(() => this._native.intn(n));
+  }
+  uint32v1() {
+    return native(() => this._native.uint32v1()) >>> 0;
+  }
   float64() {
     return native(() => this._native.float64());
+  }
+  float32() {
+    return native(() => this._native.float32());
+  }
+  // Fisher-Yates in JS for generic arrays (issue #21 shape 5). Swap indices come
+  // from native shuffleInPlace so v1 uses int31n-fast and v2 uses uint64n.
+  shuffle(values) {
+    if (!Array.isArray(values)) {
+      throw new RangeError('invalid argument to Shuffle');
+    }
+    const n = values.length;
+    const out = values.slice();
+    if (n <= 1) return out;
+    const idx = new Uint32Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
+    this.shuffleInPlace(idx);
+    for (let i = 0; i < n; i++) out[i] = values[idx[i]];
+    return out;
+  }
+  shuffleInPlace(array) {
+    if (array instanceof Uint32Array) {
+      native(() => this._native.shuffleInPlaceU32(array));
+      return;
+    }
+    if (array instanceof Float64Array) {
+      native(() => this._native.shuffleInPlaceF64(array));
+      return;
+    }
+    throw new RangeError('invalid argument to Shuffle');
+  }
+  // v2: identity then Shuffle (uint64n). v1: Go Perm loop via Intn (not Shuffle).
+  perm(n) {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 0xffffffff) {
+      throw new RangeError(n < 0 ? 'invalid argument to Perm' : 'math/rand: perm length out of range');
+    }
+    if (n === 0) return new Uint32Array(0);
+    if (this._native.isV1()) {
+      const m = new Uint32Array(n);
+      for (let i = 0; i < n; i++) {
+        const j = this.intn(i + 1);
+        m[i] = m[j];
+        m[j] = i;
+      }
+      return m;
+    }
+    const p = new Uint32Array(n);
+    for (let i = 0; i < n; i++) p[i] = i;
+    this.shuffleInPlace(p);
+    return p;
   }
   read(n) {
     if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 0xffffffff) {

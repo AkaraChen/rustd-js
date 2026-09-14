@@ -1,7 +1,7 @@
 # rustd-mathx
 
 Go `math/bits`, `math/cmplx`, and `math/rand` for Node via Rust + napi-rs.
-This is checkpoint 2 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 `uint64` + `MarshalBinary` + v1 lagged-Fibonacci `newSource` (`Int63`/`Float64`/`Read`)**. `intN`/`shuffle`/`Zipf`/`defaultRand` are not exported yet.
+This is checkpoint 3 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + `uint64N`/`intN` family + `float32`/`float64` + `perm`/`shuffle`/`shuffleInPlace`**. Zipf, `normFloat64`/`expFloat64`, and `defaultRand` are not exported yet.
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -58,9 +58,10 @@ Required signed-zero cases: `cSqrt([-1, 0]) === [0, 1]`, `cPolar([-1, 0]) === { 
 - No platform-width `bits.Len`, `LeadingZeros`, `Add`, … Use `len32`/`len64` (and the matching width for every other op). A `uint` in Go is 32 or 64 bits depending on the platform; this package never hides that.
 - Panic becomes `RangeError`.
 - `math` and `math/big` are out of the 28-package split.
-- `math/rand` checkpoint 2 exports `newPCG` / `newChaCha8` / `randFromState` (`uint64` + `state`) and v1 `newSource` (`int63` / `float64` / `read` / `uint64`). v1 has no `MarshalBinary`. `intN`, `shuffle`, Zipf, and `defaultRand` come later. `seedDefault` is **not** exported pending review (issue #21 shape decision 8).
-- v2 PCG/ChaCha8 throw `RangeError` on `int63`/`float64`/`read` until those methods land on v2 streams. v2 has no `Read`.
-- `Shuffle` will use copy + in-place typed-array APIs rather than Go's `swap` callback (issue #21 recommended shape).
+- `math/rand` checkpoint 3 exports the v2 N-family (`uint64N`/`intN`/…), v1 `int63n`/`int31n`/`intn`/`uint32v1`, `float32`/`float64` (v1 vs v2 algorithms by source), `perm`, `shuffle` (copy, generic JS array), and `shuffleInPlace` (`Uint32Array` | `Float64Array`). Zipf / `normFloat64` / `expFloat64` / `defaultRand` come in checkpoint 4. `seedDefault` is **not** exported pending review (issue #21 shape decision 8).
+- v2 PCG/ChaCha8 throw `RangeError` on v1-only methods (`int63`, `int63n`, `intn`, `read`, …). v2 has no `Read`.
+- `int()` / `uint()` are `bigint` (64-bit Go `int`/`uint`; issue #21 shape 1). `intN(n: number)` stays `number` because `n` is a JS safe integer.
+- `Shuffle` is copy + in-place typed-array APIs rather than Go's `swap` callback (issue #21 recommended shape). `perm`/`shuffle` live in `index.js` so the Fisher-Yates / v1 `Intn` loops are visible; index draws come from native `uint64n` / v1 `int31n`-fast so consumption matches Go.
 - `cLog10` is not exported (issue #21 TS draft has `cLog` only).
 - `cNorm` is extra (`re²+im²`). `cIsInf` accepts an optional sign that Go `cmplx.IsInf` does not.
 - NaN payloads from explicit `cNaN()` / Go `math.NaN()` use `0x7ff8000000000001`. Libc `sin`/`exp`/… NaN payloads may still differ; those rows go in the known-diff list if tests find them.
@@ -76,7 +77,7 @@ Compared on Linux x64 GNU against Go 1.24.13 `math/cmplx`, cartesian of `{±0,±
 | Finite libm ULP (typically 1–7, occasionally ~300 on `cPow` of π-heavy inputs) | Same special-value branches as Go; `sin`/`exp`/`pow` come from glibc vs Go `math` |
 | `cmplx.Pow(0, NaN+Infi)` | Go panics (`not reached`); we do not throw and follow the `modulus == 0` path |
 
-## API (`math/rand` checkpoints 1–2)
+## API (`math/rand` checkpoints 1–3)
 
 **This is a PRNG, not a CSPRNG.** Do not use it for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto.randomBytes` for anything security-sensitive.
 
@@ -91,8 +92,17 @@ const r2 = randFromState(bytes);   // continues the same stream
 const c = newChaCha8(Uint8Array.of(1, ...new Uint8Array(31)));
 c.state(); // 48 bytes (`chacha8:` + used + seed)
 
+r.uint64N(7n);
+r.intN(100);
+r.float64();
+r.perm(4);                 // Uint32Array, Go Perm
+r.shuffle([0, 1, 2, 3]);   // copy; Fisher-Yates via uint64N
+const buf = Uint32Array.of(0, 1, 2, 3);
+r.shuffleInPlace(buf);
+
 const v1 = newSource(1n);
 v1.int63();   // 5577006791947779410n
+v1.intn(50);
 v1.read(8);   // 52fdfc072182654f after a fresh NewSource(1)
 ```
 

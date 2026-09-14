@@ -26,6 +26,35 @@ func f64bits(n int, next func() float64) []string {
 	return out
 }
 
+func f32bits(n int, next func() float32) []string {
+	out := make([]string, n)
+	for i := 0; i < n; i++ {
+		out[i] = strconv.FormatUint(uint64(math.Float32bits(next())), 16)
+	}
+	return out
+}
+
+func ints(n int, next func() int) []int {
+	out := make([]int, n)
+	for i := 0; i < n; i++ {
+		out[i] = next()
+	}
+	return out
+}
+
+func permOf(r interface{ Perm(int) []int }, n int) []int {
+	return r.Perm(n)
+}
+
+func shuffleOf(n int, next func(n int, swap func(i, j int))) []int {
+	p := make([]int, n)
+	for i := range p {
+		p[i] = i
+	}
+	next(n, func(i, j int) { p[i], p[j] = p[j], p[i] })
+	return p
+}
+
 func v1Read(seed int64, n int) []byte {
 	buf := make([]byte, n)
 	if _, err := rand.New(rand.NewSource(seed)).Read(buf); err != nil {
@@ -110,6 +139,32 @@ func main() {
 	}
 	chachaReadNext := chachaRead.Uint64()
 
+	pcgN7 := randv2.New(randv2.NewPCG(1, 2))
+	pcgPow2 := randv2.New(randv2.NewPCG(1, 2))
+	pcgU32 := randv2.New(randv2.NewPCG(1, 2))
+	pcgU32N := randv2.New(randv2.NewPCG(1, 2))
+	pcgIntN := randv2.New(randv2.NewPCG(1, 2))
+	pcgI32 := randv2.New(randv2.NewPCG(1, 2))
+	pcgI32N := randv2.New(randv2.NewPCG(1, 2))
+	pcgI64N := randv2.New(randv2.NewPCG(1, 2))
+	pcgI64 := randv2.New(randv2.NewPCG(1, 2))
+	pcgInt := randv2.New(randv2.NewPCG(1, 2))
+	pcgUint := randv2.New(randv2.NewPCG(1, 2))
+	pcgF64 := randv2.New(randv2.NewPCG(1, 2))
+	pcgF32 := randv2.New(randv2.NewPCG(1, 2))
+	pcgPerm := randv2.New(randv2.NewPCG(1, 2))
+	pcgShuf := randv2.New(randv2.NewPCG(1, 2))
+	chachaWide := randv2.New(randv2.NewChaCha8(seed))
+	chachaN3 := randv2.New(randv2.NewChaCha8(seed))
+	v1I63n := rand.New(rand.NewSource(1))
+	v1I31 := rand.New(rand.NewSource(1))
+	v1I31n := rand.New(rand.NewSource(1))
+	v1Intn := rand.New(rand.NewSource(1))
+	v1U32 := rand.New(rand.NewSource(1))
+	v1F32 := rand.New(rand.NewSource(1))
+	v1Perm := rand.New(rand.NewSource(1))
+	v1Shuf := rand.New(rand.NewSource(1))
+
 	out := map[string]any{
 		"pcg12First3": []string{
 			"14192431797130687760",
@@ -135,6 +190,47 @@ func main() {
 		"v1Seed1Read3Then8": hexOf(v1ReadContinue(1, 3, 8)),
 		"v1Seed0Int63Head": i64s(8, rand.New(rand.NewSource(0)).Int63),
 		"v1SeedNeg1Int63Head": i64s(8, rand.New(rand.NewSource(-1)).Int63),
+		"pcg12Uint64N7":    u64s(n, func() uint64 { return pcgN7.Uint64N(7) }),
+		"pcg12Uint64NPow2": u64s(256, func() uint64 { return pcgPow2.Uint64N(1 << 10) }),
+		"pcg12Uint32":      ints(n, func() int { return int(pcgU32.Uint32()) }),
+		"pcg12Uint32N10":   ints(n, func() int { return int(pcgU32N.Uint32N(10)) }),
+		"pcg12IntN100":     ints(n, func() int { return pcgIntN.IntN(100) }),
+		"pcg12Int32":       ints(n, func() int { return int(pcgI32.Int32()) }),
+		"pcg12Int32N7":     ints(n, func() int { return int(pcgI32N.Int32N(7)) }),
+		"pcg12Int64N":      i64s(n, func() int64 { return pcgI64N.Int64N(1 << 40) }),
+		"pcg12Int64":       i64s(n, pcgI64.Int64),
+		"pcg12Int":         i64s(n, func() int64 { return int64(pcgInt.Int()) }),
+		"pcg12Uint":        u64s(n, func() uint64 { return uint64(pcgUint.Uint()) }),
+		"pcg12Float64":     f64bits(n, pcgF64.Float64),
+		"pcg12Float32":     f32bits(n, pcgF32.Float32),
+		"pcg12Perm0":       permOf(pcgPerm, 0),
+		"pcg12Perm1":       permOf(pcgPerm, 1),
+		"pcg12Perm2":       permOf(pcgPerm, 2),
+		"pcg12Perm1000":    permOf(pcgPerm, 1000),
+		"pcg12Perm10000":   permOf(pcgPerm, 10000),
+		"pcg12Shuffle0":    shuffleOf(0, pcgShuf.Shuffle),
+		"pcg12Shuffle1":    shuffleOf(1, pcgShuf.Shuffle),
+		"pcg12Shuffle2":    shuffleOf(2, pcgShuf.Shuffle),
+		"pcg12Shuffle1000": shuffleOf(1000, pcgShuf.Shuffle),
+		"pcg12Shuffle10000": shuffleOf(10000, pcgShuf.Shuffle),
+		"chachaFloat64":    f64bits(n, chachaWide.Float64),
+		"chachaUint64N3":   u64s(n, func() uint64 { return chachaN3.Uint64N(3) }),
+		"v1Int63n100":      i64s(n, func() int64 { return v1I63n.Int63n(100) }),
+		"v1Int31":          ints(n, func() int { return int(v1I31.Int31()) }),
+		"v1Int31n10":       ints(n, func() int { return int(v1I31n.Int31n(10)) }),
+		"v1Intn50":         ints(n, func() int { return v1Intn.Intn(50) }),
+		"v1Uint32":         ints(n, func() int { return int(v1U32.Uint32()) }),
+		"v1Float32":        f32bits(n, v1F32.Float32),
+		"v1Perm0": permOf(v1Perm, 0),
+		"v1Perm1": permOf(v1Perm, 1),
+		"v1Perm2": permOf(v1Perm, 2),
+		"v1Perm1000": permOf(v1Perm, 1000),
+		"v1Perm10000": permOf(v1Perm, 10000),
+		"v1Shuffle0": shuffleOf(0, v1Shuf.Shuffle),
+		"v1Shuffle1": shuffleOf(1, v1Shuf.Shuffle),
+		"v1Shuffle2": shuffleOf(2, v1Shuf.Shuffle),
+		"v1Shuffle1000": shuffleOf(1000, v1Shuf.Shuffle),
+		"v1Shuffle10000": shuffleOf(10000, v1Shuf.Shuffle),
 	}
 	enc := json.NewEncoder(os.Stdout)
 	if err := enc.Encode(out); err != nil {

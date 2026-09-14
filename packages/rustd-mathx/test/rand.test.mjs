@@ -147,11 +147,150 @@ test('v1 Seed(0) and Seed(-1) Int63 heads match Go', () => {
 test('v1 APIs throw on PCG/ChaCha8; v1 has no MarshalBinary', () => {
   const pcg = newPCG(1n, 2n);
   assert.throws(() => pcg.int63(), RangeError);
-  assert.throws(() => pcg.float64(), RangeError);
+  assert.throws(() => pcg.int63n(1n), RangeError);
+  assert.throws(() => pcg.intn(1), RangeError);
   assert.throws(() => pcg.read(8), RangeError);
   const v1 = newSource(1n);
   assert.throws(() => v1.state(), RangeError);
   assert.throws(() => newSource(1n << 64n), RangeError);
+});
+
+function f32bits(x) {
+  const buf = Buffer.alloc(4);
+  buf.writeFloatLE(x, 0);
+  return buf.readUInt32LE(0).toString(16);
+}
+
+test('PCG uint64N/intN family matches Go consumption', () => {
+  const n7 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Uint64N7.length; i++) {
+    assert.equal(n7.uint64N(7n), BigInt(packet.pcg12Uint64N7[i]), `uint64N(7)[${i}]`);
+  }
+  const pow2 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Uint64NPow2.length; i++) {
+    assert.equal(pow2.uint64N(1024n), BigInt(packet.pcg12Uint64NPow2[i]), `uint64N(1024)[${i}]`);
+  }
+  const u32 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Uint32.length; i++) {
+    assert.equal(u32.uint32(), packet.pcg12Uint32[i] >>> 0, `uint32[${i}]`);
+  }
+  const u32n = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Uint32N10.length; i++) {
+    assert.equal(u32n.uint32N(10), packet.pcg12Uint32N10[i], `uint32N[${i}]`);
+  }
+  const intn = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12IntN100.length; i++) {
+    assert.equal(intn.intN(100), packet.pcg12IntN100[i], `intN[${i}]`);
+  }
+  const i32 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Int32.length; i++) {
+    assert.equal(i32.int32(), packet.pcg12Int32[i], `int32[${i}]`);
+  }
+  const i32n = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Int32N7.length; i++) {
+    assert.equal(i32n.int32N(7), packet.pcg12Int32N7[i], `int32N[${i}]`);
+  }
+  const i64n = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Int64N.length; i++) {
+    assert.equal(i64n.int64N(1n << 40n), BigInt(packet.pcg12Int64N[i]), `int64N[${i}]`);
+  }
+  const i64 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Int64.length; i++) {
+    assert.equal(i64.int64(), BigInt(packet.pcg12Int64[i]), `int64[${i}]`);
+  }
+  const intv = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Int.length; i++) {
+    assert.equal(intv.int(), BigInt(packet.pcg12Int[i]), `int[${i}]`);
+  }
+  const uintv = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Uint.length; i++) {
+    assert.equal(uintv.uint(), BigInt(packet.pcg12Uint[i]), `uint[${i}]`);
+  }
+});
+
+test('PCG/ChaCha8 float32/float64 bit patterns match Go', () => {
+  const f64 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Float64.length; i++) {
+    assert.equal(f64bits(f64.float64()), packet.pcg12Float64[i], `pcg f64[${i}]`);
+  }
+  const f32 = newPCG(1n, 2n);
+  for (let i = 0; i < packet.pcg12Float32.length; i++) {
+    assert.equal(f32bits(f32.float32()), packet.pcg12Float32[i], `pcg f32[${i}]`);
+  }
+  const seed = new Uint8Array(32);
+  seed[0] = 1;
+  const c64 = newChaCha8(seed);
+  for (let i = 0; i < packet.chachaFloat64.length; i++) {
+    assert.equal(f64bits(c64.float64()), packet.chachaFloat64[i], `chacha f64[${i}]`);
+  }
+  const cN = newChaCha8(seed);
+  for (let i = 0; i < packet.chachaUint64N3.length; i++) {
+    assert.equal(cN.uint64N(3n), BigInt(packet.chachaUint64N3[i]), `chacha uint64N[${i}]`);
+  }
+});
+
+test('PCG perm and shuffle match Go for n=0/1/2/1000/10000', () => {
+  const p = newPCG(1n, 2n);
+  for (const n of [0, 1, 2, 1000, 10000]) {
+    assert.deepEqual(Array.from(p.perm(n)), packet[`pcg12Perm${n}`], `perm(${n})`);
+  }
+  const s = newPCG(1n, 2n);
+  for (const n of [0, 1, 2, 1000, 10000]) {
+    const values = Array.from({ length: n }, (_, i) => i);
+    assert.deepEqual(s.shuffle(values), packet[`pcg12Shuffle${n}`], `shuffle(${n})`);
+  }
+  const t = newPCG(1n, 2n);
+  for (const n of [0, 1, 2, 1000, 10000]) {
+    const arr = Uint32Array.from({ length: n }, (_, i) => i);
+    t.shuffleInPlace(arr);
+    assert.deepEqual(Array.from(arr), packet[`pcg12Shuffle${n}`], `shuffleInPlace(${n})`);
+  }
+});
+
+test('v1 int63n/int31/intn/uint32v1/float32/perm/shuffle match Go', () => {
+  const a = newSource(1n);
+  for (let i = 0; i < packet.v1Int63n100.length; i++) {
+    assert.equal(a.int63n(100n), BigInt(packet.v1Int63n100[i]), `int63n[${i}]`);
+  }
+  const b = newSource(1n);
+  for (let i = 0; i < packet.v1Int31.length; i++) {
+    assert.equal(b.int31(), packet.v1Int31[i], `int31[${i}]`);
+  }
+  const c = newSource(1n);
+  for (let i = 0; i < packet.v1Int31n10.length; i++) {
+    assert.equal(c.int31n(10), packet.v1Int31n10[i], `int31n[${i}]`);
+  }
+  const d = newSource(1n);
+  for (let i = 0; i < packet.v1Intn50.length; i++) {
+    assert.equal(d.intn(50), packet.v1Intn50[i], `intn[${i}]`);
+  }
+  const e = newSource(1n);
+  for (let i = 0; i < packet.v1Uint32.length; i++) {
+    assert.equal(e.uint32v1(), packet.v1Uint32[i] >>> 0, `uint32v1[${i}]`);
+  }
+  const f = newSource(1n);
+  for (let i = 0; i < packet.v1Float32.length; i++) {
+    assert.equal(f32bits(f.float32()), packet.v1Float32[i], `v1 f32[${i}]`);
+  }
+  const p = newSource(1n);
+  for (const n of [0, 1, 2, 1000, 10000]) {
+    assert.deepEqual(Array.from(p.perm(n)), packet[`v1Perm${n}`], `v1 perm(${n})`);
+  }
+  const s = newSource(1n);
+  for (const n of [0, 1, 2, 1000, 10000]) {
+    const values = Array.from({ length: n }, (_, i) => i);
+    assert.deepEqual(s.shuffle(values), packet[`v1Shuffle${n}`], `v1 shuffle(${n})`);
+  }
+});
+
+test('N-family and shuffle throw RangeError on Go panic inputs', () => {
+  const r = newPCG(1n, 2n);
+  assert.throws(() => r.uint64N(0n), RangeError);
+  assert.throws(() => r.int64N(0n), RangeError);
+  assert.throws(() => r.intN(0), RangeError);
+  assert.throws(() => r.shuffle(-1), RangeError);
+  assert.throws(() => r.perm(-1), RangeError);
+  assert.equal(r.perm(0).byteLength, 0);
 });
 
 test('release .node stays under 2MB (expected << 500KB)', () => {

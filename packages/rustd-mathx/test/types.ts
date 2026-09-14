@@ -25,17 +25,25 @@ const sqrt: Complex = cSqrt(z);
 const inf: boolean = cIsInf(z, 0);
 const rng: Rand = newPCG(1n, 2n);
 const u: bigint = rng.uint64();
+const n64: bigint = rng.uint64N(7n);
+const i: bigint = rng.int();
+const iN: number = rng.intN(100);
+const shuffled: number[] = rng.shuffle([1, 2, 3]);
+const perm: Uint32Array = rng.perm(4);
 const st: Uint8Array = rng.state();
 const c8: Rand = newChaCha8(new Uint8Array(32));
 const restored: Rand = randFromState(st);
 const v1: Rand = newSource(1n);
 const i63: bigint = v1.int63();
 const f64: number = v1.float64();
+const f32: number = rng.float32();
 const bytes: Uint8Array = v1.read(8);
+const idx = Uint32Array.of(0, 1, 2);
+rng.shuffleInPlace(idx);
 // @ts-expect-error Complex is a two-number tuple, not a number.
 cAbs(1);
 // @ts-expect-error PCG seeds are bigint.
 newPCG(1, 2);
 // @ts-expect-error NewSource seed is bigint.
 newSource(1);
-void [lz, lz64, rotated, sum32, sum64, div, rem, abs, polar, sqrt, inf, u, c8, restored, i63, f64, bytes];
+void [lz, lz64, rotated, sum32, sum64, div, rem, abs, polar, sqrt, inf, u, n64, i, iN, shuffled, perm, c8, restored, i63, f64, f32, bytes, idx];

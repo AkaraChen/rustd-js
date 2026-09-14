@@ -442,6 +442,142 @@ enum Inner {
     Rng(RngSource),
 }
 
+impl Inner {
+    fn uint64(&mut self) -> u64 {
+        match self {
+            Inner::Pcg(p) => p.uint64(),
+            Inner::ChaCha8(c) => c.uint64(),
+            Inner::Rng(r) => r.uint64(),
+        }
+    }
+
+    fn is_v1(&self) -> bool {
+        matches!(self, Inner::Rng(_))
+    }
+
+    fn rng(&mut self) -> Result<&mut RngSource> {
+        match self {
+            Inner::Rng(r) => Ok(r),
+            _ => Err(range("math/rand: this method is a v1 API")),
+        }
+    }
+}
+
+fn uint64n(src: &mut Inner, n: u64) -> u64 {
+    if n & (n - 1) == 0 {
+        return src.uint64() & (n - 1);
+    }
+    let (mut hi, mut lo) = mul64(src.uint64(), n);
+    if lo < n {
+        let thresh = n.wrapping_neg() % n;
+        while lo < thresh {
+            let next = mul64(src.uint64(), n);
+            hi = next.0;
+            lo = next.1;
+        }
+    }
+    hi
+}
+
+fn v2_float64(src: &mut Inner) -> f64 {
+    (src.uint64() << 11 >> 11) as f64 / ((1u64 << 53) as f64)
+}
+
+fn v2_float32(src: &mut Inner) -> f32 {
+    let x = (src.uint64() >> 32) as u32;
+    (x << 8 >> 8) as f32 / ((1u32 << 24) as f32)
+}
+
+fn v1_int63n(rng: &mut RngSource, n: i64) -> Result<i64> {
+    if n <= 0 {
+        return Err(range("invalid argument to Int63n"));
+    }
+    if n & (n - 1) == 0 {
+        return Ok(rng.int63() & (n - 1));
+    }
+    let max = (i64::MAX as u64 - ((1u64 << 63) % n as u64)) as i64;
+    let mut v = rng.int63();
+    while v > max {
+        v = rng.int63();
+    }
+    Ok(v % n)
+}
+
+fn v1_int31(rng: &mut RngSource) -> i32 {
+    (rng.int63() >> 32) as i32
+}
+
+fn v1_uint32(rng: &mut RngSource) -> u32 {
+    (rng.int63() >> 31) as u32
+}
+
+fn v1_int31n(rng: &mut RngSource, n: i32) -> Result<i32> {
+    if n <= 0 {
+        return Err(range("invalid argument to Int31n"));
+    }
+    if n & (n - 1) == 0 {
+        return Ok(v1_int31(rng) & (n - 1));
+    }
+    let max = (i32::MAX as u32 - ((1u32 << 31) % n as u32)) as i32;
+    let mut v = v1_int31(rng);
+    while v > max {
+        v = v1_int31(rng);
+    }
+    Ok(v % n)
+}
+
+fn v1_int31n_fast(rng: &mut RngSource, n: i32) -> i32 {
+    let v = v1_uint32(rng);
+    let mut prod = u64::from(v) * u64::from(n as u32);
+    let mut low = prod as u32;
+    if low < n as u32 {
+        let thresh = (n as u32).wrapping_neg() % (n as u32);
+        while low < thresh {
+            let v = v1_uint32(rng);
+            prod = u64::from(v) * u64::from(n as u32);
+            low = prod as u32;
+        }
+    }
+    (prod >> 32) as i32
+}
+
+fn v1_intn(rng: &mut RngSource, n: i64) -> Result<i64> {
+    if n <= 0 {
+        return Err(range("invalid argument to Intn"));
+    }
+    if n <= i64::from(i32::MAX) {
+        Ok(i64::from(v1_int31n(rng, n as i32)?))
+    } else {
+        v1_int63n(rng, n)
+    }
+}
+
+fn shuffle_slice<T>(src: &mut Inner, arr: &mut [T]) {
+    let n = arr.len();
+    if src.is_v1() {
+        let rng = match src {
+            Inner::Rng(r) => r,
+            _ => unreachable!(),
+        };
+        let mut i = n as i64 - 1;
+        while i > (1i64 << 31) - 2 {
+            let j = v1_int63n(rng, i + 1).expect("shuffle n > 0") as usize;
+            arr.swap(i as usize, j);
+            i -= 1;
+        }
+        while i > 0 {
+            let j = v1_int31n_fast(rng, (i + 1) as i32) as usize;
+            arr.swap(i as usize, j);
+            i -= 1;
+        }
+        return;
+    }
+    for i in (1..n).rev() {
+        let j = uint64n(src, (i + 1) as u64) as usize;
+        arr.swap(i, j);
+    }
+}
+
 #[napi]
 pub struct NativeRand {
     inner: Inner,
@@ -459,29 +595,156 @@ fn wrap(inner: Inner) -> NativeRand {
 
 #[napi]
 impl NativeRand {
+    #[napi(js_name = "isV1")]
+    pub fn is_v1(&self) -> bool {
+        self.inner.is_v1()
+    }
+
     #[napi]
     pub fn uint64(&mut self) -> Result<BigInt> {
-        match &mut self.inner {
-            Inner::Pcg(p) => Ok(u64_out(p.uint64())),
-            Inner::ChaCha8(c) => Ok(u64_out(c.uint64())),
-            Inner::Rng(r) => Ok(u64_out(r.uint64())),
+        Ok(u64_out(self.inner.uint64()))
+    }
+
+    #[napi(js_name = "uint64N")]
+    pub fn uint64_n(&mut self, n: BigInt) -> Result<BigInt> {
+        let n = u64_arg(n)?;
+        if n == 0 {
+            return Err(range("invalid argument to Uint64N"));
         }
+        Ok(u64_out(uint64n(&mut self.inner, n)))
+    }
+
+    #[napi]
+    pub fn uint32(&mut self) -> u32 {
+        (self.inner.uint64() >> 32) as u32
+    }
+
+    #[napi(js_name = "uint32N")]
+    pub fn uint32_n(&mut self, n: u32) -> Result<u32> {
+        if n == 0 {
+            return Err(range("invalid argument to Uint32N"));
+        }
+        Ok(uint64n(&mut self.inner, u64::from(n)) as u32)
+    }
+
+    #[napi]
+    pub fn uint(&mut self) -> Result<BigInt> {
+        Ok(u64_out(self.inner.uint64()))
+    }
+
+    #[napi(js_name = "uintN")]
+    pub fn uint_n(&mut self, n: BigInt) -> Result<BigInt> {
+        let n = u64_arg(n)?;
+        if n == 0 {
+            return Err(range("invalid argument to UintN"));
+        }
+        Ok(u64_out(uint64n(&mut self.inner, n)))
+    }
+
+    #[napi]
+    pub fn int64(&mut self) -> Result<BigInt> {
+        Ok(u64_out(self.inner.uint64() & !(1u64 << 63)))
+    }
+
+    #[napi(js_name = "int64N")]
+    pub fn int64_n(&mut self, n: BigInt) -> Result<BigInt> {
+        let n = i64_arg(n)?;
+        if n <= 0 {
+            return Err(range("invalid argument to Int64N"));
+        }
+        Ok(u64_out(uint64n(&mut self.inner, n as u64)))
+    }
+
+    #[napi]
+    pub fn int32(&mut self) -> i32 {
+        (self.inner.uint64() >> 33) as i32
+    }
+
+    #[napi(js_name = "int32N")]
+    pub fn int32_n(&mut self, n: i32) -> Result<i32> {
+        if n <= 0 {
+            return Err(range("invalid argument to Int32N"));
+        }
+        Ok(uint64n(&mut self.inner, n as u64) as i32)
+    }
+
+    #[napi(js_name = "int")]
+    pub fn int_value(&mut self) -> Result<BigInt> {
+        Ok(u64_out(self.inner.uint64() << 1 >> 1))
+    }
+
+    #[napi(js_name = "intN")]
+    pub fn int_n(&mut self, n: i64) -> Result<i64> {
+        if n <= 0 {
+            return Err(range("invalid argument to IntN"));
+        }
+        Ok(uint64n(&mut self.inner, n as u64) as i64)
     }
 
     #[napi]
     pub fn int63(&mut self) -> Result<BigInt> {
-        match &mut self.inner {
-            Inner::Rng(r) => Ok(u64_out(r.int63() as u64)),
-            _ => Err(range("math/rand: Int63 is a v1 API")),
-        }
+        Ok(u64_out(self.inner.rng()?.int63() as u64))
+    }
+
+    #[napi(js_name = "int63n")]
+    pub fn int63n(&mut self, n: BigInt) -> Result<BigInt> {
+        let n = i64_arg(n)?;
+        Ok(u64_out(v1_int63n(self.inner.rng()?, n)? as u64))
+    }
+
+    #[napi]
+    pub fn int31(&mut self) -> Result<i32> {
+        Ok(v1_int31(self.inner.rng()?))
+    }
+
+    #[napi(js_name = "int31n")]
+    pub fn int31n(&mut self, n: i32) -> Result<i32> {
+        v1_int31n(self.inner.rng()?, n)
+    }
+
+    #[napi(js_name = "intn")]
+    pub fn intn(&mut self, n: i64) -> Result<i64> {
+        v1_intn(self.inner.rng()?, n)
+    }
+
+    #[napi(js_name = "uint32v1")]
+    pub fn uint32_v1(&mut self) -> Result<u32> {
+        Ok(v1_uint32(self.inner.rng()?))
     }
 
     #[napi]
     pub fn float64(&mut self) -> Result<f64> {
-        match &mut self.inner {
-            Inner::Rng(r) => Ok(r.float64()),
-            _ => Err(range("math/rand: v1 Float64 is not implemented for this source")),
+        if self.inner.is_v1() {
+            Ok(self.inner.rng()?.float64())
+        } else {
+            Ok(v2_float64(&mut self.inner))
         }
+    }
+
+    #[napi]
+    pub fn float32(&mut self) -> Result<f32> {
+        if self.inner.is_v1() {
+            loop {
+                let f = self.inner.rng()?.float64() as f32;
+                if f != 1.0 {
+                    return Ok(f);
+                }
+            }
+        } else {
+            Ok(v2_float32(&mut self.inner))
+        }
+    }
+
+    #[napi(js_name = "shuffleInPlaceU32")]
+    pub fn shuffle_in_place_u32(&mut self, mut arr: Uint32Array) -> Result<()> {
+        shuffle_slice(&mut self.inner, unsafe { arr.as_mut() });
+        Ok(())
+    }
+
+    #[napi(js_name = "shuffleInPlaceF64")]
+    pub fn shuffle_in_place_f64(&mut self, mut arr: Float64Array) -> Result<()> {
+        shuffle_slice(&mut self.inner, unsafe { arr.as_mut() });
+        Ok(())
     }
 
     #[napi]
