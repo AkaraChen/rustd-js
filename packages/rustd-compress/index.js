@@ -134,6 +134,8 @@ class LzwDecompressor {
   }
   end() { native(() => this._handle.end()); }
   reset() { native(() => this._handle.reset()); }
+  /** Unconsumed compressed bytes plus leftover bit-buffer; not in public .d.ts. */
+  bufferedInputBytes() { return native(() => this._handle.debugInputLen()); }
 }
 
 class LzwCompressor {

@@ -76,9 +76,21 @@ test('streaming LZW matches one-shot across split points', () => {
     for (let i = 0; i < input.length; i += size) enc.write(input.subarray(i, i + size));
     assert.equal(hex(enc.finish()), hex(expected), `compress split ${size}`);
     const dec = new LzwDecompressor(opts);
-    for (let i = 0; i < expected.length; i += size) dec.write(expected.subarray(i, i + size));
-    dec.end();
     const chunks = [];
+    let produced = 0;
+    for (let i = 0; i < expected.length; i += size) {
+      dec.write(expected.subarray(i, i + size));
+      assert.ok(dec.bufferedInputBytes() <= 4, `pending ${dec.bufferedInputBytes()} split ${size} at ${i}`);
+      for (;;) {
+        const part = dec.read(size === 1 ? 1 : 64);
+        if (!part.length) break;
+        produced += part.length;
+        chunks.push(part);
+      }
+    }
+    assert.ok(produced > 0, `must emit before end() split ${size}`);
+    dec.end();
+    assert.equal(dec.bufferedInputBytes(), 0);
     for (;;) {
       const part = dec.read(size === 1 ? 1 : 64);
       if (!part.length) break;
@@ -87,6 +99,68 @@ test('streaming LZW matches one-shot across split points', () => {
     const joined = Buffer.concat(chunks);
     assert.equal(hex(joined), hex(input), `decompress split ${size}`);
   }
+});
+
+test('LZW leftover bits across every byte split match Go for lsb and msb', () => {
+  const input = Uint8Array.from({ length: 80 }, (_, i) => (i * 19) & 255);
+  for (const order of ['lsb', 'msb']) {
+    for (const litWidth of [2, 8]) {
+      const max = (1 << litWidth) - 1;
+      const plain = Uint8Array.from(input, (b) => b & max);
+      const opts = { order, litWidth };
+      const compressed = lzwCompress(plain, opts);
+      assert.ok(compressed.length >= 3, `${order}-${litWidth} compressed`);
+      for (let split = 1; split < compressed.length; split++) {
+        const dec = new LzwDecompressor(opts);
+        dec.write(compressed.subarray(0, split));
+        assert.ok(dec.bufferedInputBytes() <= 4, `${order}-${litWidth} pending at ${split}`);
+        const head = [];
+        for (;;) {
+          const part = dec.read(32);
+          if (!part.length) break;
+          head.push(part);
+        }
+        dec.write(compressed.subarray(split));
+        dec.end();
+        const tail = [];
+        for (;;) {
+          const part = dec.read(32);
+          if (!part.length) break;
+          tail.push(part);
+        }
+        const joined = Buffer.concat([...head, ...tail]);
+        assert.equal(hex(joined), hex(plain), `${order}-${litWidth} split ${split}/${compressed.length}`);
+      }
+    }
+  }
+});
+
+test('LzwDecompressor.write does not keep the whole compressed stream', () => {
+  const opts = { order: 'msb', litWidth: 8 };
+  const input = lcg(64 << 10, 7);
+  const compressed = lzwCompress(input, opts);
+  const dec = new LzwDecompressor(opts);
+  const out = [];
+  let peak = 0;
+  let produced = 0;
+  const chunkSize = 1;
+  for (let i = 0; i < compressed.length; i += chunkSize) {
+    dec.write(compressed.subarray(i, i + chunkSize));
+    peak = Math.max(peak, dec.bufferedInputBytes());
+    assert.ok(dec.bufferedInputBytes() <= 4, `pending ${dec.bufferedInputBytes()} at ${i}`);
+    const part = dec.read();
+    if (part.length) {
+      produced += part.length;
+      out.push(part);
+    }
+  }
+  assert.ok(produced > 0, 'must emit before end()');
+  dec.end();
+  assert.equal(dec.bufferedInputBytes(), 0);
+  const last = dec.read();
+  if (last.length) out.push(last);
+  assert.equal(hex(Buffer.concat(out)), hex(input));
+  assert.ok(peak <= 4, `peak pending ${peak}`);
 });
 
 test('litWidth is rejected immediately with Go wording', () => {

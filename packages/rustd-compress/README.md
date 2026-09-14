@@ -29,8 +29,9 @@ clears codec state.
   decompressed byte the extra pending copy is dropped, so a large single stream
   does not keep the whole input. Small/concat streams still finish via
   `decompress_all` on `end()` because the vendor decoder over-reads past the
-  member footer (no leftover `BZh`). `LzwDecompressor` still buffers until
-  `end()`.
+  member footer (no leftover `BZh`). `LzwDecompressor.write` decodes complete
+  codes immediately and keeps only leftover bits (`nBits < width`) across
+  chunks, matching Go `readLSB`/`readMSB`.
 - `read()` always copies into a fresh `Uint8Array`. Go fills a caller buffer.
 - Error classes are thrown (not `(value, error)`). `Bzip2FormatError` keeps the
   `bzip2 data invalid: …` prefix for structural failures (`bad magic value`,
@@ -50,9 +51,9 @@ clears codec state.
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **437,976 bytes** (issue cap 1.5 MB).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **440,368 bytes** (issue cap 1.5 MB).
 
 ```text
 $ ls -l packages/rustd-compress/*.node
--rwxrwxr-x 1 akrc akrc 437976 Sep 14 18:11 packages/rustd-compress/rustd-compress.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 440368 Sep 14 18:26 packages/rustd-compress/rustd-compress.linux-x64-gnu.node
 ```
