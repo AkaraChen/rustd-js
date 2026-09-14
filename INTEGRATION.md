@@ -35,6 +35,7 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | rustd-encoding | `pkg/rustd-encoding-grok-bulk-2` @ `060ccf7` | merged (`79c22c0`); replay onto origin/main `f6591c3` (issue #7). First-time landing of rustd-encoding. |
 | rustd-encoding | `pkg/rustd-encoding-grok-bulk-2` @ `c6695ea` | superseded by replay `060ccf7` (pre-replay tip; `pnpm-lock.yaml` conflict vs later-landed packages) |
 | rustd-mathx | `pkg/rustd-mathx-grok-bulk-10` @ `9c04f91` | rejected — `pnpm-lock.yaml` conflict (merge-base still `de3e643`); cLog10 on un-rebased history (`a8246ba` is ancestor). Worker must rebase |
+| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `5787caf` | merged (`7048770`); NextPart part-count 1000/1001 vs Go (issue #9 ck23). `04cf16b` **is** an ancestor; merge-tree CLEAN |
 | rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `1034fbd` | merged (`833667d`); NextPart overlong boundary / header without CRLF vs Go (issue #9). `0e4e41b` (malformed-bodies) **is** an ancestor; `0b07ff1` **is** an ancestor; merge-tree CLEAN |
 | rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `0b07ff1` | merged (`4568fdc`); NextPart header-count 10000/10001 vs Go (issue #9). `0b6ace1` **is** an ancestor; merge-tree CLEAN |
 | rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `79c1977` | superseded — parallel history vs merged `0b07ff1`; replaced by rebased tip `1034fbd` (`0b07ff1` **is** an ancestor of `1034fbd`) |
@@ -1735,15 +1736,16 @@ Suggested next three: mathx **after rebase/replay onto origin/main** (last remai
 
 Agent: `grok-integrator`  
 `origin/main` before: `9d9e42f`  
-`origin/main` after: (this file lands as a follow-up commit; package merge `1e5b770`)
+`origin/main` after: (this file lands as a follow-up commit; package merges `1e5b770` + `7048770`)
 
-Priority this round: owner-12 leftover is still **mathx** (same SHA `9c04f91`, lockfile CONFLICT — not re-built). New tips during fetch: containers `a460fd6` (CLEAN, FF) and gotool `8f4d2f9` (parallel history). Verified containers; merged. Did not merge gotool.
+Priority this round: owner-12 leftover is still **mathx** (same SHA `9c04f91`, lockfile CONFLICT — not re-built). New tips during fetch: containers `a460fd6` (CLEAN, FF) and gotool `8f4d2f9` (parallel history). Verified containers; merged. Mid-round mime pushed `5787caf` (CLEAN); verified and merged. Did not merge gotool.
 
 ### Merged (verified green, `--no-ff`, pushed)
 
 | 分支 | 包 | 验证 | merge sha |
 |---|---|---|---|
 | `pkg/rustd-containers-grok-bulk-2` @ `a460fd6` | rustd-containers follow-up | build + 21 tests pass (6 `unused_assignments` in `sais.rs`, not a failure); patterned SuffixArray caps 16×/128× vs Go SA-IS (pattern-16 16MB/1MB=51.6). `68f538e` **is** an ancestor; merge-tree CLEAN (FF from `9d9e42f`) | `1e5b770` |
+| `pkg/rustd-mime-grok-bulk-3` @ `5787caf` | rustd-mime follow-up | build + 89 tests pass (was 80); NextPart part-count 1000/1001 vs Go (issue #9 ck23). `04cf16b` **is** an ancestor; merge-tree CLEAN | `7048770` |
 
 ### Rejected
 
@@ -1845,7 +1847,7 @@ Suggested next three: mathx **after rebase/replay onto origin/main** (last remai
 - Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
 - First-time remaining of the owner 12: **mathx only**. Mail still pending rebase. Gotool follow-up (StringVal/Float64Val) is extra work on a parallel rewrite.
 - On main now: crypto, checksum, containers, compress, archive, serial, image, log, unicode, gotool, regexsyntax, mime, encoding. Missing from the 12: mathx.
-- This round merged the containers patterned-cap follow-up that previously failed 16MB/1MB=77.27 under 64×.
+- This round merged the containers patterned-cap follow-up that previously failed 16MB/1MB=77.27 under 64×, plus mime NextPart part-count 1000/1001.
 - `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
 - `CI=false` on `--filter` builds. Lockfile drift and test-generated `go-fixtures.json` discarded, not committed.
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
