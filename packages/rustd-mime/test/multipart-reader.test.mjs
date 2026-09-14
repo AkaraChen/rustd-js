@@ -911,6 +911,73 @@ test('readForm maxMemory=-10MiB is MessageTooLargeError vs Go', () => {
   assert.throws(() => nativeReadForm('b', body, -(10 << 20)), MessageTooLargeError);
 });
 
+function fileForm(name, filename, content) {
+  const w = new MultipartWriter({ boundary: 'b' });
+  const part = w.createFormFile(name, filename);
+  part.write(content);
+  part.end();
+  return w.bytes();
+}
+
+function assertFormFileMatch(form, goForm, key, index = 0) {
+  assert.equal(goForm.error ?? '', '');
+  const native = form.file[key][index];
+  const goFile = goForm.file[key][index];
+  assert.equal(native.filename, goFile.filename);
+  assert.equal(native.size, goFile.size);
+  assert.equal(hex(native.content), goFile.bodyHex);
+  assert.equal(goFile.spilled, false);
+}
+
+test('readForm file maxMemory 1024 vs Go in-memory; 1023 throws while Go spills', () => {
+  const body = fileForm('f', 'f.txt', Buffer.from('x'.repeat(1024)));
+  const goSpill = goReadForm(body, 'b', 1023);
+  assert.equal(goSpill.error ?? '', '');
+  assert.equal(goSpill.file.f[0].size, 1024);
+  assert.equal(goSpill.file.f[0].bodyHex.length, 2048);
+  assert.equal(goSpill.file.f[0].spilled, true);
+  assert.throws(() => nativeReadForm('b', body, 1023), (err) => {
+    assert.ok(err instanceof MessageTooLargeError);
+    assert.equal(err.message, 'multipart: message too large');
+    return true;
+  });
+  const goOk = goReadForm(body, 'b', 1024);
+  const form = nativeReadForm('b', body, 1024);
+  assertFormFileMatch(form, goOk, 'f');
+  assert.equal(form.file.f[0].content.length, 1024);
+});
+
+test('readForm two 600-byte files share maxMemory vs Go', () => {
+  const w = new MultipartWriter({ boundary: 'b' });
+  for (const name of ['a', 'c']) {
+    const part = w.createFormFile(name, `${name}.txt`);
+    part.write(Buffer.from('y'.repeat(600)));
+    part.end();
+  }
+  const body = w.bytes();
+  const goSpill = goReadForm(body, 'b', 1000);
+  assert.equal(goSpill.error ?? '', '');
+  assert.equal(goSpill.file.a[0].spilled, false);
+  assert.equal(goSpill.file.c[0].spilled, true);
+  assert.throws(() => nativeReadForm('b', body, 1000), MessageTooLargeError);
+  const goOk = goReadForm(body, 'b', 1200);
+  const form = nativeReadForm('b', body, 1200);
+  assertFormFileMatch(form, goOk, 'a');
+  assertFormFileMatch(form, goOk, 'c');
+});
+
+test('readForm empty file fits maxMemory=0; 1-byte file throws vs Go spill', () => {
+  const empty = fileForm('z', 'z.txt', Buffer.alloc(0));
+  const goEmpty = goReadForm(empty, 'b', 0);
+  const form = nativeReadForm('b', empty, 0);
+  assertFormFileMatch(form, goEmpty, 'z');
+  const one = fileForm('f', 'one.txt', Buffer.from('x'));
+  const goOne = goReadForm(one, 'b', 0);
+  assert.equal(goOne.error ?? '', '');
+  assert.equal(goOne.file.f[0].spilled, true);
+  assert.throws(() => nativeReadForm('b', one, 0), MessageTooLargeError);
+});
+
 test('readForm 1000 files succeeds vs Go; 1001 is MessageTooLargeError', () => {
   const w1000 = new MultipartWriter({ boundary: 'b' });
   for (let i = 0; i < 1000; i++) {
