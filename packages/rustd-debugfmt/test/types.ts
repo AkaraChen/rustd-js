@@ -19,4 +19,14 @@ sniff('ELF');
 const asNumber: number = file.size;
 const dwarf: DwarfReader | null = file.dwarf();
 const gosym: GoSymTable | null = file.gosym();
+if (gosym) {
+  const fn = gosym.lookupFunc('main.main');
+  const pkg: string = fn?.package ?? '';
+  const recv: string = fn?.receiver ?? '';
+  const base: string = fn?.base ?? '';
+  const st: boolean = fn?.static ?? false;
+  const loc = gosym.pcToLine(fn?.entry ?? 0n);
+  const locFn: string | undefined = loc.fn?.name;
+  void [pkg, recv, base, st, locFn];
+}
 void [asNumber, dwarf, gosym];

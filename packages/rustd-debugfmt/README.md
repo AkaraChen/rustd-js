@@ -19,6 +19,13 @@ Addresses, offsets, and sizes are `bigint`. `open(path)` maps the file with
   innermost source location in `file`/`line`. Inlined callees from
   `FUNCDATA_InlTree` / `PCDATA_InlTreeIndex` are listed innermost-first in
   `inlineFrames`.
+- `FuncInfo.package` / `receiver` / `base` follow `debug/gosym.Sym`
+  (`PackageName` / `ReceiverName` / `BaseName`, Go 1.20+ `go:`/`type:` rules).
+  Methods keep the parentheses: `main.(*Box).Name` → receiver `(*Box)`.
+  `static` is nm's lowercase type letter (`Type >= 'a'` / ELF local binding).
+- `go tool objdump` TEXT names for assembly ABI wrappers append `.abi0`;
+  pclntab uses the unsuffixed name at the same entry PC. objdump/nm also
+  rewrite `·` (U+00B7) to `.`. `pcToLine` file/line still match at that PC.
 - `LineReader.next()` yields one sequence (including the `EndSequence` row);
   the following `next()` is `null` until `reset()` or `seek()`. `seek`/`seekPC`
   search every compile unit, because DWARF addresses are not globally sorted.
@@ -50,7 +57,7 @@ Local Linux x64 GNU release (Rust 1.97.1, overflow-checks, strip):
 
 ```text
 $ ls -l packages/rustd-debugfmt/*.node
--rwxrwxr-x 1 akrc akrc 708664 Sep 14 17:02 packages/rustd-debugfmt/rustd-debugfmt.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 713912 Sep 14 18:23 packages/rustd-debugfmt/rustd-debugfmt.linux-x64-gnu.node
 ```
 
-708,664 bytes / 2,000,000 cap.
+713,912 bytes / 2,000,000 cap.

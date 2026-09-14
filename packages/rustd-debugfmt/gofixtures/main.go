@@ -8,6 +8,7 @@ type Box struct {
 	Label string
 }
 
+//go:noinline
 func (b *Box) Name() string { return b.Label }
 
 func helper(n int) int {

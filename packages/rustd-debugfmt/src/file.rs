@@ -539,7 +539,7 @@ impl NativeBinaryFile {
                     .map(|s| {
                         let kind = plan9_kind(s.kind);
                         JsSymbol {
-                            go: go_name(&s.name),
+                            go: go_name_with_static(&s.name, s.kind.is_ascii_lowercase()),
                             name: s.name,
                             value: u64_big(s.value.saturating_add(base)),
                             size: u64_big(0),
@@ -922,7 +922,7 @@ fn map_symbol(file: &object::File<'_>, sym: &object::Symbol<'_, '_>, base: u64) 
     };
     let kind = symbol_kind(file, sym);
     Ok(JsSymbol {
-        go: go_name(&name),
+        go: go_name_with_static(&name, !sym.is_global() && !sym.is_undefined()),
         name,
         value: u64_big(sym.address().saturating_add(base)),
         size: u64_big(sym.size()),
@@ -1003,49 +1003,92 @@ fn plan9_kind(t: u8) -> String {
     }
 }
 
+/// Strip the outermost `[...]` instantiation, matching `debug/gosym.Sym.nameWithoutInst`.
+fn name_without_inst(name: &str) -> String {
+    let Some(start) = name.find('[') else {
+        return name.to_string();
+    };
+    let Some(end) = name.rfind(']') else {
+        return name.to_string();
+    };
+    if end < start {
+        return name.to_string();
+    }
+    let mut out = String::with_capacity(name.len() - (end - start + 1));
+    out.push_str(&name[..start]);
+    out.push_str(&name[end + 1..]);
+    out
+}
+
+fn go_package_name(name: &str) -> String {
+    let stripped = name_without_inst(name);
+    // Go 1.20+ compiler-generated symbols (issue #18 §4.4 / debug/gosym).
+    if stripped.starts_with("go:") || stripped.starts_with("type:") {
+        return String::new();
+    }
+    let pathend = stripped.rfind('/').unwrap_or(0);
+    match stripped[pathend..].find('.') {
+        Some(i) => stripped[..pathend + i].to_string(),
+        None => String::new(),
+    }
+}
+
+fn go_receiver_name(name: &str) -> String {
+    let stripped = name_without_inst(name);
+    let pathend = stripped.rfind('/').unwrap_or(0);
+    let Some(l) = stripped[pathend..].find('.') else {
+        return String::new();
+    };
+    let Some(r) = stripped[pathend..].rfind('.') else {
+        return String::new();
+    };
+    if l == r {
+        return String::new();
+    }
+    let Some(r_orig) = name.get(pathend..).and_then(|s| s.rfind('.')) else {
+        return String::new();
+    };
+    name[pathend + l + 1..pathend + r_orig].to_string()
+}
+
+fn go_base_name(name: &str) -> String {
+    let stripped = name_without_inst(name);
+    let Some(mut i) = stripped.rfind('.') else {
+        return name.to_string();
+    };
+    if name != stripped {
+        if let Some(brack) = name.find('[') {
+            if i > brack {
+                if let Some(j) = name.rfind('.') {
+                    i = j;
+                }
+            }
+        }
+    }
+    name[i + 1..].to_string()
+}
+
+/// Split a Go symbol the way `debug/gosym.Sym` does (issue #18 §4.4).
+/// `static_` is nm's lowercase type letter (`Type >= 'a'`), not the name itself.
 pub(crate) fn go_name(name: &str) -> Option<JsGoName> {
-    if name.is_empty() || name.starts_with('_') {
+    go_name_with_static(name, false)
+}
+
+pub(crate) fn go_name_with_static(name: &str, static_: bool) -> Option<JsGoName> {
+    if name.is_empty() {
         return None;
     }
-    if name.contains("@@") || name.contains(' ') {
+    if name.contains("@@") {
         return None;
     }
     if !name.contains('.') && !name.contains('/') {
         return None;
     }
-    let mut rest = name;
-    for prefix in ["go:", "type:", "go:itab.", "go:func."] {
-        if let Some(r) = rest.strip_prefix(prefix) {
-            rest = r;
-        }
-    }
-    let base = rest.rsplit(['.', '/']).next().unwrap_or(rest).to_string();
-    let receiver = if let Some(start) = rest.find("(*") {
-        if let Some(end) = rest[start..].find(").") {
-            rest[start + 2..start + end].to_string()
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-    let package = if let Some(idx) = rest.rfind('.') {
-        let p = &rest[..idx];
-        if receiver.is_empty() {
-            p.to_string()
-        } else if let Some(idx2) = p.rfind('.') {
-            p[..idx2].to_string()
-        } else {
-            p.to_string()
-        }
-    } else {
-        String::new()
-    };
     Some(JsGoName {
-        package,
-        receiver,
-        base,
-        static_: false,
+        package: go_package_name(name),
+        receiver: go_receiver_name(name),
+        base: go_base_name(name),
+        static_,
     })
 }
 

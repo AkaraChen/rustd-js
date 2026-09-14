@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use napi::bindgen_prelude::*;
@@ -36,6 +37,7 @@ struct Table {
     pctab_off: usize,
     funcdata_off: usize,
     functab: Vec<u8>,
+    local_names: HashSet<String>,
 }
 
 const PCDATA_INL_TREE_INDEX: u32 = 2;
@@ -304,7 +306,9 @@ impl Table {
                 .as_ref()
                 .map(|g| g.base.clone())
                 .unwrap_or_else(|| name.rsplit('.').next().unwrap_or(&name).to_string()),
-            static_: parsed.map(|g| g.static_).unwrap_or(false),
+            // pclntab has no nm type letter; `static` is false here (Sym.Static is Type >= 'a').
+            static_: parsed.map(|g| g.static_).unwrap_or(false)
+                || self.local_names.contains(&name),
             name,
         })
     }
@@ -542,7 +546,23 @@ fn parse_table(data: Vec<u8>, text_start: u64) -> Result<Table> {
         pctab_off,
         funcdata_off,
         functab,
+        local_names: HashSet::new(),
     })
+}
+
+fn load_local_names(obj: &object::File<'_>) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for sym in obj.symbols() {
+        if sym.is_global() || sym.is_undefined() {
+            continue;
+        }
+        if let Ok(name) = sym.name() {
+            if !name.is_empty() {
+                names.insert(name.to_string());
+            }
+        }
+    }
+    names
 }
 
 fn load_gofunc(obj: &object::File<'_>) -> Result<Vec<u8>> {
@@ -640,6 +660,7 @@ pub fn open(file: Arc<Shared>) -> Result<Option<NativeGoSymTable>> {
         };
         let mut table = parse_table(data, text.saturating_add(file.base))?;
         table.gofunc = gofunc;
+        table.local_names = load_local_names(&obj);
         Ok(Some(NativeGoSymTable {
             file: file.clone(),
             table: Arc::new(table),
