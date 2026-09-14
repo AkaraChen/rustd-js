@@ -18,6 +18,8 @@ Checkpoint 7: `AddExtensionType` error strings vs Go 1.24 (`mime: extension %q m
 
 Checkpoint 8: `AddExtensionType` success mapping vs Go 1.24 — lowercase `text/` without charset stores `charset=utf-8`; `TEXT/PLAIN` is not rewritten; `text/plain; foo=bar` stores empty because `FormatMediaType` of the raw string fails; `TypeByExtension` after add (exact and lowercased) matches Go. Multipart still waits on `rustd-net`.
 
+Checkpoint 9: `ExtensionsByType` after `AddExtensionType` keys off `ParseMediaType` justType. `TEXT/PLAIN` and the empty `FormatMediaType` rewrite of `text/plain; foo=bar` still register the lowercase extension under `text/plain`; lookups via `TEXT/PLAIN` and `text/plain; charset=utf-8` match Go 1.24. Multipart still waits on `rustd-net`.
+
 ## Differences from Go
 
 - **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.

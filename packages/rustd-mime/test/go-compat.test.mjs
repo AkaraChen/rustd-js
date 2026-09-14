@@ -43,6 +43,46 @@ function addExtNative(ext, typ) {
   }
 }
 
+function justTypeNative(typ) {
+  try {
+    const { mediaType } = parseMediaType(typ);
+    return { justType: mediaType, justTypeError: '' };
+  } catch (err) {
+    if (err instanceof InvalidMediaParameterError) {
+      return { justType: err.mediaType, justTypeError: err.message };
+    }
+    if (err instanceof MediaTypeError) {
+      return { justType: '', justTypeError: err.message };
+    }
+    throw err;
+  }
+}
+
+function addExtLookups(ext, typ, justType) {
+  const lower = ext.toLowerCase();
+  const queries = [];
+  const seen = new Set();
+  const addQuery = (q) => {
+    if (!q || seen.has(q)) return;
+    seen.add(q);
+    queries.push(q);
+  };
+  addQuery(justType);
+  addQuery(typ);
+  if (justType) {
+    addQuery(justType.toUpperCase());
+    if (justType.startsWith('text/')) addQuery(`${justType}; charset=utf-8`);
+  }
+  return queries.map((query) => {
+    try {
+      return { query, contains: extensionsByType(query).includes(lower), error: '' };
+    } catch (err) {
+      if (err instanceof MediaTypeError) return { query, contains: false, error: err.message };
+      throw err;
+    }
+  });
+}
+
 test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures; native matches', () => {
   const generated = go();
   assert.equal(generated.status, 0, generated.stderr);
@@ -109,16 +149,40 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
     assert.equal(decoder.decodeHeader(c.in), c.out, `header ${JSON.stringify(c.in)}`);
   }
   let success = 0;
+  let ck9 = 0;
   for (const c of fixture.addExt) {
+    const parsed = justTypeNative(c.type);
+    assert.equal(parsed.justType, c.justType, `justType ${JSON.stringify(c.type)}`);
+    assert.equal(parsed.justTypeError, c.justTypeError ?? '', `justTypeError ${JSON.stringify(c.type)}`);
     assert.equal(addExtNative(c.ext, c.type).error, c.error, `addExt ${JSON.stringify(c.ext)} ${JSON.stringify(c.type)}`);
     if (c.error) {
       continue;
     }
     success += 1;
+    if (c.ext.toLowerCase().startsWith('.ck9')) ck9 += 1;
     assert.equal(typeByExtension(c.ext), c.stored, `stored ${c.ext}`);
     assert.equal(typeByExtension(c.ext.toLowerCase()), c.storedLower, `storedLower ${c.ext}`);
+    const lower = c.ext.toLowerCase();
+    assert.equal(extensionsByType(c.justType).includes(lower), c.registered, `registered ${c.ext} ${c.justType}`);
+    assert.equal(c.registered, true, `success add must register lowercase ext ${c.ext}`);
+    for (const lu of c.lookups ?? []) {
+      if (lu.error) {
+        assert.throws(
+          () => extensionsByType(lu.query),
+          (err) => err instanceof MediaTypeError && err.message === lu.error,
+          `lookup error ${c.ext} ${lu.query}`,
+        );
+        continue;
+      }
+      assert.equal(
+        extensionsByType(lu.query).includes(lower),
+        lu.contains,
+        `lookup ${c.ext} ${lu.query}`,
+      );
+    }
   }
   assert.ok(success >= 20, `addExt success cases ${success}`);
+  assert.ok(ck9 >= 6, `checkpoint 9 addExt cases ${ck9}`);
 });
 
 test('JS generates quoted-printable and media types → Go verifies', () => {
@@ -147,13 +211,19 @@ test('JS generates quoted-printable and media types → Go verifies', () => {
     exts: [...(c.exts ?? [])].sort(),
   }));
   const addExt = fixture.addExt.map((c) => {
+    const parsed = justTypeNative(c.type);
     const error = addExtNative(c.ext, c.type).error;
+    const lookups = error ? [] : addExtLookups(c.ext, c.type, parsed.justType);
     return {
       ext: c.ext,
       type: c.type,
       error,
       stored: error ? '' : typeByExtension(c.ext),
       storedLower: error ? '' : typeByExtension(c.ext.toLowerCase()),
+      justType: parsed.justType,
+      justTypeError: parsed.justTypeError,
+      registered: error ? false : lookups.some((lu) => lu.query === parsed.justType && lu.contains),
+      lookups,
     };
   });
   const packet = { schema: 1, package: 'mime', parse, qpEnc, qpDec: [], words: [], format, headers, ext, addExt };

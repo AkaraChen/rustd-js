@@ -9,6 +9,7 @@ import (
 	"mime"
 	"mime/quotedprintable"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -46,12 +47,22 @@ type ExtCase struct {
 	Exts []string `json:"exts"`
 }
 
+type ExtLookup struct {
+	Query    string `json:"query"`
+	Contains bool   `json:"contains"`
+	Error    string `json:"error"`
+}
+
 type AddExtCase struct {
-	Ext         string `json:"ext"`
-	Type        string `json:"type"`
-	Error       string `json:"error"`
-	Stored      string `json:"stored"`
-	StoredLower string `json:"storedLower"`
+	Ext           string      `json:"ext"`
+	Type          string      `json:"type"`
+	Error         string      `json:"error"`
+	Stored        string      `json:"stored"`
+	StoredLower   string      `json:"storedLower"`
+	JustType      string      `json:"justType"`
+	JustTypeError string      `json:"justTypeError"`
+	Registered    bool        `json:"registered"`
+	Lookups       []ExtLookup `json:"lookups"`
 }
 
 type FormatCase struct {
@@ -522,11 +533,50 @@ func extCases() []ExtCase {
 
 func recordAddExt(ext, typ string) AddExtCase {
 	c := AddExtCase{Ext: ext, Type: typ}
+	just, _, perr := mime.ParseMediaType(typ)
+	c.JustType = just
+	if perr != nil {
+		c.JustTypeError = perr.Error()
+	}
 	if err := mime.AddExtensionType(ext, typ); err != nil {
 		c.Error = err.Error()
 	}
 	c.Stored = mime.TypeByExtension(ext)
 	c.StoredLower = mime.TypeByExtension(strings.ToLower(ext))
+	if c.Error != "" {
+		return c
+	}
+	lower := strings.ToLower(ext)
+	queries := make([]string, 0, 4)
+	seen := map[string]bool{}
+	addQuery := func(q string) {
+		if q == "" || seen[q] {
+			return
+		}
+		seen[q] = true
+		queries = append(queries, q)
+	}
+	addQuery(c.JustType)
+	addQuery(typ)
+	if c.JustType != "" {
+		addQuery(strings.ToUpper(c.JustType))
+		if strings.HasPrefix(c.JustType, "text/") {
+			addQuery(c.JustType + "; charset=utf-8")
+		}
+	}
+	for _, q := range queries {
+		got, err := mime.ExtensionsByType(q)
+		lu := ExtLookup{Query: q}
+		if err != nil {
+			lu.Error = err.Error()
+		} else {
+			lu.Contains = slices.Contains(got, lower)
+		}
+		c.Lookups = append(c.Lookups, lu)
+		if q == c.JustType {
+			c.Registered = lu.Contains
+		}
+	}
 	return c
 }
 
@@ -583,6 +633,15 @@ func addExtCases() []AddExtCase {
 		{".ck8json", "application/json"},
 		{".ck8png", "image/png"},
 		{".ck8wasm", "application/wasm"},
+		// Checkpoint 9: ExtensionsByType keys off ParseMediaType justType.
+		{".ck9upper", "TEXT/PLAIN"},
+		{".ck9params", "text/plain; foo=bar"},
+		{".CK9MIX", "TEXT/x-ck9"},
+		{".ck9mixed", "Text/plain"},
+		{".ck9charset", "text/plain; charset=utf-8"},
+		{".ck9quoted", "text/plain; title=\"x y\""},
+		{".ck9html", "TEXT/HTML"},
+		{".ck9space", "text/plain; format=flowed"},
 	}
 	out := make([]AddExtCase, 0, len(errorSpecs)+len(successSpecs))
 	for _, s := range errorSpecs {
@@ -721,6 +780,34 @@ func main() {
 			storedLower := mime.TypeByExtension(strings.ToLower(c.Ext))
 			if errText != c.Error || stored != c.Stored || storedLower != c.StoredLower {
 				fail(fmt.Errorf("addExt mismatch %q %q: got %q/%q/%q want %q/%q/%q", c.Ext, c.Type, errText, stored, storedLower, c.Error, c.Stored, c.StoredLower))
+			}
+			just, _, perr := mime.ParseMediaType(c.Type)
+			justErr := ""
+			if perr != nil {
+				justErr = perr.Error()
+			}
+			if just != c.JustType || justErr != c.JustTypeError {
+				fail(fmt.Errorf("addExt justType %q %q: got %q/%q want %q/%q", c.Ext, c.Type, just, justErr, c.JustType, c.JustTypeError))
+			}
+			if c.Error != "" {
+				continue
+			}
+			lower := strings.ToLower(c.Ext)
+			got, e := mime.ExtensionsByType(c.JustType)
+			contains := e == nil && slices.Contains(got, lower)
+			if contains != c.Registered {
+				fail(fmt.Errorf("addExt registered %q %q: got %v want %v", c.Ext, c.Type, contains, c.Registered))
+			}
+			for _, lu := range c.Lookups {
+				g, e2 := mime.ExtensionsByType(lu.Query)
+				err2 := ""
+				if e2 != nil {
+					err2 = e2.Error()
+				}
+				cont := e2 == nil && slices.Contains(g, lower)
+				if err2 != lu.Error || cont != lu.Contains {
+					fail(fmt.Errorf("addExt lookup %q %q query %q: got %v/%q want %v/%q", c.Ext, c.Type, lu.Query, cont, err2, lu.Contains, lu.Error))
+				}
 			}
 		}
 		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt))

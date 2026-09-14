@@ -47,6 +47,36 @@ test('AddExtensionType success mapping vs Go (text/* charset=utf-8 default)', ()
   assert.equal(typeByExtension('.ck8mix'), 'text/x-ck8-mix; charset=utf-8');
 });
 
+test('ExtensionsByType after AddExtensionType uses ParseMediaType justType (issue #9 §3)', () => {
+  addExtensionType('.ck9upper', 'TEXT/PLAIN');
+  assert.equal(typeByExtension('.ck9upper'), 'TEXT/PLAIN');
+  for (const typ of ['text/plain', 'TEXT/PLAIN', 'text/plain; charset=utf-8']) {
+    assert.ok(extensionsByType(typ).includes('.ck9upper'), typ);
+  }
+
+  addExtensionType('.ck9params', 'text/plain; foo=bar');
+  assert.equal(typeByExtension('.ck9params'), '');
+  for (const typ of ['text/plain', 'TEXT/PLAIN', 'text/plain; charset=utf-8']) {
+    assert.ok(extensionsByType(typ).includes('.ck9params'), `empty FormatMediaType rewrite still registers ${typ}`);
+  }
+
+  addExtensionType('.CK9MIX', 'TEXT/x-ck9');
+  assert.equal(typeByExtension('.CK9MIX'), 'TEXT/x-ck9');
+  assert.ok(extensionsByType('text/x-ck9').includes('.ck9mix'));
+  assert.ok(extensionsByType('TEXT/X-CK9').includes('.ck9mix'));
+  assert.equal(extensionsByType('text/x-ck9').includes('.CK9MIX'), false);
+
+  addExtensionType('.ck9mixed', 'Text/plain');
+  assert.equal(typeByExtension('.ck9mixed'), 'Text/plain');
+  assert.ok(extensionsByType('text/plain').includes('.ck9mixed'));
+  assert.ok(extensionsByType('TEXT/PLAIN').includes('.ck9mixed'));
+
+  assert.throws(
+    () => extensionsByType('text/plain; charset'),
+    (err) => err instanceof MediaTypeError && err.message === 'mime: invalid media parameter',
+  );
+});
+
 test('AddExtensionType error strings match Go (issue #9 §3)', () => {
   const cases = [
     ['no-dot', 'application/x-test', 'mime: extension "no-dot" missing leading dot'],
