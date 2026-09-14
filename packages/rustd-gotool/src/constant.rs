@@ -355,27 +355,82 @@ pub fn const_string(v: &GoConstValue) -> String {
     }
 }
 
+fn is_int_kind(v: &GoConstValue) -> bool {
+    v.kind == "Int"
+}
+
+fn is_num_kind(v: &GoConstValue) -> bool {
+    v.kind == "Int" || v.kind == "Float"
+}
+
+fn rat_binop(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue> {
+    let xr = as_rat(x, "x")?;
+    let yr = as_rat(y, "y")?;
+    if op == token::QUO && yr.numer().sign() == Sign::NoSign {
+        // Issue #28: JS maps Go's QUO-by-zero panic to Unknown.
+        return Ok(make_unknown());
+    }
+    match op {
+        token::ADD => Ok(make_float(&xr + &yr)),
+        token::SUB => Ok(make_float(&xr - &yr)),
+        token::MUL => Ok(make_float(&xr * &yr)),
+        token::QUO => Ok(make_float(&xr / &yr)),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constBinaryOp Float ops must be ADD, SUB, MUL, or QUO",
+        )),
+    }
+}
+
+/// Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
+/// Float (and mixed Int/Float) ADD/SUB/MUL/QUO via `big.Rat` (`match` then `makeRat`).
+/// QUO of Ints is Float. QUO/REM by zero → Unknown.
 #[napi]
 pub fn const_binary_op(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue> {
     if x.kind == "Unknown" || y.kind == "Unknown" {
         return Ok(make_unknown());
     }
-    let xi = as_int(x, "x")?;
-    let yi = as_int(y, "y")?;
-    if (op == token::QUO || op == token::REM) && yi.sign() == Sign::NoSign {
-        // Issue #28: JS maps Go's QUO/REM-by-zero panic to Unknown.
-        return Ok(make_unknown());
+    if !is_num_kind(x) {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: x must be Int or Float",
+        ));
+    }
+    if !is_num_kind(y) {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: y must be Int or Float",
+        ));
+    }
+    if is_int_kind(x) && is_int_kind(y) {
+        let xi = as_int(x, "x")?;
+        let yi = as_int(y, "y")?;
+        if (op == token::QUO || op == token::REM) && yi.sign() == Sign::NoSign {
+            // Issue #28: JS maps Go's QUO/REM-by-zero panic to Unknown.
+            return Ok(make_unknown());
+        }
+        return match op {
+            token::ADD => Ok(make_int(xi + yi)),
+            token::SUB => Ok(make_int(xi - yi)),
+            token::MUL => Ok(make_int(xi * yi)),
+            token::QUO => Ok(make_float(BigRational::new(xi.clone(), yi.clone()))),
+            token::REM => Ok(make_int(xi % yi)),
+            token::AND => Ok(make_int(xi.bitand(yi))),
+            token::OR => Ok(make_int(xi.bitor(yi))),
+            token::XOR => Ok(make_int(xi.bitxor(yi))),
+            token::AND_NOT => Ok(make_int(xi.bitand(&yi.clone().not()))),
+            _ => Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constBinaryOp op must be ADD, SUB, MUL, QUO, REM, AND, OR, XOR, or AND_NOT",
+            )),
+        };
     }
     match op {
-        token::ADD => Ok(make_int(xi + yi)),
-        token::SUB => Ok(make_int(xi - yi)),
-        token::MUL => Ok(make_int(xi * yi)),
-        token::QUO => Ok(make_float(BigRational::new(xi.clone(), yi.clone()))),
-        token::REM => Ok(make_int(xi % yi)),
-        token::AND => Ok(make_int(xi.bitand(yi))),
-        token::OR => Ok(make_int(xi.bitor(yi))),
-        token::XOR => Ok(make_int(xi.bitxor(yi))),
-        token::AND_NOT => Ok(make_int(xi.bitand(&yi.clone().not()))),
+        token::ADD | token::SUB | token::MUL | token::QUO => rat_binop(op, x, y),
+        token::REM | token::AND | token::OR | token::XOR | token::AND_NOT => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constBinaryOp REM, AND, OR, XOR, and AND_NOT require Int",
+        )),
         _ => Err(Error::new(
             Status::InvalidArg,
             "gotool: constBinaryOp op must be ADD, SUB, MUL, QUO, REM, AND, OR, XOR, or AND_NOT",

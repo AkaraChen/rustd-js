@@ -821,3 +821,152 @@ func verifyConstantFloatCompare(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-float-compare cases\n", len(packet.Cases))
 }
+
+type ConstFBinCase struct {
+	ID       string `json:"id"`
+	Op       string `json:"op"`
+	OpTok    int    `json:"opTok"`
+	FormX    string `json:"formX"`
+	XX       string `json:"xx"`
+	XY       string `json:"xy"`
+	XS       string `json:"xs"`
+	FormY    string `json:"formY"`
+	YX       string `json:"yx"`
+	YY       string `json:"yy"`
+	YS       string `json:"ys"`
+	Kind     string `json:"kind"`
+	Exact    string `json:"exact"`
+	Sign     int    `json:"sign"`
+	F64Bits  string `json:"f64Bits"`
+	F64Exact bool   `json:"f64Exact"`
+}
+
+type ConstFBinPacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Slice   string          `json:"slice"`
+	Cases   []ConstFBinCase `json:"cases"`
+}
+
+func floatBinOps() []struct {
+	name string
+	tok  token.Token
+} {
+	return []struct {
+		name string
+		tok  token.Token
+	}{
+		{"ADD", token.ADD},
+		{"SUB", token.SUB},
+		{"MUL", token.MUL},
+		{"QUO", token.QUO},
+	}
+}
+
+func evalFloatBin(a, b fcmpSrc, op token.Token) (ConstFBinCase, error) {
+	vx, err := makeConst(a.form, a.x, a.y, a.s)
+	if err != nil {
+		return ConstFBinCase{}, err
+	}
+	vy, err := makeConst(b.form, b.x, b.y, b.s)
+	if err != nil {
+		return ConstFBinCase{}, err
+	}
+	v := constant.BinaryOp(vx, op, vy)
+	f, exact := constant.Float64Val(v)
+	return ConstFBinCase{
+		OpTok:    int(op),
+		FormX:    a.form,
+		XX:       a.x,
+		XY:       a.y,
+		XS:       a.s,
+		FormY:    b.form,
+		YX:       b.x,
+		YY:       b.y,
+		YS:       b.s,
+		Kind:     v.Kind().String(),
+		Exact:    v.ExactString(),
+		Sign:     constant.Sign(v),
+		F64Bits:  fmt.Sprintf("%016x", math.Float64bits(f)),
+		F64Exact: exact,
+	}, nil
+}
+
+func dumpConstantFloatBin(w io.Writer) {
+	packet := ConstFBinPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-float-binop",
+	}
+	corpus := floatCmpCorpus()
+	for _, op := range floatBinOps() {
+		for i, a := range corpus {
+			for j, b := range corpus {
+				vy, err := makeConst(b.form, b.x, b.y, b.s)
+				if err != nil {
+					fail(err)
+				}
+				if op.tok == token.QUO && constant.Sign(vy) == 0 {
+					continue
+				}
+				c, err := evalFloatBin(a, b, op.tok)
+				if err != nil {
+					fail(err)
+				}
+				c.ID = fmt.Sprintf("go-fbin-%s-%d-%d", op.name, i, j)
+				c.Op = op.name
+				packet.Cases = append(packet.Cases, c)
+			}
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantFloatBin(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstFBinPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-float-binop" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-float-binop packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{}
+	for _, op := range floatBinOps() {
+		tokOf[op.name] = op.tok
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		got, err := evalFloatBin(
+			fcmpSrc{c.FormX, c.XX, c.XY, c.XS},
+			fcmpSrc{c.FormY, c.YX, c.YY, c.YS},
+			op,
+		)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s op=%s: go kind=%s exact=%s sign=%d f64=%s exact64=%v got kind=%s exact=%s sign=%d f64=%s exact64=%v",
+				i, c.ID, c.Op, got.Kind, got.Exact, got.Sign, got.F64Bits, got.F64Exact,
+				c.Kind, c.Exact, c.Sign, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-float-binop cases\n", len(packet.Cases))
+}
