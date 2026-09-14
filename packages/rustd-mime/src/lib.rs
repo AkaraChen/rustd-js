@@ -233,6 +233,13 @@ impl NativeMultipartWriter {
     }
 
     #[napi]
+    pub fn create_form_file(&mut self, fieldname: String, filename: String) -> Result<u32> {
+        self.inner
+            .create_form_file(&fieldname, &filename)
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
     pub fn write_part(&mut self, part_id: u32, data: Uint8Array) -> Result<()> {
         self.inner
             .write_part(part_id, data.as_ref())
@@ -260,6 +267,11 @@ impl NativeMultipartWriter {
             .map(Into::into)
             .map_err(|e| error("MultipartError", &e))
     }
+}
+
+#[napi]
+pub fn file_content_disposition(fieldname: String, filename: String) -> String {
+    writer::file_content_disposition(&fieldname, &filename)
 }
 
 #[napi(object)]

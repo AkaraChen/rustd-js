@@ -59,9 +59,11 @@ export class MultipartWriter {
   boundary(): string
   formDataContentType(): string
   createFormField(fieldname: string): MultipartPartWriter
+  createFormFile(fieldname: string, filename: string): MultipartPartWriter
   writeField(fieldname: string, value: string): void
   bytes(): Uint8Array
 }
+export function fileContentDisposition(fieldname: string, filename: string): string
 export class MultipartReader {
   constructor(opts: { boundary: string; maxHeadersPerPart?: number; maxTotalHeaders?: number })
   write(chunk: Uint8Array): void

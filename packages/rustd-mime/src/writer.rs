@@ -1,6 +1,7 @@
-//! Go `mime/multipart.Writer` (Go 1.24 `writer.go`).
+//! Go `mime/multipart.Writer` (Go 1.24 `writer.go` + Go 1.25 `FileContentDisposition`).
 //!
-//! This slice is CreateFormField / WriteField / Close only. No CreateFormFile.
+//! This slice is CreateFormField / CreateFormFile / WriteField / Close.
+//! No CreatePart (generic MIMEHeader part).
 
 use getrandom::getrandom;
 
@@ -54,31 +55,21 @@ impl MultipartWriter {
     }
 
     pub fn create_form_field(&mut self, fieldname: &str) -> Result<u32, String> {
-        self.close_current_part()?;
-        if self.finished {
-            return Err("multipart: can't write to finished part".into());
-        }
-        if self.has_part {
-            self.buf.extend_from_slice(b"\r\n--");
-        } else {
-            self.buf.extend_from_slice(b"--");
-        }
-        self.buf.extend_from_slice(self.boundary.as_bytes());
-        self.buf.extend_from_slice(b"\r\n");
-        let disp = format!(
-            "form-data; name=\"{}\"",
-            escape_quotes(fieldname)
-        );
+        self.start_part()?;
+        let disp = format!("form-data; name=\"{}\"", escape_quotes(fieldname));
         self.buf.extend_from_slice(b"Content-Disposition: ");
         self.buf.extend_from_slice(disp.as_bytes());
         self.buf.extend_from_slice(b"\r\n\r\n");
-        self.has_part = true;
-        self.part_open = true;
-        self.part_id = self.part_id.wrapping_add(1);
-        if self.part_id == 0 {
-            self.part_id = 1;
-        }
-        Ok(self.part_id)
+        Ok(self.open_part())
+    }
+
+    pub fn create_form_file(&mut self, fieldname: &str, filename: &str) -> Result<u32, String> {
+        self.start_part()?;
+        let disp = file_content_disposition(fieldname, filename);
+        self.buf.extend_from_slice(b"Content-Disposition: ");
+        self.buf.extend_from_slice(disp.as_bytes());
+        self.buf.extend_from_slice(b"\r\nContent-Type: application/octet-stream\r\n\r\n");
+        Ok(self.open_part())
     }
 
     pub fn write_part(&mut self, part_id: u32, data: &[u8]) -> Result<(), String> {
@@ -115,10 +106,44 @@ impl MultipartWriter {
         Ok(self.buf.clone())
     }
 
+    fn start_part(&mut self) -> Result<(), String> {
+        self.close_current_part()?;
+        if self.finished {
+            return Err("multipart: can't write to finished part".into());
+        }
+        if self.has_part {
+            self.buf.extend_from_slice(b"\r\n--");
+        } else {
+            self.buf.extend_from_slice(b"--");
+        }
+        self.buf.extend_from_slice(self.boundary.as_bytes());
+        self.buf.extend_from_slice(b"\r\n");
+        Ok(())
+    }
+
+    fn open_part(&mut self) -> u32 {
+        self.has_part = true;
+        self.part_open = true;
+        self.part_id = self.part_id.wrapping_add(1);
+        if self.part_id == 0 {
+            self.part_id = 1;
+        }
+        self.part_id
+    }
+
     fn close_current_part(&mut self) -> Result<(), String> {
         self.part_open = false;
         Ok(())
     }
+}
+
+/// Go 1.25 `multipart.FileContentDisposition` (same bytes as Go 1.24 `CreateFormFile`).
+pub fn file_content_disposition(fieldname: &str, filename: &str) -> String {
+    format!(
+        "form-data; name=\"{}\"; filename=\"{}\"",
+        escape_quotes(fieldname),
+        escape_quotes(filename)
+    )
 }
 
 fn escape_quotes(s: &str) -> String {
@@ -168,6 +193,20 @@ mod tests {
         let got = w.finish().unwrap();
         let want = b"--boundary\r\nContent-Disposition: form-data; name=\"foo\"\r\n\r\nbar\r\n--boundary--\r\n";
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn create_form_file_one_part_matches_go() {
+        let mut w = MultipartWriter::new(Some("boundary".into())).unwrap();
+        let id = w.create_form_file("file", "a.txt").unwrap();
+        w.write_part(id, b"hi").unwrap();
+        let got = w.finish().unwrap();
+        let want = b"--boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nhi\r\n--boundary--\r\n";
+        assert_eq!(got, want);
+        assert_eq!(
+            file_content_disposition("file", "a.txt"),
+            "form-data; name=\"file\"; filename=\"a.txt\""
+        );
     }
 
     #[test]

@@ -774,9 +774,11 @@ func mimeHeaderCases() []MimeHeaderCase {
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
 type mpField struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-	Mode  string `json:"mode"`
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	ValueHex string `json:"valueHex"`
+	Filename string `json:"filename"`
+	Mode     string `json:"mode"`
 }
 
 type mpWriteIn struct {
@@ -822,6 +824,52 @@ func emitJSON(v any) {
 	}
 }
 
+func mpFieldBody(f mpField) []byte {
+	if f.ValueHex != "" {
+		return unhex(f.ValueHex)
+	}
+	return []byte(f.Value)
+}
+
+func handleFileContentDisposition() {
+	var in struct {
+		Fieldname string `json:"fieldname"`
+		Filename  string `json:"filename"`
+	}
+	decodeStdinJSON(&in)
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	if err := w.SetBoundary("b"); err != nil {
+		fail(err)
+	}
+	p, err := w.CreateFormFile(in.Fieldname, in.Filename)
+	if err != nil {
+		fail(err)
+	}
+	if _, err := p.Write([]byte("x")); err != nil {
+		fail(err)
+	}
+	if err := w.Close(); err != nil {
+		fail(err)
+	}
+	r := multipart.NewReader(bytes.NewReader(buf.Bytes()), "b")
+	part, err := r.NextPart()
+	if err != nil {
+		fail(err)
+	}
+	emitJSON(struct {
+		Value       string `json:"value"`
+		ContentType string `json:"contentType"`
+		FileName    string `json:"fileName"`
+		FormName    string `json:"formName"`
+	}{
+		Value:       part.Header.Get("Content-Disposition"),
+		ContentType: part.Header.Get("Content-Type"),
+		FileName:    part.FileName(),
+		FormName:    part.FormName(),
+	})
+}
+
 func handleMultipartWrite() {
 	var in mpWriteIn
 	decodeStdinJSON(&in)
@@ -850,7 +898,17 @@ func handleMultipartWrite() {
 				emitJSON(mpWriteOut{Error: err.Error()})
 				return
 			}
-			if _, err := p.Write([]byte(f.Value)); err != nil {
+			if _, err := p.Write(mpFieldBody(f)); err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+		case "createFormFile":
+			p, err := w.CreateFormFile(f.Name, f.Filename)
+			if err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+			if _, err := p.Write(mpFieldBody(f)); err != nil {
 				emitJSON(mpWriteOut{Error: err.Error()})
 				return
 			}
@@ -913,6 +971,7 @@ func main() {
 	verify := flag.Bool("verify", false, "verify packet from stdin")
 	mpWrite := flag.Bool("multipart-write", false, "Go multipart.Writer from stdin JSON fields")
 	mpRead := flag.Bool("multipart-read", false, "Go multipart.NewReader from stdin JSON bodyHex")
+	fcd := flag.Bool("file-content-disposition", false, "Go CreateFormFile Content-Disposition from stdin JSON")
 	flag.Parse()
 	if *mpWrite {
 		handleMultipartWrite()
@@ -920,6 +979,10 @@ func main() {
 	}
 	if *mpRead {
 		handleMultipartRead()
+		return
+	}
+	if *fcd {
+		handleFileContentDisposition()
 		return
 	}
 	if *verify {
