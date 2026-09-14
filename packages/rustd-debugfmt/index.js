@@ -143,14 +143,17 @@ function liftDwarfValue(attr) {
   }
 }
 
-function liftEntry(raw) {
+function liftEntry(raw, native) {
   return {
     tag: raw.tag,
     tagValue: raw.tagValue,
     offset: raw.offset,
     children: raw.children,
     attrs: (raw.attrs ?? []).map((a) => ({ attr: a.attr, class: a.class, value: liftDwarfValue(a) })),
-    type() { return null; },
+    type() {
+      const info = wrapNative(() => native.typeAt(raw.offset));
+      return info ?? null;
+    },
   };
 }
 
@@ -158,25 +161,20 @@ class LineReader {
   constructor(rows) {
     this._rows = rows ?? [];
     this._i = 0;
-    this._ended = false;
   }
   next() {
-    if (this._ended || this._i >= this._rows.length) return null;
-    const row = this._rows[this._i++];
-    if (row.endSequence) this._ended = true;
-    return row;
+    if (this._i >= this._rows.length) return null;
+    return this._rows[this._i++];
   }
   reset() {
     this._i = 0;
-    this._ended = false;
   }
   tell() {
-    if (this._ended || this._i >= this._rows.length) return 0n;
+    if (this._i >= this._rows.length) return 0n;
     return this._rows[this._i].address;
   }
   files() { return [...new Set(this._rows.map((r) => r.file).filter(Boolean))]; }
   seek(addr) {
-    this._ended = false;
     let lastIdx = -1;
     for (let i = 0; i < this._rows.length; i++) {
       const row = this._rows[i];
@@ -216,7 +214,7 @@ function wrapDwarf(native) {
     get version() { return native.version; },
     get addressSize() { return native.addressSize; },
     get byteOrder() { return native.byteOrder; },
-    entries() { return wrapNative(() => native.entries()).map(liftEntry); },
+    entries() { return wrapNative(() => native.entries()).map((e) => liftEntry(e, native)); },
     iterateEntries(cb) {
       for (const entry of reader.entries()) {
         if (cb(entry) === false) break;
@@ -224,11 +222,11 @@ function wrapDwarf(native) {
     },
     entryAt(offset) {
       const raw = wrapNative(() => native.entryAt(offset));
-      return raw ? liftEntry(raw) : null;
+      return raw ? liftEntry(raw, native) : null;
     },
     seekPC(addr) {
       const raw = wrapNative(() => native.seekPc(addr));
-      return raw ? liftEntry(raw) : null;
+      return raw ? liftEntry(raw, native) : null;
     },
     lineReader() { return new LineReader(wrapNative(() => native.lineEntries())); },
     ranges(entry) { return wrapNative(() => native.rangesForOffset(entry.offset)); },

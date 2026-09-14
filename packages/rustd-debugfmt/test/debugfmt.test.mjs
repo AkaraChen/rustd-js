@@ -834,7 +834,7 @@ function lineFromReader(reader, pc) {
   return last;
 }
 
-test('LineReader vs readelf --debug-dump=decodedline at function entry+mid PCs; next() after EndSequence is null', () => {
+test('LineReader vs readelf --debug-dump=decodedline at function entry+mid PCs; next() after EndSequence continues', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-line-'));
   const out = join(dir, 'hello');
   const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
@@ -880,21 +880,26 @@ test('LineReader vs readelf --debug-dump=decodedline at function entry+mid PCs; 
 
   reader.reset();
   let sawEnd = false;
+  let afterEnd = null;
   for (;;) {
     const row = reader.next();
     if (!row) break;
     if (row.endSequence) {
-      assert.equal(reader.next(), null, 'next() after EndSequence is null');
+      afterEnd = reader.next();
       sawEnd = true;
       break;
     }
   }
   assert.equal(sawEnd, true, 'fixture line table includes EndSequence');
-  assert.equal(reader.next(), null);
+  assert.ok(afterEnd, 'next() after EndSequence continues to the next sequence');
+  assert.equal(typeof afterEnd.address, 'bigint');
 
   reader.reset();
   const first = reader.next();
   assert.ok(first);
+  let n = 1;
+  while (reader.next()) n += 1;
+  assert.ok(n > 2, `concatenated line table has ${n} rows`);
   file.close();
 });
 
@@ -1452,6 +1457,217 @@ test('symbols() JSON dump is read back by Go fixture vs go tool nm -size and deb
   assert.equal(counts[1], counts[2]);
   assert.ok(Number(counts[1]) === dump.length);
   assert.ok(Number(counts[3]) > 0);
+});
+
+function uleb(n) {
+  const out = [];
+  let v = n >>> 0;
+  while (v >= 0x80) {
+    out.push((v & 0x7f) | 0x80);
+    v >>>= 7;
+  }
+  out.push(v);
+  return Buffer.from(out);
+}
+
+function elf64leNamedSections(parts) {
+  const names = ['.shstrtab', ...parts.map((p) => p.name)];
+  const nameOff = { '': 0 };
+  const chunks = [Buffer.from([0])];
+  let cursor = 1;
+  for (const n of names) {
+    nameOff[n] = cursor;
+    chunks.push(Buffer.from(`${n}\0`));
+    cursor += n.length + 1;
+  }
+  const shstr = Buffer.concat(chunks);
+  const shnum = 2 + parts.length;
+  const ehdr = 64;
+  const shentsize = 64;
+  const shoff = ehdr;
+  const shstrOff = shoff + shnum * shentsize;
+  const payloads = [];
+  let dataOff = shstrOff + shstr.length;
+  for (const part of parts) {
+    payloads.push({ ...part, offset: dataOff });
+    dataOff += part.data.length;
+  }
+  const buf = Buffer.alloc(dataOff);
+  buf.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0], 0);
+  buf.writeUInt16LE(1, 16);
+  buf.writeUInt16LE(62, 18);
+  buf.writeUInt32LE(1, 20);
+  buf.writeBigUInt64LE(0n, 24);
+  buf.writeBigUInt64LE(0n, 32);
+  buf.writeBigUInt64LE(BigInt(shoff), 40);
+  buf.writeUInt32LE(0, 48);
+  buf.writeUInt16LE(64, 52);
+  buf.writeUInt16LE(0, 54);
+  buf.writeUInt16LE(0, 56);
+  buf.writeUInt16LE(shentsize, 58);
+  buf.writeUInt16LE(shnum, 60);
+  buf.writeUInt16LE(1, 62);
+  writeElf64LeShdr(buf, shoff, {});
+  writeElf64LeShdr(buf, shoff + shentsize, {
+    name: nameOff['.shstrtab'],
+    type: 3,
+    offset: BigInt(shstrOff),
+    size: BigInt(shstr.length),
+    addralign: 1n,
+  });
+  payloads.forEach((part, i) => {
+    writeElf64LeShdr(buf, shoff + (2 + i) * shentsize, {
+      name: nameOff[part.name],
+      type: 1,
+      offset: BigInt(part.offset),
+      size: BigInt(part.data.length),
+      addralign: 1n,
+    });
+    part.data.copy(buf, part.offset);
+  });
+  shstr.copy(buf, shstrOff);
+  return new Uint8Array(buf);
+}
+
+function dwarfLineTwoSequences() {
+  const stdLengths = Buffer.from([0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1]);
+  const files = Buffer.concat([Buffer.from('t.c\0'), uleb(0), uleb(0), uleb(0), Buffer.from([0])]);
+  const headerBody = Buffer.concat([
+    Buffer.from([1, 1, 1, 0, 1, 13]),
+    stdLengths,
+    Buffer.from([0]),
+    files,
+  ]);
+  const setAddr = (addr) => {
+    const b = Buffer.alloc(11);
+    b[0] = 0;
+    b[1] = 9;
+    b[2] = 2;
+    b.writeBigUInt64LE(addr, 3);
+    return b;
+  };
+  const endSeq = Buffer.from([0, 1, 1]);
+  const program = Buffer.concat([
+    setAddr(0x1000n),
+    Buffer.from([1]),
+    endSeq,
+    setAddr(0x2000n),
+    Buffer.from([1]),
+    endSeq,
+  ]);
+  const headerLength = headerBody.length;
+  const unitLength = 2 + 4 + headerLength + program.length;
+  const out = Buffer.alloc(4 + unitLength);
+  out.writeUInt32LE(unitLength, 0);
+  out.writeUInt16LE(4, 4);
+  out.writeUInt32LE(headerLength, 6);
+  headerBody.copy(out, 10);
+  program.copy(out, 10 + headerLength);
+  return out;
+}
+
+function dwarfSpecCycleAndLine() {
+  const abbrev = Buffer.from([
+    1, 0x11, 1, 0x10, 0x17, 0, 0,
+    2, 0x13, 0, 0x03, 0x08, 0x47, 0x13, 0, 0,
+    0,
+  ]);
+  const infoBody = Buffer.alloc(27);
+  infoBody.writeUInt16LE(4, 0);
+  infoBody.writeUInt32LE(0, 2);
+  infoBody[6] = 8;
+  infoBody[7] = 1;
+  infoBody.writeUInt32LE(0, 8);
+  infoBody[12] = 2;
+  infoBody[13] = 0x41;
+  infoBody[14] = 0;
+  infoBody.writeUInt32LE(23, 15);
+  infoBody[19] = 2;
+  infoBody[20] = 0x42;
+  infoBody[21] = 0;
+  infoBody.writeUInt32LE(16, 22);
+  infoBody[26] = 0;
+  const info = Buffer.alloc(4 + infoBody.length);
+  info.writeUInt32LE(infoBody.length, 0);
+  infoBody.copy(info, 4);
+  const line = dwarfLineTwoSequences();
+  return {
+    bytes: elf64leNamedSections([
+      { name: '.debug_abbrev', data: abbrev },
+      { name: '.debug_info', data: info },
+      { name: '.debug_line', data: line },
+    ]),
+    dieA: 16n,
+    dieB: 23n,
+  };
+}
+
+test('issue #18 §4.7: DW_AT_specification cycle is BinaryFormatError with a depth cap', () => {
+  const { bytes, dieA, dieB } = dwarfSpecCycleAndLine();
+  const file = openBytes(bytes);
+  const dwarf = file.dwarf();
+  assert.ok(dwarf);
+  const entries = dwarf.entries();
+  assert.equal(entries.length, 3);
+  const a = dwarf.entryAt(dieA);
+  const b = dwarf.entryAt(dieB);
+  assert.ok(a);
+  assert.ok(b);
+  assert.equal(a.tag, 'DW_TAG_structure_type');
+  assert.equal(b.tag, 'DW_TAG_structure_type');
+  const specA = a.attrs.find((x) => x.attr === 'DW_AT_specification');
+  const specB = b.attrs.find((x) => x.attr === 'DW_AT_specification');
+  assert.equal(specA?.value.kind, 'ref');
+  assert.equal(specA.value.value, dieB);
+  assert.equal(specB.value.value, dieA);
+
+  const t0 = process.hrtime.bigint();
+  assert.throws(
+    () => a.type(),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'dwarf_cycle');
+      return true;
+    },
+  );
+  assert.throws(
+    () => b.type(),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'dwarf_cycle');
+      return true;
+    },
+  );
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 1000, `cycle follow took ${ms}ms`);
+  const listed = dwarf.types().filter((t) => t.kind === 'struct');
+  assert.equal(listed.length, 2);
+  file.close();
+});
+
+test('issue #18 §4.7: LineReader next() after EndSequence yields the next sequence', () => {
+  const { bytes } = dwarfSpecCycleAndLine();
+  const file = openBytes(bytes);
+  const dwarf = file.dwarf();
+  assert.ok(dwarf);
+  const reader = dwarf.lineReader();
+  const first = reader.next();
+  assert.ok(first);
+  assert.equal(first.address, 0x1000n);
+  assert.equal(first.endSequence, false);
+  const end1 = reader.next();
+  assert.ok(end1);
+  assert.equal(end1.endSequence, true);
+  assert.equal(end1.address, 0x1000n);
+  const second = reader.next();
+  assert.ok(second, 'Next after EndSequence must continue');
+  assert.equal(second.endSequence, false);
+  assert.equal(second.address, 0x2000n);
+  const end2 = reader.next();
+  assert.ok(end2);
+  assert.equal(end2.endSequence, true);
+  assert.equal(reader.next(), null);
+  file.close();
 });
 
 void UnsupportedFeatureError;

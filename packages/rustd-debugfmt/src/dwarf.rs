@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use gimli::{
@@ -10,6 +11,9 @@ use object::{Object, ObjectSection};
 use crate::file::{bigint_to_u64, fail, format_err, is_compressed, u64_big, Shared};
 
 type Slice<'a> = EndianSlice<'a, RunTimeEndian>;
+
+/// Cap on DW_AT_specification / abstract_origin / type ref chains (issue #18 §3/§4.7).
+const MAX_SPEC_DEPTH: u32 = 32;
 
 struct OwnedDwarf {
     sections: DwarfSections<Vec<u8>>,
@@ -351,12 +355,77 @@ fn convert_attr(
     }
 }
 
-fn entry_offset(unit: &Unit<Slice<'_>>, entry: &gimli::DebuggingInformationEntry<Slice<'_>>) -> u64 {
-    let unit_off = match unit.header.offset() {
+fn unit_section_offset(unit: &Unit<Slice<'_>>) -> u64 {
+    match unit.header.offset() {
         gimli::UnitSectionOffset::DebugInfoOffset(o) => o.0 as u64,
         gimli::UnitSectionOffset::DebugTypesOffset(o) => o.0 as u64,
-    };
-    unit_off.saturating_add(entry.offset().0 as u64)
+    }
+}
+
+fn entry_offset(unit: &Unit<Slice<'_>>, entry: &gimli::DebuggingInformationEntry<Slice<'_>>) -> u64 {
+    unit_section_offset(unit).saturating_add(entry.offset().0 as u64)
+}
+
+fn attr_die_offset(unit: &Unit<Slice<'_>>, value: AttributeValue<Slice<'_>>) -> Option<u64> {
+    match value {
+        AttributeValue::UnitRef(offset) => {
+            Some(unit_section_offset(unit).saturating_add(offset.0 as u64))
+        }
+        AttributeValue::DebugInfoRef(offset) => Some(offset.0 as u64),
+        _ => None,
+    }
+}
+
+fn type_kind(tag: gimli::DwTag) -> Option<&'static str> {
+    match tag {
+        gimli::DW_TAG_base_type => Some("basic"),
+        gimli::DW_TAG_structure_type => Some("struct"),
+        gimli::DW_TAG_union_type => Some("union"),
+        gimli::DW_TAG_enumeration_type => Some("enum"),
+        gimli::DW_TAG_array_type => Some("array"),
+        gimli::DW_TAG_pointer_type => Some("ptr"),
+        gimli::DW_TAG_typedef => Some("typedef"),
+        gimli::DW_TAG_subroutine_type => Some("func"),
+        _ => None,
+    }
+}
+
+fn type_info_from_die(
+    dwarf: &gimli::Dwarf<Slice<'_>>,
+    unit: &Unit<Slice<'_>>,
+    entry: &gimli::DebuggingInformationEntry<Slice<'_>>,
+) -> JsTypeInfo {
+    let kind = type_kind(entry.tag()).unwrap_or("unsupported");
+    let name = entry
+        .attr_value(gimli::DW_AT_name)
+        .ok()
+        .flatten()
+        .and_then(|v| dwarf.attr_string(unit, v).ok())
+        .map(slice_to_string)
+        .unwrap_or_default();
+    let byte_size = entry
+        .attr_value(gimli::DW_AT_byte_size)
+        .ok()
+        .flatten()
+        .and_then(|v| v.udata_value())
+        .map(u64_big);
+    JsTypeInfo {
+        kind: kind.into(),
+        name,
+        byte_size,
+        go_kind: None,
+    }
+}
+
+fn first_ref(
+    unit: &Unit<Slice<'_>>,
+    entry: &gimli::DebuggingInformationEntry<Slice<'_>>,
+    attr: gimli::DwAt,
+) -> Result<Option<u64>> {
+    Ok(entry
+        .attr_value(attr)
+        .map_err(dwarf_err)?
+        .and_then(|value| attr_die_offset(unit, value)))
 }
 
 fn convert_entry(
@@ -639,42 +708,74 @@ impl NativeDwarfReader {
         let mut out = Vec::new();
         with_dwarf(&self.dwarf, |dwarf| {
             walk_entries(dwarf, |unit, entry| {
-                let kind = match entry.tag() {
-                    gimli::DW_TAG_base_type => Some("basic"),
-                    gimli::DW_TAG_structure_type => Some("struct"),
-                    gimli::DW_TAG_union_type => Some("union"),
-                    gimli::DW_TAG_enumeration_type => Some("enum"),
-                    gimli::DW_TAG_array_type => Some("array"),
-                    gimli::DW_TAG_pointer_type => Some("ptr"),
-                    gimli::DW_TAG_typedef => Some("typedef"),
-                    gimli::DW_TAG_subroutine_type => Some("func"),
-                    _ => None,
-                };
-                let Some(kind) = kind else {
+                if type_kind(entry.tag()).is_none() {
                     return Ok(true);
-                };
-                let name = entry
-                    .attr_value(gimli::DW_AT_name)
-                    .ok()
-                    .flatten()
-                    .and_then(|v| dwarf.attr_string(unit, v).ok())
-                    .map(slice_to_string)
-                    .unwrap_or_default();
-                let byte_size = entry
-                    .attr_value(gimli::DW_AT_byte_size)
-                    .ok()
-                    .flatten()
-                    .and_then(|v| v.udata_value())
-                    .map(u64_big);
-                out.push(JsTypeInfo {
-                    kind: kind.into(),
-                    name,
-                    byte_size,
-                    go_kind: None,
-                });
+                }
+                out.push(type_info_from_die(dwarf, unit, entry));
                 Ok(true)
             })
         })?;
         Ok(out)
     }
+
+    /// Follow DW_AT_specification / abstract_origin / type with a hard depth cap.
+    #[napi]
+    pub fn type_at(&self, offset: BigInt) -> Result<Option<JsTypeInfo>> {
+        self.ensure_open()?;
+        let start = bigint_to_u64(offset)?;
+        with_dwarf(&self.dwarf, |dwarf| resolve_type_at(dwarf, start))
+    }
+}
+
+enum TypeStep {
+    Follow(u64),
+    Done(JsTypeInfo),
+}
+
+fn resolve_type_at(dwarf: &gimli::Dwarf<Slice<'_>>, start: u64) -> Result<Option<JsTypeInfo>> {
+    let mut current = start;
+    let mut visited = HashSet::new();
+    for _ in 0..MAX_SPEC_DEPTH {
+        if !visited.insert(current) {
+            return Err(format_err(
+                "dwarf_cycle",
+                current,
+                format!("DW_AT_specification chain exceeds depth {MAX_SPEC_DEPTH}"),
+            ));
+        }
+        let mut step = None;
+        walk_entries(dwarf, |unit, entry| {
+            if entry_offset(unit, entry) != current {
+                return Ok(true);
+            }
+            if let Some(off) = first_ref(unit, entry, gimli::DW_AT_specification)? {
+                step = Some(TypeStep::Follow(off));
+                return Ok(false);
+            }
+            if let Some(off) = first_ref(unit, entry, gimli::DW_AT_abstract_origin)? {
+                step = Some(TypeStep::Follow(off));
+                return Ok(false);
+            }
+            if type_kind(entry.tag()).is_some() {
+                step = Some(TypeStep::Done(type_info_from_die(dwarf, unit, entry)));
+                return Ok(false);
+            }
+            if let Some(off) = first_ref(unit, entry, gimli::DW_AT_type)? {
+                step = Some(TypeStep::Follow(off));
+                return Ok(false);
+            }
+            step = Some(TypeStep::Done(type_info_from_die(dwarf, unit, entry)));
+            Ok(false)
+        })?;
+        match step {
+            Some(TypeStep::Follow(next)) => current = next,
+            Some(TypeStep::Done(info)) => return Ok(Some(info)),
+            None => return Ok(None),
+        }
+    }
+    Err(format_err(
+        "dwarf_cycle",
+        current,
+        format!("DW_AT_specification chain exceeds depth {MAX_SPEC_DEPTH}"),
+    ))
 }

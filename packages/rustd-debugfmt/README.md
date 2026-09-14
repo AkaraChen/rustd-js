@@ -26,10 +26,14 @@ Addresses, offsets, and sizes are `bigint`. `open(path)` maps the file with
 - `go tool objdump` TEXT names for assembly ABI wrappers append `.abi0`;
   pclntab uses the unsuffixed name at the same entry PC. objdump/nm also
   rewrite `·` (U+00B7) to `.`. `pcToLine` file/line still match at that PC.
-- `LineReader.next()` yields one sequence (including the `EndSequence` row);
-  the following `next()` is `null` until `reset()` or `seek()`. `seek`/`seekPC`
-  search every compile unit, because DWARF addresses are not globally sorted.
-- `DwarfEntry.type()` is a stub (`null`); use `types()` for DIE-derived types.
+- `LineReader.next()` walks every compile-unit sequence. An `EndSequence` row
+  is a row, not EOF: the following `next()` is the next sequence (or `null` at
+  the real end of the concatenated table). `seek`/`seekPC` search every CU,
+  because DWARF addresses are not globally sorted.
+- `DwarfEntry.type()` follows `DW_AT_specification`, then `DW_AT_abstract_origin`,
+  then `DW_AT_type`, with a depth cap of 32. A cycle or deeper chain throws
+  `BinaryFormatError` (`kind: dwarf_cycle`). `types()` still lists each DIE
+  without chasing those refs.
 - `dynamicValue` always returns `null` in this slice.
 - Fat Mach-O selects the current process architecture and errors if that slice
   is missing (it does not silently take the first arch).
@@ -57,7 +61,7 @@ Local Linux x64 GNU release (Rust 1.97.1, overflow-checks, strip):
 
 ```text
 $ ls -l packages/rustd-debugfmt/*.node
--rwxrwxr-x 1 akrc akrc 713912 Sep 14 18:23 packages/rustd-debugfmt/rustd-debugfmt.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 729056 Sep 14 20:04 packages/rustd-debugfmt/rustd-debugfmt.linux-x64-gnu.node
 ```
 
-713,912 bytes / 2,000,000 cap.
+729,056 bytes / 2,000,000 cap.
