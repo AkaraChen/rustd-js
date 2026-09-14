@@ -50,8 +50,13 @@ do not need `close()`.
   field is absent. This package writes extra field `0x5455` when `modified` is set.
   A zero DOS date/time decodes as 1979-11-30 UTC, matching Go `archive/zip`
   `msDosTimeToTime` (so `modified` is still a `Date`, not omitted).
-- Non-UTF-8 zip names keep the raw bytes on `rawName` and set `nonUtf8`. The
-  `name` string is a lossy UTF-8 view and must not be treated as round-trippable.
+- Zip `entry.nonUtf8` is Go `FileHeader.NonUTF8` after `readDirectoryHeader`,
+  not the raw inverse of general-purpose bit 11. ASCII / CP-437-compatible
+  names and comments decode as `nonUtf8` absent/false even when the UTF-8 flag
+  is clear. Invalid UTF-8, or multibyte UTF-8 without bit 11, sets `nonUtf8`.
+  Invalid name bytes are also kept on `rawName`; `name` is then a lossy UTF-8
+  view and must not be treated as round-trippable. There is no `extra` or
+  archive-level comment field.
 - Filesystem helpers such as `extractTo` belong in `rustd-fs`, not this package.
 - Zip `entry.mode` is Go `FileHeader.Mode()` (`io/fs.FileMode` bits), not the
   raw unix extra-attr word. FAT/NTFS/VFAT creators with empty attrs decode as
