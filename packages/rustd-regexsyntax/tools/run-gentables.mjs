@@ -21,4 +21,12 @@ if (!generated.includes('go1.24.13')) {
   console.error('src/unicode_tables.rs is missing go1.24.13 pin');
   process.exit(1);
 }
-process.exit(0);
+
+const pkg = new URL('..', import.meta.url);
+const diff = spawnSync('git', ['diff', '--exit-code', '--', 'src/unicode_tables.rs'], {
+  encoding: 'utf8',
+  stdio: 'inherit',
+  cwd: pkg,
+});
+if (diff.error) throw diff.error;
+process.exit(diff.status ?? 1);

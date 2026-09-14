@@ -33,11 +33,11 @@ matches Go `syntax.Perl`. `OP` values match Go's `Op` iota (NoMatch starts at 1)
 
 ## Differences from Go
 
-- Unicode property tables (`unicode.Properties`, e.g. `\p{White_Space}`) are
-  not generated in this checkpoint. Unknown names still return
-  `invalid character class range`, matching Go.
 - Unicode tables match **Go 1.24.13 / Unicode 15.0.0**, not a later Go 1.25
-  snapshot.
+  snapshot. Go `regexp/syntax` `unicodeTable` looks up `unicode.Categories`
+  and `unicode.Scripts` only (plus the special name `Any`). `unicode.Properties`
+  such as `\p{White_Space}` are not part of that lookup; unknown names return
+  `invalid character class range`, matching Go.
 - `syntaxCompile()` is Parse+Compile (same as Go `prog_test.go`), not a matching engine.
 - `emptyOpContext` / `isWordChar` match Go `prog.go` (ASCII `\b`/`\B`); no matching engine.
 - `OpRepeat` is not compiled: Go panics; we return an error. Call `simplify()` first.
@@ -62,6 +62,25 @@ Same-machine 10k mixed `syntax.Parse` (2026-09-14, Node v24.20.0, Go 1.24.13, li
 | Go `regexp/syntax.Parse` | 8182 / 1818 | 59.795 ms | 167,238 |
 
 Native is about **12.8× slower** than Go on this corpus (honest; the package value is Go-shaped trees, not parse speed). Reproduce: `nice -n 10 node packages/rustd-regexsyntax/test/bench-parse.mjs`.
+
+## Generate
+
+`\p` / `\P` tables come from `tools/gentables` on **Go 1.24.13**
+(`unicode.Version == "15.0.0"`). Re-running the generator must not change
+committed files:
+
+```text
+$ cd packages/rustd-regexsyntax
+$ pnpm generate:tables
+wrote src/unicode_tables.rs (... tables, ... categories, ... scripts, unicode 15.0.0, go1.24.13)
+$ git diff --exit-code -- src/unicode_tables.rs
+```
+
+Same assertion as `pnpm generate:check` (from this package directory). Local
+runs pin Go 1.24.13 through `mise exec go@1.24.13`; CI sets `RUSTD_GO=path` and
+uses the workflow's `setup-go` 1.24.13. Do not regenerate with a different
+toolchain; `goVersion` is part of the pin. The five-platform napi artifacts and
+the linux-x64 CI `generate:check` hook remain checkpoint 11.
 
 ## Size
 
