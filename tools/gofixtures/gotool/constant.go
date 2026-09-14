@@ -1092,3 +1092,168 @@ func verifyConstantFloatUnary(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-float-unary cases\n", len(packet.Cases))
 }
+
+type ConstLitCase struct {
+	ID       string `json:"id"`
+	Lit      string `json:"lit"`
+	Tok      string `json:"tok"`
+	TokNum   int    `json:"tokNum"`
+	Kind     string `json:"kind"`
+	Exact    string `json:"exact"`
+	Sign     int    `json:"sign"`
+	ToInt    string `json:"toInt"`
+	ToIntOk  bool   `json:"toIntOk"`
+	BitLen   int    `json:"bitLen"`
+	F64Bits  string `json:"f64Bits"`
+	F64Exact bool   `json:"f64Exact"`
+}
+
+type ConstLitPacket struct {
+	Schema  int            `json:"schema"`
+	Package string         `json:"package"`
+	Go      string         `json:"go"`
+	Slice   string         `json:"slice"`
+	Cases   []ConstLitCase `json:"cases"`
+}
+
+func fillLiteral(v constant.Value, c *ConstLitCase) {
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	c.Sign = constant.Sign(v)
+	f, exact := constant.Float64Val(v)
+	c.F64Bits = fmt.Sprintf("%016x", math.Float64bits(f))
+	c.F64Exact = exact
+	if v.Kind() == constant.Int {
+		iv, ok := constant.Int64Val(v)
+		c.ToInt = strconv.FormatInt(iv, 10)
+		c.ToIntOk = ok
+		c.BitLen = constant.BitLen(v)
+	} else {
+		c.ToInt = "0"
+		c.ToIntOk = false
+		c.BitLen = 0
+	}
+}
+
+func evalLiteral(lit string, tok token.Token) ConstLitCase {
+	c := ConstLitCase{Lit: lit, TokNum: int(tok)}
+	switch tok {
+	case token.INT:
+		c.Tok = "INT"
+	case token.FLOAT:
+		c.Tok = "FLOAT"
+	default:
+		c.Tok = tok.String()
+	}
+	fillLiteral(constant.MakeFromLiteral(lit, tok, 0), &c)
+	return c
+}
+
+// Official go/constant TestNumbers tables (LHS only) plus invalid extras.
+func literalCorpus() []struct {
+	tok token.Token
+	lit string
+} {
+	intLits := []string{
+		"0_123", "0123_456",
+		"1_234", "1_234_567",
+		"0X_0", "0X_1234", "0X_CAFE_f00d",
+		"0o0", "0o1234", "0o01234567",
+		"0O0", "0O1234", "0O01234567",
+		"0o_0", "0o_1234", "0o0123_4567",
+		"0O_0", "0O_1234", "0O0123_4567",
+		"0b0", "0b1011", "0b00101101",
+		"0B0", "0B1011", "0B00101101",
+		"0b_0", "0b10_11", "0b_0010_1101",
+		"0", "1", "-1", "+42", "9223372036854775807", "-9223372036854775808",
+		"9223372036854775808", "999999999999999999999",
+		"", "08", "1.2", "0x", "+", "1_", "_1", "0b", "xyz", "0x10g",
+	}
+	floatLits := []string{
+		"1_2_3.", "0_123.",
+		"0_0e0", "1_2_3e0", "0_123e0",
+		"0e-0_0", "1_2_3E+0", "0123E1_2_3",
+		"0.e+1", "123.E-1_0", "01_23.e123",
+		".0e-1", ".123E+10", ".0123E123",
+		"1_2_3.123", "0123.01_23",
+		"1e-1000000000", "1e+1000000000", "6e5518446744", "-6e5518446744",
+		"0x0.p+0", "0Xdeadcafe.p-10", "0x1234.P84",
+		"0x.1p-0", "0X.deadcafep4", "0x.1234P+12",
+		"0x0p0", "0Xdeadcafep+1", "0x1234P-10",
+		"0x0.0p0", "0Xdead.cafep+1", "0x12.34P-10",
+		"0Xdead_cafep+1", "0x_1234P-10",
+		"0X_dead_cafe.p-10", "0x12_34.P1_2_3",
+		"1.5", "1.", ".5", "1e2", "1", "08.5", "0x1p0", "0x1.2", "0x1.2p0",
+		"-1.5", "+.5",
+		"", "1e", "0x", ".", "+", "1_", "_1", "xyz",
+	}
+	out := make([]struct {
+		tok token.Token
+		lit string
+	}, 0, len(intLits)+len(floatLits))
+	for _, lit := range intLits {
+		out = append(out, struct {
+			tok token.Token
+			lit string
+		}{token.INT, lit})
+	}
+	for _, lit := range floatLits {
+		out = append(out, struct {
+			tok token.Token
+			lit string
+		}{token.FLOAT, lit})
+	}
+	return out
+}
+
+func dumpConstantLiteral(w io.Writer) {
+	packet := ConstLitPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-int-float-literal",
+	}
+	for i, src := range literalCorpus() {
+		c := evalLiteral(src.lit, src.tok)
+		c.ID = fmt.Sprintf("go-lit-%s-%d", c.Tok, i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantLiteral(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstLitPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-int-float-literal" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-literal packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{"INT": token.INT, "FLOAT": token.FLOAT}
+	for i, c := range packet.Cases {
+		tok, ok := tokOf[c.Tok]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown tok %q", i, c.ID, c.Tok))
+		}
+		if c.TokNum != int(tok) {
+			fail(fmt.Errorf("case %d id=%s: tokNum %d != Go %s %d", i, c.ID, c.TokNum, c.Tok, int(tok)))
+		}
+		got := evalLiteral(c.Lit, tok)
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ToInt != c.ToInt || got.ToIntOk != c.ToIntOk || got.BitLen != c.BitLen || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s lit=%q tok=%s: go kind=%s exact=%s sign=%d toInt=%s ok=%v bitLen=%d f64=%s exact64=%v got kind=%s exact=%s sign=%d toInt=%s ok=%v bitLen=%d f64=%s exact64=%v",
+				i, c.ID, c.Lit, c.Tok, got.Kind, got.Exact, got.Sign, got.ToInt, got.ToIntOk, got.BitLen, got.F64Bits, got.F64Exact,
+				c.Kind, c.Exact, c.Sign, c.ToInt, c.ToIntOk, c.BitLen, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-int-float-literal cases\n", len(packet.Cases))
+}

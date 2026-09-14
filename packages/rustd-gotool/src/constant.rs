@@ -540,3 +540,326 @@ pub fn const_shift(op: i32, x: &GoConstValue, s: BigInt) -> Result<GoConstValue>
         )),
     }
 }
+
+/// Go `math/big` MaxExp / MinExp and `go/constant.maxExp` (4<<10).
+const BIG_MAX_EXP: i64 = 2_147_483_647;
+const BIG_MIN_EXP: i64 = -2_147_483_647;
+const SMALL_FLOAT_EXP: i64 = 4 << 10;
+
+struct Cursor<'a> {
+    s: &'a [u8],
+    i: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn read(&mut self) -> Option<u8> {
+        if self.i >= self.s.len() {
+            None
+        } else {
+            let c = self.s[self.i];
+            self.i += 1;
+            Some(c)
+        }
+    }
+
+    fn unread(&mut self) {
+        if self.i > 0 {
+            self.i -= 1;
+        }
+    }
+}
+
+fn digit_val(ch: u8) -> u32 {
+    match ch {
+        b'0'..=b'9' => u32::from(ch - b'0'),
+        b'a'..=b'z' => u32::from(ch - b'a') + 10,
+        b'A'..=b'Z' => u32::from(ch - b'A') + 10,
+        _ => 100,
+    }
+}
+
+/// Go `math/big` `nat.scan` with `base == 0`.
+fn scan_mant(cur: &mut Cursor<'_>, frac_ok: bool) -> Option<(num_bigint::BigInt, u32, i32)> {
+    let mut prev = b'.';
+    let mut inval_sep = false;
+    let mut frac_ok = frac_ok;
+    let ch0 = cur.read();
+    let mut ch = ch0;
+    let mut b: u32 = 10;
+    let mut prefix: u8 = 0;
+    let mut count: i32 = 0;
+    if ch == Some(b'0') {
+        prev = b'0';
+        count = 1;
+        ch = cur.read();
+        if let Some(c) = ch {
+            match c {
+                b'b' | b'B' => {
+                    b = 2;
+                    prefix = b'b';
+                }
+                b'o' | b'O' => {
+                    b = 8;
+                    prefix = b'o';
+                }
+                b'x' | b'X' => {
+                    b = 16;
+                    prefix = b'x';
+                }
+                _ => {
+                    if !frac_ok {
+                        b = 8;
+                        prefix = b'0';
+                    }
+                }
+            }
+            if prefix != 0 {
+                count = 0;
+                if prefix != b'0' {
+                    ch = cur.read();
+                }
+            }
+        }
+    }
+    let mut mant = num_bigint::BigInt::from(0);
+    let mut dp: i32 = -1;
+    while let Some(c) = ch {
+        if c == b'.' && frac_ok {
+            frac_ok = false;
+            if prev == b'_' {
+                inval_sep = true;
+            }
+            prev = b'.';
+            dp = count;
+        } else if c == b'_' {
+            if prev != b'0' {
+                inval_sep = true;
+            }
+            prev = b'_';
+        } else {
+            let d1 = digit_val(c);
+            if d1 >= b {
+                cur.unread();
+                break;
+            }
+            prev = b'0';
+            count += 1;
+            mant = mant * b + d1;
+        }
+        ch = cur.read();
+    }
+    if inval_sep || prev == b'_' {
+        return None;
+    }
+    if count == 0 {
+        if prefix == b'0' {
+            return Some((num_bigint::BigInt::from(0), 10, 1));
+        }
+        return None;
+    }
+    if dp >= 0 {
+        count = dp - count;
+    }
+    Some((mant, b, count))
+}
+
+fn scan_exp(cur: &mut Cursor<'_>) -> Option<(i64, u32)> {
+    let Some(ch0) = cur.read() else {
+        return Some((0, 10));
+    };
+    let ebase = match ch0 {
+        b'e' | b'E' => 10u32,
+        b'p' | b'P' => 2u32,
+        _ => {
+            cur.unread();
+            return Some((0, 10));
+        }
+    };
+    let mut digits = Vec::new();
+    let mut ch = cur.read();
+    if ch == Some(b'+') || ch == Some(b'-') {
+        if ch == Some(b'-') {
+            digits.push(b'-');
+        }
+        ch = cur.read();
+    }
+    let mut prev = b'.';
+    let mut inval_sep = false;
+    let mut has_digits = false;
+    while let Some(c) = ch {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            prev = b'0';
+            has_digits = true;
+        } else if c == b'_' {
+            if prev != b'0' {
+                inval_sep = true;
+            }
+            prev = b'_';
+        } else {
+            cur.unread();
+            break;
+        }
+        ch = cur.read();
+    }
+    if !has_digits || inval_sep || prev == b'_' {
+        return None;
+    }
+    let s = std::str::from_utf8(&digits).ok()?;
+    let exp = s.parse::<i64>().ok()?;
+    Some((exp, ebase))
+}
+
+fn scan_sign(cur: &mut Cursor<'_>) -> bool {
+    match cur.read() {
+        Some(b'+') => false,
+        Some(b'-') => true,
+        Some(_) => {
+            cur.unread();
+            false
+        }
+        None => false,
+    }
+}
+
+fn parse_int_literal(lit: &str) -> Option<num_bigint::BigInt> {
+    if lit.is_empty() {
+        return None;
+    }
+    let mut cur = Cursor {
+        s: lit.as_bytes(),
+        i: 0,
+    };
+    let neg = scan_sign(&mut cur);
+    let (mut mant, _, _) = scan_mant(&mut cur, false)?;
+    if cur.i != cur.s.len() {
+        return None;
+    }
+    if neg && mant.sign() != Sign::NoSign {
+        mant = -mant;
+    }
+    Some(mant)
+}
+
+fn approx_log2(mant_bits: i64, exp2: i64, exp5: i64) -> i64 {
+    // log2(5) ≈ 2.321928094887362
+    let log5 = (exp5 as i128) * 2_321_928_094_887_362i128 / 1_000_000_000_000_000i128;
+    let s = mant_bits as i128 + exp2 as i128 + log5;
+    if s > i64::MAX as i128 {
+        i64::MAX
+    } else if s < i64::MIN as i128 {
+        i64::MIN
+    } else {
+        s as i64
+    }
+}
+
+fn apply_exp2_exp5(
+    mant: num_bigint::BigInt,
+    neg: bool,
+    exp2: i64,
+    exp5: i64,
+) -> Option<GoConstValue> {
+    if mant.sign() == Sign::NoSign {
+        return Some(make_float(BigRational::from_integer(num_bigint::BigInt::from(
+            0,
+        ))));
+    }
+    let bits = i64::try_from(mant.bits()).unwrap_or(i64::MAX);
+    let log2 = approx_log2(bits, exp2, exp5);
+    if log2 > BIG_MAX_EXP {
+        return None;
+    }
+    if log2 < BIG_MIN_EXP {
+        return Some(make_float(BigRational::from_integer(num_bigint::BigInt::from(
+            0,
+        ))));
+    }
+    if log2.unsigned_abs() >= SMALL_FLOAT_EXP as u64 && log2 != 0 {
+        return None;
+    }
+    if exp5.unsigned_abs() > 1_000_000 || exp2.unsigned_abs() > 10_000_000 {
+        return None;
+    }
+    let mut numer = mant;
+    let mut denom = num_bigint::BigInt::from(1);
+    if exp5 > 0 {
+        numer *= num_bigint::BigInt::from(5).pow(u32::try_from(exp5).ok()?);
+    } else if exp5 < 0 {
+        denom *= num_bigint::BigInt::from(5).pow(u32::try_from(-exp5).ok()?);
+    }
+    if exp2 > 0 {
+        numer <<= exp2 as usize;
+    } else if exp2 < 0 {
+        denom <<= (-exp2) as usize;
+    }
+    if denom.sign() == Sign::NoSign {
+        return None;
+    }
+    if neg {
+        numer = -numer;
+    }
+    Some(make_float(BigRational::new(numer, denom)))
+}
+
+fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
+    if lit.is_empty() {
+        return None;
+    }
+    let mut cur = Cursor {
+        s: lit.as_bytes(),
+        i: 0,
+    };
+    let neg = scan_sign(&mut cur);
+    let (mant, base, fcount) = scan_mant(&mut cur, true)?;
+    let (exp, ebase) = scan_exp(&mut cur)?;
+    if cur.i != cur.s.len() {
+        return None;
+    }
+    let mut exp2: i64 = 0;
+    let mut exp5: i64 = 0;
+    if fcount < 0 {
+        let d = i64::from(fcount);
+        match base {
+            10 => {
+                exp5 = d;
+                exp2 = d;
+            }
+            2 => exp2 = d,
+            8 => exp2 = d.checked_mul(3)?,
+            16 => exp2 = d.checked_mul(4)?,
+            _ => return None,
+        }
+    }
+    match ebase {
+        10 => {
+            exp5 = exp5.checked_add(exp)?;
+            exp2 = exp2.checked_add(exp)?;
+        }
+        2 => exp2 = exp2.checked_add(exp)?,
+        _ => return None,
+    }
+    apply_exp2_exp5(mant, neg, exp2, exp5)
+}
+
+/// Go `MakeFromLiteral` for INT/FLOAT. Invalid lit → Unknown. Other toks throw.
+/// `prec` must be 0 (Go panics otherwise).
+#[napi]
+pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoConstValue> {
+    if prec != 0 {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constMakeFromLiteral prec must be 0",
+        ));
+    }
+    match tok {
+        token::INT => Ok(parse_int_literal(&lit)
+            .map(make_int)
+            .unwrap_or_else(make_unknown)),
+        token::FLOAT => Ok(parse_float_literal(&lit).unwrap_or_else(make_unknown)),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constMakeFromLiteral tok must be INT or FLOAT",
+        )),
+    }
+}
