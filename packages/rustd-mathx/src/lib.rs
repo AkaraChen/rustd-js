@@ -1,3 +1,5 @@
+mod cmplx;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -313,4 +315,123 @@ pub fn rem32(hi: u32, lo: u32, y: u32) -> Result<u32> {
 #[napi]
 pub fn rem64(hi: BigInt, lo: BigInt, y: BigInt) -> Result<BigInt> {
     Ok(u64_out(div64_inner(u64_arg(hi)?, u64_arg(lo)?, u64_arg(y)?)?.1))
+}
+
+fn pair(z: cmplx::C) -> Vec<f64> {
+    vec![z.0, z.1]
+}
+
+#[napi]
+pub fn c_abs(re: f64, im: f64) -> f64 {
+    cmplx::abs((re, im))
+}
+#[napi]
+pub fn c_arg(re: f64, im: f64) -> f64 {
+    cmplx::arg((re, im))
+}
+#[napi]
+pub fn c_norm(re: f64, im: f64) -> f64 {
+    cmplx::norm((re, im))
+}
+#[napi]
+pub fn c_conj(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::conj((re, im)))
+}
+#[napi]
+pub fn c_rect(r: f64, theta: f64) -> Vec<f64> {
+    pair(cmplx::rect(r, theta))
+}
+#[napi(object)]
+pub struct Polar {
+    pub r: f64,
+    pub phi: f64,
+}
+#[napi]
+pub fn c_polar(re: f64, im: f64) -> Polar {
+    let (r, phi) = cmplx::polar((re, im));
+    Polar { r, phi }
+}
+#[napi]
+pub fn c_exp(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::exp((re, im)))
+}
+#[napi]
+pub fn c_log(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::log((re, im)))
+}
+#[napi]
+pub fn c_pow(x_re: f64, x_im: f64, y_re: f64, y_im: f64) -> Vec<f64> {
+    pair(cmplx::pow((x_re, x_im), (y_re, y_im)))
+}
+#[napi]
+pub fn c_sqrt(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::sqrt((re, im)))
+}
+#[napi]
+pub fn c_sin(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::sin((re, im)))
+}
+#[napi]
+pub fn c_cos(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::cos((re, im)))
+}
+#[napi]
+pub fn c_tan(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::tan((re, im)))
+}
+#[napi]
+pub fn c_sinh(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::sinh((re, im)))
+}
+#[napi]
+pub fn c_cosh(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::cosh((re, im)))
+}
+#[napi]
+pub fn c_tanh(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::tanh((re, im)))
+}
+#[napi]
+pub fn c_asin(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::asin((re, im)))
+}
+#[napi]
+pub fn c_acos(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::acos((re, im)))
+}
+#[napi]
+pub fn c_atan(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::atan((re, im)))
+}
+#[napi]
+pub fn c_asinh(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::asinh((re, im)))
+}
+#[napi]
+pub fn c_acosh(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::acosh((re, im)))
+}
+#[napi]
+pub fn c_atanh(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::atanh((re, im)))
+}
+#[napi]
+pub fn c_cot(re: f64, im: f64) -> Vec<f64> {
+    pair(cmplx::cot((re, im)))
+}
+#[napi]
+pub fn c_inf() -> Vec<f64> {
+    pair(cmplx::inf_c())
+}
+#[napi(js_name = "cNaN")]
+pub fn c_nan() -> Vec<f64> {
+    pair(cmplx::nan_c())
+}
+#[napi]
+pub fn c_is_inf(re: f64, im: f64, sign: Option<i32>) -> bool {
+    cmplx::is_inf_c((re, im), sign.unwrap_or(0))
+}
+#[napi(js_name = "cIsNaN")]
+pub fn c_is_nan(re: f64, im: f64) -> bool {
+    cmplx::is_nan_c((re, im))
 }

@@ -36,3 +36,33 @@ export function div32(hi: number, lo: number, y: number): { quo: number; rem: nu
 export function div64(hi: bigint, lo: bigint, y: bigint): { quo: bigint; rem: bigint };
 export function rem32(hi: number, lo: number, y: number): number;
 export function rem64(hi: bigint, lo: bigint, y: bigint): bigint;
+
+/** math/cmplx. `Complex` is a readonly `[re, im]` tuple. */
+export type Complex = readonly [re: number, im: number];
+export function cAbs(x: Complex): number;
+export function cArg(x: Complex): number;
+export function cNorm(x: Complex): number;
+export function cConj(x: Complex): Complex;
+export function cRect(r: number, φ: number): Complex;
+export function cPolar(x: Complex): { r: number; φ: number };
+export function cExp(x: Complex): Complex;
+export function cLog(x: Complex): Complex;
+export function cPow(x: Complex, y: Complex): Complex;
+export function cSqrt(x: Complex): Complex;
+export function cSin(x: Complex): Complex;
+export function cCos(x: Complex): Complex;
+export function cTan(x: Complex): Complex;
+export function cSinh(x: Complex): Complex;
+export function cCosh(x: Complex): Complex;
+export function cTanh(x: Complex): Complex;
+export function cAsin(x: Complex): Complex;
+export function cAcos(x: Complex): Complex;
+export function cAtan(x: Complex): Complex;
+export function cAsinh(x: Complex): Complex;
+export function cAcosh(x: Complex): Complex;
+export function cAtanh(x: Complex): Complex;
+export function cCot(x: Complex): Complex;
+export function cInf(): Complex;
+export function cNaN(): Complex;
+export function cIsInf(x: Complex, sign?: number): boolean;
+export function cIsNaN(x: Complex): boolean;

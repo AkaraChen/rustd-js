@@ -1,7 +1,7 @@
 # rustd-mathx
 
-Go `math/bits` (and later `math/cmplx` / `math/rand`) for Node via Rust + napi-rs.
-This is checkpoint 1 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` only**. Complex and PRNG APIs are not exported yet.
+Go `math/bits` and `math/cmplx` (and later `math/rand`) for Node via Rust + napi-rs.
+This is checkpoint 2 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx`**. PRNG APIs are not exported yet.
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -35,11 +35,43 @@ div64(0n, 10n, 3n);            // { quo: 3n, rem: 1n }
 
 `Div*` / `Rem*` throw `RangeError` with Go's panic text: `integer divide by zero` or `integer overflow` (`hi >= y`).
 
+## API (`math/cmplx`)
+
+`Complex` is a readonly `[re, im]` tuple. Special-value branches follow Go / C99 Annex G. Bit patterns are compared against Go `math/cmplx` in `test/cmplx.test.mjs`.
+
+| Go | This package |
+| --- | --- |
+| `Abs` / `Phase` | `cAbs` / `cArg` |
+| — | `cNorm` (`re²+im²`; not in Go) |
+| `Conj` / `Rect` / `Polar` | `cConj` / `cRect` / `cPolar` → `{ r, φ }` |
+| `Exp` / `Log` / `Pow` / `Sqrt` | `cExp` / `cLog` / `cPow` / `cSqrt` |
+| `Sin`/`Cos`/`Tan`/`Sinh`/`Cosh`/`Tanh`/`Cot` | `cSin` … `cCot` |
+| `Asin`/`Acos`/`Atan`/`Asinh`/`Acosh`/`Atanh` | `cAsin` … `cAtanh` |
+| `Inf` / `NaN` / `IsInf` / `IsNaN` | `cInf` / `cNaN` / `cIsInf` / `cIsNaN` |
+
+`cIsInf(x, sign?)` takes an optional `sign` like `math.IsInf`: omitted/`0` matches either infinity, `>0` only `+Inf`, `<0` only `-Inf`. Go's `cmplx.IsInf` is the omitted-sign case.
+
+Required signed-zero cases: `cSqrt([-1, 0]) === [0, 1]`, `cPolar([-1, 0]) === { r: 1, φ: π }`.
+
 ## Differences from Go
 
 - No platform-width `bits.Len`, `LeadingZeros`, `Add`, … Use `len32`/`len64` (and the matching width for every other op). A `uint` in Go is 32 or 64 bits depending on the platform; this package never hides that.
 - Panic becomes `RangeError`.
-- `math`, `math/big`, `math/cmplx`, and `math/rand` are not in this checkpoint. `math`/`math/big` are out of the 28-package split entirely.
+- `math` and `math/big` are out of the 28-package split. `math/rand` is the next checkpoint.
+- `cLog10` is not exported (issue #21 TS draft has `cLog` only).
+- `cNorm` is extra (`re²+im²`). `cIsInf` accepts an optional sign that Go `cmplx.IsInf` does not.
+- NaN payloads from explicit `cNaN()` / Go `math.NaN()` use `0x7ff8000000000001`. Libc `sin`/`exp`/… NaN payloads may still differ; those rows go in the known-diff list if tests find them.
+- Complex arithmetic uses the platform `libm` via Rust `std`. Finite values that differ from Go's `math` package by ULP are recorded as known diffs rather than approximated.
+
+### Known bit-pattern diffs (`math/cmplx`)
+
+Compared on Linux x64 GNU against Go 1.24.13 `math/cmplx`, cartesian of `{±0,±1,±0.5,±2,π,±Inf,NaN}` plus 64 `NormFloat64` samples (`rand.NewSource(1)`):
+
+| Kind | Handling |
+| --- | --- |
+| NaN payload `7ff8000000000001` (Go) vs `7ff8000000000000` (V8/JS) | Treated as equal: JS numbers cannot preserve Go's `uvnan` payload |
+| Finite libm ULP (typically 1–7, occasionally ~300 on `cPow` of π-heavy inputs) | Same special-value branches as Go; `sin`/`exp`/`pow` come from glibc vs Go `math` |
+| `cmplx.Pow(0, NaN+Infi)` | Go panics (`not reached`); we do not throw and follow the `modulus == 0` path |
 
 ## Not a CSPRNG
 
@@ -62,7 +94,6 @@ Release + strip, local Linux x64 GNU:
 
 ```text
 $ ls -l packages/rustd-mathx/*.node
--rwxrwxr-x 1 akrc akrc 368096 Sep 14 16:33 packages/rustd-mathx/rustd-mathx.linux-x64-gnu.node
 ```
 
-368,096 bytes (well under the 2 MB cap and the 500 KB "something is wrong" check).
+See the local `*.node` after `pnpm --filter rustd-mathx build`. Cap is 2 MB; this package should stay well under 500 KB.

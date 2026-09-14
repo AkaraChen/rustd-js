@@ -116,6 +116,63 @@ function div64(hi, lo, y) {
 function rem32(hi, lo, y) { return native(() => binding.rem32(u32('hi', hi), u32('lo', lo), u32('y', y))) >>> 0; }
 function rem64(hi, lo, y) { return native(() => binding.rem64(u64('hi', hi), u64('lo', lo), u64('y', y))); }
 
+function asComplex(x, label = 'x') {
+  if (!Array.isArray(x) || x.length !== 2 || typeof x[0] !== 'number' || typeof x[1] !== 'number') {
+    throw new TypeError(`math/cmplx: ${label} must be [re, im]`);
+  }
+  return x;
+}
+function asNumber(name, x) {
+  if (typeof x !== 'number') throw new TypeError(`math/cmplx: ${name} must be a number`);
+  return x;
+}
+function complexOut(pair) {
+  return Object.freeze([pair[0], pair[1]]);
+}
+
+function cAbs(x) { const [re, im] = asComplex(x); return binding.cAbs(re, im); }
+function cArg(x) { const [re, im] = asComplex(x); return binding.cArg(re, im); }
+function cNorm(x) { const [re, im] = asComplex(x); return binding.cNorm(re, im); }
+function cConj(x) { const [re, im] = asComplex(x); return complexOut(binding.cConj(re, im)); }
+function cRect(r, phi) { return complexOut(binding.cRect(asNumber('r', r), asNumber('φ', phi))); }
+function cPolar(x) {
+  const [re, im] = asComplex(x);
+  const polar = binding.cPolar(re, im);
+  return { r: polar.r, φ: polar.phi };
+}
+function cExp(x) { const [re, im] = asComplex(x); return complexOut(binding.cExp(re, im)); }
+function cLog(x) { const [re, im] = asComplex(x); return complexOut(binding.cLog(re, im)); }
+function cPow(x, y) {
+  const [xr, xi] = asComplex(x, 'x');
+  const [yr, yi] = asComplex(y, 'y');
+  return complexOut(binding.cPow(xr, xi, yr, yi));
+}
+function cSqrt(x) { const [re, im] = asComplex(x); return complexOut(binding.cSqrt(re, im)); }
+function cSin(x) { const [re, im] = asComplex(x); return complexOut(binding.cSin(re, im)); }
+function cCos(x) { const [re, im] = asComplex(x); return complexOut(binding.cCos(re, im)); }
+function cTan(x) { const [re, im] = asComplex(x); return complexOut(binding.cTan(re, im)); }
+function cSinh(x) { const [re, im] = asComplex(x); return complexOut(binding.cSinh(re, im)); }
+function cCosh(x) { const [re, im] = asComplex(x); return complexOut(binding.cCosh(re, im)); }
+function cTanh(x) { const [re, im] = asComplex(x); return complexOut(binding.cTanh(re, im)); }
+function cAsin(x) { const [re, im] = asComplex(x); return complexOut(binding.cAsin(re, im)); }
+function cAcos(x) { const [re, im] = asComplex(x); return complexOut(binding.cAcos(re, im)); }
+function cAtan(x) { const [re, im] = asComplex(x); return complexOut(binding.cAtan(re, im)); }
+function cAsinh(x) { const [re, im] = asComplex(x); return complexOut(binding.cAsinh(re, im)); }
+function cAcosh(x) { const [re, im] = asComplex(x); return complexOut(binding.cAcosh(re, im)); }
+function cAtanh(x) { const [re, im] = asComplex(x); return complexOut(binding.cAtanh(re, im)); }
+function cCot(x) { const [re, im] = asComplex(x); return complexOut(binding.cCot(re, im)); }
+function cInf() { return complexOut(binding.cInf()); }
+function cNaN() { return complexOut(binding.cNaN()); }
+function cIsInf(x, sign) {
+  const [re, im] = asComplex(x);
+  if (sign === undefined) return binding.cIsInf(re, im);
+  if (typeof sign !== 'number' || !Number.isInteger(sign)) {
+    throw new RangeError('math/cmplx: sign must be an integer');
+  }
+  return binding.cIsInf(re, im, sign);
+}
+function cIsNaN(x) { const [re, im] = asComplex(x); return binding.cIsNaN(re, im); }
+
 module.exports = {
   leadingZeros8, leadingZeros16, leadingZeros32, leadingZeros64,
   trailingZeros8, trailingZeros16, trailingZeros32, trailingZeros64,
@@ -125,4 +182,7 @@ module.exports = {
   reverse8, reverse16, reverse32, reverse64,
   reverseBytes16, reverseBytes32, reverseBytes64,
   add32, add64, sub32, sub64, mul32, mul64, div32, div64, rem32, rem64,
+  cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cPow, cSqrt,
+  cSin, cCos, cTan, cSinh, cCosh, cTanh, cAsin, cAcos, cAtan, cAsinh, cAcosh, cAtanh, cCot,
+  cInf, cNaN, cIsInf, cIsNaN,
 };
