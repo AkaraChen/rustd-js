@@ -11,6 +11,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -289,10 +290,64 @@ func main() {
 	draw.Draw(srcOp, srcOp.Bounds(), dst, image.Point{}, draw.Src)
 	draw.Draw(srcOp, srcOp.Bounds(), src, image.Point{}, draw.Src)
 
+	maskDst := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	maskSrc := sampleNRGBA()
+	mask := image.NewAlpha(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			maskDst.SetRGBA(x, y, color.RGBA{R: 0, G: 0, B: 255, A: 255})
+			mask.SetAlpha(x, y, color.Alpha{A: uint8((x + y) * 16)})
+		}
+	}
+	maskOver := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	draw.Draw(maskOver, maskOver.Bounds(), maskDst, image.Point{}, draw.Src)
+	draw.DrawMask(maskOver, maskOver.Bounds(), maskSrc, image.Point{}, mask, image.Point{}, draw.Over)
+	maskSrcOp := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	draw.Draw(maskSrcOp, maskSrcOp.Bounds(), maskDst, image.Point{}, draw.Src)
+	draw.DrawMask(maskSrcOp, maskSrcOp.Bounds(), maskSrc, image.Point{}, mask, image.Point{}, draw.Src)
+
+	grad := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			grad.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 16), G: uint8(y * 16), B: uint8((x + y) * 8), A: 255})
+		}
+	}
+	floydPlan9 := image.NewPaletted(grad.Bounds(), palette.Plan9)
+	draw.FloydSteinberg.Draw(floydPlan9, floydPlan9.Bounds(), grad, image.Point{})
+	floydWeb := image.NewPaletted(grad.Bounds(), palette.WebSafe)
+	draw.FloydSteinberg.Draw(floydWeb, floydWeb.Bounds(), grad, image.Point{})
+	srcPlan9 := image.NewPaletted(grad.Bounds(), palette.Plan9)
+	draw.Draw(srcPlan9, srcPlan9.Bounds(), grad, image.Point{}, draw.Src)
+
+	rng := rand.New(rand.NewSource(1))
+	var plan9Rand []idx
+	var webRand []idx
+	for i := 0; i < 1024; i++ {
+		c := color.NRGBA{
+			R: uint8(rng.Intn(256)),
+			G: uint8(rng.Intn(256)),
+			B: uint8(rng.Intn(256)),
+			A: uint8(rng.Intn(256)),
+		}
+		r, g, b, a := c.RGBA()
+		plan9Rand = append(plan9Rand, idx{R: r, G: g, B: b, A: a, Index: color.Palette(palette.Plan9).Index(c)})
+		webRand = append(webRand, idx{R: r, G: g, B: b, A: a, Index: color.Palette(palette.WebSafe).Index(c)})
+	}
+
 	extra := map[string]any{
-		"plan9Index": indexes,
-		"drawOver":   pixdump(over),
-		"drawSrc":    pixdump(srcOp),
+		"plan9Index":        indexes,
+		"plan9IndexRandom":  plan9Rand,
+		"webSafeIndexRandom": webRand,
+		"drawOver":          pixdump(over),
+		"drawSrc":           pixdump(srcOp),
+		"drawMaskOver":      pixdump(maskOver),
+		"drawMaskSrc":       pixdump(maskSrcOp),
+		"floydPlan9":        pixdump(floydPlan9),
+		"floydPlan9Pix":     hex(floydPlan9.Pix),
+		"floydWebSafe":      pixdump(floydWeb),
+		"floydWebSafePix":   hex(floydWeb.Pix),
+		"quantSrcPlan9":     pixdump(srcPlan9),
+		"quantSrcPlan9Pix":  hex(srcPlan9.Pix),
 		"gifAll": map[string]any{
 			"loopCount":       gall.LoopCount,
 			"backgroundIndex": gall.BackgroundIndex,

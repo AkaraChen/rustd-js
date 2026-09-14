@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   pngDecode, pngDecodeConfig, jpegDecodeConfig, gifDecode, gifDecodeAll, gifDecodeConfig,
-  plan9Palette, nrgba, draw, Image, rect,
+  plan9Palette, webSafePalette, nrgba, draw, drawMask, quantize, Image, rect,
 } from '../index.mjs';
 
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -124,4 +124,74 @@ test('Plan9 Index and draw Over/Src still match Go', () => {
   draw(srcOp, rect(0, 0, 4, 4), dst, { x: 0, y: 0 }, 'src');
   draw(srcOp, rect(0, 0, 4, 4), src, { x: 0, y: 0 }, 'src');
   assert.equal(pixdump(srcOp), extra.drawSrc);
+});
+
+function sampleNRGBA8() {
+  const img = Image.nrgba(rect(0, 0, 8, 8));
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      img.set(x, y, nrgba({ r: x * 32, g: y * 32, b: 128, a: 255 }));
+    }
+  }
+  img.set(0, 0, nrgba({ r: 255, g: 0, b: 0, a: 128 }));
+  return img;
+}
+
+function gradient16() {
+  const img = Image.nrgba(rect(0, 0, 16, 16));
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      img.set(x, y, nrgba({ r: x * 16, g: y * 16, b: (x + y) * 8, a: 255 }));
+    }
+  }
+  return img;
+}
+
+test('drawMask Over/Src pixdump matches Go', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const maskDst = Image.rgba(rect(0, 0, 8, 8));
+  const mask = Image.alpha(rect(0, 0, 8, 8));
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      maskDst.set(x, y, nrgba({ r: 0, g: 0, b: 255, a: 255 }));
+      mask.set(x, y, nrgba({ r: 0, g: 0, b: 0, a: (x + y) * 16 }));
+    }
+  }
+  const src = sampleNRGBA8();
+  const over = Image.rgba(rect(0, 0, 8, 8));
+  draw(over, rect(0, 0, 8, 8), maskDst, { x: 0, y: 0 }, 'src');
+  drawMask(over, rect(0, 0, 8, 8), src, { x: 0, y: 0 }, mask, { x: 0, y: 0 }, 'over');
+  assert.equal(pixdump(over), extra.drawMaskOver);
+  const srcOp = Image.rgba(rect(0, 0, 8, 8));
+  draw(srcOp, rect(0, 0, 8, 8), maskDst, { x: 0, y: 0 }, 'src');
+  drawMask(srcOp, rect(0, 0, 8, 8), src, { x: 0, y: 0 }, mask, { x: 0, y: 0 }, 'src');
+  assert.equal(pixdump(srcOp), extra.drawMaskSrc);
+});
+
+test('FloydSteinberg and Src quantize pixdump/indices match Go', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const src = gradient16();
+  const floyd9 = quantize(plan9Palette(), src, { drawer: 'floyd-steinberg' });
+  assert.equal(pixdump(floyd9), extra.floydPlan9);
+  assert.equal(Buffer.from(floyd9.pix()).toString('hex'), extra.floydPlan9Pix);
+  const floydWeb = quantize(webSafePalette(), src, { drawer: 'floyd-steinberg' });
+  assert.equal(pixdump(floydWeb), extra.floydWebSafe);
+  assert.equal(Buffer.from(floydWeb.pix()).toString('hex'), extra.floydWebSafePix);
+  const src9 = quantize(plan9Palette(), src);
+  assert.equal(pixdump(src9), extra.quantSrcPlan9);
+  assert.equal(Buffer.from(src9.pix()).toString('hex'), extra.quantSrcPlan9Pix);
+});
+
+test('Plan9 and WebSafe Index match Go on 1024 random NRGBA colors', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  assert.ok(extra.plan9IndexRandom.length >= 1000);
+  assert.ok(extra.webSafeIndexRandom.length >= 1000);
+  const plan9 = plan9Palette();
+  const web = webSafePalette();
+  for (const row of extra.plan9IndexRandom) {
+    assert.equal(plan9.index({ r: row.r, g: row.g, b: row.b, a: row.a }), row.index);
+  }
+  for (const row of extra.webSafeIndexRandom) {
+    assert.equal(web.index({ r: row.r, g: row.g, b: row.b, a: row.a }), row.index);
+  }
 });
