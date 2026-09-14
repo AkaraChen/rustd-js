@@ -80,6 +80,22 @@ function constBinaryOp(op, x, y) {
     binding.constBinaryOp(asNumber(op, 'op'), asConst(x, 'x')._n, asConst(y, 'y')._n),
   );
 }
+function asUintBound(value, label) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 1_000_000) {
+    throw new TypeError(`gotool: ${label} must be an integer in 0..1000000`);
+  }
+  return value;
+}
+function constUnaryOp(op, y, prec) {
+  return new GoConstValue(
+    binding.constUnaryOp(asNumber(op, 'op'), asConst(y, 'y')._n, asUintBound(prec, 'prec')),
+  );
+}
+function constShift(op, x, s) {
+  return new GoConstValue(
+    binding.constShift(asNumber(op, 'op'), asConst(x, 'x')._n, asBigInt(s, 's')),
+  );
+}
 
 function asNumber(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -351,6 +367,8 @@ module.exports.constCompare = constCompare;
 module.exports.constSign = constSign;
 module.exports.constBitLen = constBitLen;
 module.exports.constBinaryOp = constBinaryOp;
+module.exports.constUnaryOp = constUnaryOp;
+module.exports.constShift = constShift;
 module.exports.TOKEN = TOKEN;
 module.exports.SCAN_MODE = SCAN_MODE;
 module.exports.PARSE_MODE = PARSE_MODE;

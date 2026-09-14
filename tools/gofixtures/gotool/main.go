@@ -108,7 +108,26 @@ func main() {
 	verifyConstantFlag := flag.Bool("verify-constant", false, "verify a constant-int packet read from stdin")
 	constantBinFlag := flag.Bool("constant-binop", false, "dump go/constant Int BinaryOp fixtures")
 	verifyConstantBinFlag := flag.Bool("verify-constant-binop", false, "verify a constant-int-binop packet read from stdin")
+	constantUSFlag := flag.Bool("constant-unary-shift", false, "dump go/constant Int UnaryOp/AND_NOT/Shift fixtures")
+	verifyConstantUSFlag := flag.Bool("verify-constant-unary-shift", false, "verify a constant-int-unary-shift packet read from stdin")
 	flag.Parse()
+	if *verifyConstantUSFlag {
+		verifyConstantUnaryShift(os.Stdin)
+		return
+	}
+	if *constantUSFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantUnaryShift(writer)
+		return
+	}
 	if *verifyConstantBinFlag {
 		verifyConstantBin(os.Stdin)
 		return

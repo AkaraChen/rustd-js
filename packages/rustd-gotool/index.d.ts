@@ -17,10 +17,14 @@ export function constCompare(x: GoConstValue, y: GoConstValue): number;
 export function constSign(v: GoConstValue): number;
 export function constBitLen(v: GoConstValue): number;
 /**
- * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR.
+ * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
  * QUO of Ints is Float (`n` / `n/d` ExactString). QUO/REM by zero → Unknown.
  */
 export function constBinaryOp(op: number, x: GoConstValue, y: GoConstValue): GoConstValue;
+/** Int ADD/SUB/XOR. `prec` is Go XOR width in bits; 0 = unlimited. */
+export function constUnaryOp(op: number, y: GoConstValue, prec: number): GoConstValue;
+/** Int SHL/SHR. `s` is a non-negative bigint count (Go `uint`). */
+export function constShift(op: number, x: GoConstValue, s: bigint): GoConstValue;
 
 export const TOKEN: {
   readonly ILLEGAL: number;

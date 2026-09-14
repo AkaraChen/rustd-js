@@ -11,15 +11,15 @@ import (
 )
 
 type ConstCase struct {
-	ID       string `json:"id"`
-	X        string `json:"x"`
-	Y        string `json:"y"`
-	Kind     string `json:"kind"`
-	ToInt    string `json:"toInt"`
-	ToIntOk  bool   `json:"toIntOk"`
-	Sign     int    `json:"sign"`
-	BitLen   int    `json:"bitLen"`
-	Compare  int    `json:"compare"`
+	ID      string `json:"id"`
+	X       string `json:"x"`
+	Y       string `json:"y"`
+	Kind    string `json:"kind"`
+	ToInt   string `json:"toInt"`
+	ToIntOk bool   `json:"toIntOk"`
+	Sign    int    `json:"sign"`
+	BitLen  int    `json:"bitLen"`
+	Compare int    `json:"compare"`
 }
 
 type ConstPacket struct {
@@ -257,4 +257,217 @@ func verifyConstant(r io.Reader) {
 		}
 	}
 	fmt.Printf("Go verified %d gotool constant-int cases\n", len(packet.Cases))
+}
+
+type ConstUSCase struct {
+	ID      string `json:"id"`
+	Form    string `json:"form"`
+	Op      string `json:"op"`
+	OpTok   int    `json:"opTok"`
+	X       string `json:"x"`
+	Y       string `json:"y"`
+	S       string `json:"s"`
+	Prec    uint   `json:"prec"`
+	Kind    string `json:"kind"`
+	Exact   string `json:"exact"`
+	ToInt   string `json:"toInt"`
+	ToIntOk bool   `json:"toIntOk"`
+	Sign    int    `json:"sign"`
+	BitLen  int    `json:"bitLen"`
+}
+
+type ConstUSPacket struct {
+	Schema  int           `json:"schema"`
+	Package string        `json:"package"`
+	Go      string        `json:"go"`
+	Slice   string        `json:"slice"`
+	Cases   []ConstUSCase `json:"cases"`
+}
+
+func fillFromValue(v constant.Value, c *ConstUSCase) {
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	c.Sign = constant.Sign(v)
+	if v.Kind() == constant.Int {
+		iv, ok := constant.Int64Val(v)
+		c.ToInt = strconv.FormatInt(iv, 10)
+		c.ToIntOk = ok
+		c.BitLen = constant.BitLen(v)
+	} else {
+		c.ToInt = "0"
+		c.ToIntOk = false
+		c.BitLen = 0
+	}
+}
+
+func shiftCounts() []uint {
+	return []uint{0, 1, 2, 8, 31, 32, 63, 64}
+}
+
+func xorPrecs() []uint {
+	return []uint{0, 1, 8, 32, 63, 64}
+}
+
+func dumpConstantUnaryShift(w io.Writer) {
+	packet := ConstUSPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-int-unary-shift",
+	}
+	corpus := constCorpus()
+	for _, op := range []struct {
+		name string
+		tok  token.Token
+	}{
+		{"ADD", token.ADD},
+		{"SUB", token.SUB},
+	} {
+		for i, x := range corpus {
+			v := constant.UnaryOp(op.tok, constant.MakeInt64(x), 0)
+			c := ConstUSCase{
+				ID:    fmt.Sprintf("go-unary-%s-%d", op.name, i),
+				Form:  "unary",
+				Op:    op.name,
+				OpTok: int(op.tok),
+				X:     strconv.FormatInt(x, 10),
+				Y:     "0",
+				S:     "0",
+				Prec:  0,
+			}
+			fillFromValue(v, &c)
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	for _, prec := range xorPrecs() {
+		for i, x := range corpus {
+			v := constant.UnaryOp(token.XOR, constant.MakeInt64(x), prec)
+			c := ConstUSCase{
+				ID:    fmt.Sprintf("go-unary-XOR-p%d-%d", prec, i),
+				Form:  "unary",
+				Op:    "XOR",
+				OpTok: int(token.XOR),
+				X:     strconv.FormatInt(x, 10),
+				Y:     "0",
+				S:     "0",
+				Prec:  prec,
+			}
+			fillFromValue(v, &c)
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	for i, x := range corpus {
+		for j, y := range corpus {
+			v := constant.BinaryOp(constant.MakeInt64(x), token.AND_NOT, constant.MakeInt64(y))
+			c := ConstUSCase{
+				ID:    fmt.Sprintf("go-andnot-%d-%d", i, j),
+				Form:  "andnot",
+				Op:    "AND_NOT",
+				OpTok: int(token.AND_NOT),
+				X:     strconv.FormatInt(x, 10),
+				Y:     strconv.FormatInt(y, 10),
+				S:     "0",
+				Prec:  0,
+			}
+			fillFromValue(v, &c)
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	for _, op := range []struct {
+		name string
+		tok  token.Token
+	}{
+		{"SHL", token.SHL},
+		{"SHR", token.SHR},
+	} {
+		for _, s := range shiftCounts() {
+			for i, x := range corpus {
+				v := constant.Shift(constant.MakeInt64(x), op.tok, s)
+				c := ConstUSCase{
+					ID:    fmt.Sprintf("go-shift-%s-s%d-%d", op.name, s, i),
+					Form:  "shift",
+					Op:    op.name,
+					OpTok: int(op.tok),
+					X:     strconv.FormatInt(x, 10),
+					Y:     "0",
+					S:     strconv.FormatUint(uint64(s), 10),
+					Prec:  0,
+				}
+				fillFromValue(v, &c)
+				packet.Cases = append(packet.Cases, c)
+			}
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantUnaryShift(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstUSPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-int-unary-shift" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-unary-shift packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{
+		"ADD": token.ADD, "SUB": token.SUB, "XOR": token.XOR,
+		"AND_NOT": token.AND_NOT, "SHL": token.SHL, "SHR": token.SHR,
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		x, err := strconv.ParseInt(c.X, 10, 64)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: bad x: %w", i, c.ID, err))
+		}
+		var got ConstUSCase
+		switch c.Form {
+		case "unary":
+			if c.Op != "ADD" && c.Op != "SUB" && c.Op != "XOR" {
+				fail(fmt.Errorf("case %d id=%s: unary form with op %s", i, c.ID, c.Op))
+			}
+			fillFromValue(constant.UnaryOp(op, constant.MakeInt64(x), c.Prec), &got)
+		case "andnot":
+			if op != token.AND_NOT {
+				fail(fmt.Errorf("case %d id=%s: andnot form with op %s", i, c.ID, c.Op))
+			}
+			y, err := strconv.ParseInt(c.Y, 10, 64)
+			if err != nil {
+				fail(fmt.Errorf("case %d id=%s: bad y: %w", i, c.ID, err))
+			}
+			fillFromValue(constant.BinaryOp(constant.MakeInt64(x), token.AND_NOT, constant.MakeInt64(y)), &got)
+		case "shift":
+			if op != token.SHL && op != token.SHR {
+				fail(fmt.Errorf("case %d id=%s: shift form with op %s", i, c.ID, c.Op))
+			}
+			s, err := strconv.ParseUint(c.S, 10, 64)
+			if err != nil {
+				fail(fmt.Errorf("case %d id=%s: bad s: %w", i, c.ID, err))
+			}
+			fillFromValue(constant.Shift(constant.MakeInt64(x), op, uint(s)), &got)
+		default:
+			fail(fmt.Errorf("case %d id=%s: unknown form %q", i, c.ID, c.Form))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.ToInt != c.ToInt || got.ToIntOk != c.ToIntOk || got.Sign != c.Sign || got.BitLen != c.BitLen {
+			fail(fmt.Errorf("mismatch case %d id=%s form=%s op=%s x=%s y=%s s=%s prec=%d: go kind=%s exact=%s toInt=%s ok=%v sign=%d bitLen=%d got kind=%s exact=%s toInt=%s ok=%v sign=%d bitLen=%d",
+				i, c.ID, c.Form, c.Op, c.X, c.Y, c.S, c.Prec, got.Kind, got.Exact, got.ToInt, got.ToIntOk, got.Sign, got.BitLen,
+				c.Kind, c.Exact, c.ToInt, c.ToIntOk, c.Sign, c.BitLen))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-int-unary-shift cases\n", len(packet.Cases))
 }

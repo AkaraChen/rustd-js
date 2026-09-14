@@ -10,6 +10,8 @@ export const {
   constSign,
   constBitLen,
   constBinaryOp,
+  constUnaryOp,
+  constShift,
   TOKEN,
   SCAN_MODE,
   PARSE_MODE,

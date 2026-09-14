@@ -3,7 +3,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use num_bigint::Sign;
 use num_rational::BigRational;
-use std::ops::{BitAnd, BitOr, BitXor};
+use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 
 /// Opaque `go/constant.Value` (issue #28). Int is arbitrary-precision.
 /// QUO of Ints is a Float (`big.Rat`); QUO/REM by zero is Unknown.
@@ -194,9 +194,95 @@ pub fn const_binary_op(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<Go
         token::AND => Ok(make_int(xi.bitand(yi))),
         token::OR => Ok(make_int(xi.bitor(yi))),
         token::XOR => Ok(make_int(xi.bitxor(yi))),
+        token::AND_NOT => Ok(make_int(xi.bitand(&yi.clone().not()))),
         _ => Err(Error::new(
             Status::InvalidArg,
-            "gotool: constBinaryOp op must be ADD, SUB, MUL, QUO, REM, AND, OR, or XOR",
+            "gotool: constBinaryOp op must be ADD, SUB, MUL, QUO, REM, AND, OR, XOR, or AND_NOT",
+        )),
+    }
+}
+
+fn as_prec(prec: i64) -> Result<u32> {
+    u32::try_from(prec).map_err(|_| {
+        Error::new(
+            Status::InvalidArg,
+            "gotool: constUnaryOp prec must be an integer in 0..1000000",
+        )
+    }).and_then(|p| {
+        if p > 1_000_000 {
+            Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constUnaryOp prec must be an integer in 0..1000000",
+            ))
+        } else {
+            Ok(p)
+        }
+    })
+}
+
+fn as_shift_count(s: &BigInt) -> Result<u32> {
+    let (neg, n, lossless) = s.get_u64();
+    if neg || !lossless || n > 1_000_000 {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constShift s must be a non-negative bigint in 0..1000000",
+        ));
+    }
+    Ok(n as u32)
+}
+
+/// Int ADD/SUB/XOR. `prec` is Go's XOR width in bits; 0 means unlimited (two's complement).
+#[napi]
+pub fn const_unary_op(op: i32, y: &GoConstValue, prec: i64) -> Result<GoConstValue> {
+    let prec = as_prec(prec)?;
+    if y.kind == "Unknown" {
+        return match op {
+            token::ADD | token::SUB | token::XOR => Ok(make_unknown()),
+            _ => Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constUnaryOp op must be ADD, SUB, or XOR",
+            )),
+        };
+    }
+    let yi = as_int(y, "y")?;
+    match op {
+        token::ADD => Ok(make_int(yi.clone())),
+        token::SUB => Ok(make_int(-yi)),
+        token::XOR => {
+            let mut z = yi.clone().not();
+            if prec > 0 {
+                let high = num_bigint::BigInt::from(-1).shl(prec as usize);
+                z = z.bitand(&high.not());
+            }
+            Ok(make_int(z))
+        }
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constUnaryOp op must be ADD, SUB, or XOR",
+        )),
+    }
+}
+
+/// Int SHL/SHR. `s` is Go's `uint` shift count.
+#[napi]
+pub fn const_shift(op: i32, x: &GoConstValue, s: BigInt) -> Result<GoConstValue> {
+    let s = as_shift_count(&s)?;
+    if x.kind == "Unknown" {
+        return match op {
+            token::SHL | token::SHR => Ok(make_unknown()),
+            _ => Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constShift op must be SHL or SHR",
+            )),
+        };
+    }
+    let xi = as_int(x, "x")?;
+    match op {
+        token::SHL => Ok(make_int(xi.clone().shl(s as usize))),
+        token::SHR => Ok(make_int(xi.clone().shr(s as usize))),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constShift op must be SHL or SHR",
         )),
     }
 }
