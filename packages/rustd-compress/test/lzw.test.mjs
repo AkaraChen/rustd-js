@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
-  lzwCompress, lzwDecompress, lzwCompressStream, LzwCompressor, LzwDecompressor, LzwConfigError, LzwFormatError,
+  lzwCompress, lzwDecompress, lzwCompressStream, lzwDecompressStream, LzwCompressor, LzwDecompressor, LzwConfigError, LzwFormatError,
 } from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -282,4 +282,52 @@ test('lzwCompressStream matches one-shot', async () => {
   const out = [];
   for await (const part of lzwCompressStream(chunks(), opts)) out.push(part);
   assert.equal(hex(Buffer.concat(out)), hex(expected));
+});
+
+test('lzwDecompressStream matches one-shot and LzwDecompressor across splits', async () => {
+  const input = Uint8Array.from({ length: 5000 }, (_, i) => (i * 17) & 255);
+  for (const order of ['lsb', 'msb']) {
+    const opts = { order, litWidth: 8 };
+    const compressed = lzwCompress(input, opts);
+    const expected = lzwDecompress(compressed, opts);
+    for (const size of [1, 2, 3, 7, 64, 1024, compressed.length]) {
+      const classChunks = [];
+      const dec = new LzwDecompressor(opts);
+      for (let i = 0; i < compressed.length; i += size) {
+        dec.write(compressed.subarray(i, i + size));
+        for (;;) {
+          const part = dec.read();
+          if (!part.length) break;
+          classChunks.push(part);
+        }
+      }
+      dec.end();
+      for (;;) {
+        const part = dec.read();
+        if (!part.length) break;
+        classChunks.push(part);
+      }
+      assert.equal(hex(Buffer.concat(classChunks)), hex(expected), `${order} class split ${size}`);
+
+      async function* chunks() {
+        for (let i = 0; i < compressed.length; i += size) {
+          yield compressed.subarray(i, i + size);
+        }
+      }
+      const streamChunks = [];
+      for await (const part of lzwDecompressStream(chunks(), opts)) streamChunks.push(part);
+      assert.equal(hex(Buffer.concat(streamChunks)), hex(expected), `${order} stream split ${size}`);
+    }
+  }
+});
+
+test('lzwDecompressStream truncated input throws LzwFormatError', async () => {
+  const opts = { order: 'msb', litWidth: 8 };
+  const compressed = lzwCompress(Uint8Array.from({ length: 64 }, (_, i) => i), opts);
+  async function* chunks() {
+    yield compressed.subarray(0, 2);
+  }
+  await assert.rejects(async () => {
+    for await (const part of lzwDecompressStream(chunks(), opts)) void part;
+  }, LzwFormatError);
 });

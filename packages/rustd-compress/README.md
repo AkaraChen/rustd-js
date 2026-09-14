@@ -13,9 +13,10 @@ const roundtrip = lzwDecompress(packed, { order: 'lsb', litWidth: 8 });
 ```
 
 Streaming classes feed bounded compressed input (`chunkSize` default 1 MiB) and
-return newly allocated `Uint8Array` slices from `read()`. There is no `close()`:
-the native objects do not hold file descriptors or borrowed JS memory. `reset()`
-clears codec state.
+return newly allocated `Uint8Array` slices from `read()`. `lzwDecompressStream`
+and `bzip2DecompressStream` wrap those classes over `AsyncIterable` chunks
+(`write` then `end`). There is no `close()`: the native objects do not hold file
+descriptors or borrowed JS memory. `reset()` clears codec state.
 
 ## Differences from Go
 
