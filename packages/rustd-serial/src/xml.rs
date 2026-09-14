@@ -1201,6 +1201,23 @@ impl Encoder {
         }
     }
 
+    /// Go `encoding/xml` `emitCDATA` (marshal `,cdata`), not EncodeToken.
+    fn write_cdata(&mut self, s: &[u8]) -> Result<(), XmlError> {
+        if s.is_empty() {
+            return Ok(());
+        }
+        self.buf.extend_from_slice(b"<![CDATA[");
+        let mut rest = s;
+        while let Some(i) = rest.windows(3).position(|w| w == b"]]>") {
+            self.buf.extend_from_slice(&rest[..i]);
+            self.buf.extend_from_slice(b"]]]]><![CDATA[>");
+            rest = &rest[i + 3..];
+        }
+        self.buf.extend_from_slice(rest);
+        self.buf.extend_from_slice(b"]]>");
+        Ok(())
+    }
+
     /// Go `encoding/xml` Marshal comment field (`printer` comment case), not EncodeToken.
     fn write_comment(&mut self, b: &[u8]) -> Result<(), XmlError> {
         if b.is_empty() {
@@ -1354,7 +1371,7 @@ pub struct Schema {
     pub omitempty: Option<bool>,
 }
 
-fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, bool) {
+fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, bool, bool) {
     let mut kind = match schema.kind.as_str() {
         "attr" => "attr",
         "chardata" => "chardata",
@@ -1363,6 +1380,7 @@ fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, boo
         _ => "element",
     };
     let mut omitempty = schema.omitempty.unwrap_or(false);
+    let mut cdata = false;
     let mut name = schema.name.clone();
     let mut xmlns = String::new();
     let mut parents = Vec::new();
@@ -1386,7 +1404,14 @@ fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, boo
         for flag in toks {
             match flag {
                 "attr" => kind = "attr",
-                "chardata" | "cdata" => kind = "chardata",
+                "chardata" => {
+                    kind = "chardata";
+                    cdata = false;
+                }
+                "cdata" => {
+                    kind = "chardata";
+                    cdata = true;
+                }
                 "comment" => kind = "comment",
                 "innerxml" | "any" => kind = "any",
                 "omitempty" => omitempty = true,
@@ -1403,7 +1428,7 @@ fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, boo
             }
         }
     }
-    (name, xmlns, parents, kind, omitempty)
+    (name, xmlns, parents, kind, omitempty, cdata)
 }
 
 fn is_empty_json(v: &Value) -> bool {
@@ -1532,7 +1557,7 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
         }
         return Ok(());
     }
-    let (name, xmlns, parents, kind, omitempty) = parse_tag(schema);
+    let (name, xmlns, parents, kind, omitempty, _) = parse_tag(schema);
     if omitempty && is_empty_json(value) {
         return Ok(());
     }
@@ -1572,7 +1597,7 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
         let obj = value.as_object();
         for child in children {
             let cv = obj.and_then(|o| o.get(&child_key(child))).unwrap_or(&Value::Null);
-            let (_, _, _, ck, omit) = parse_tag(child);
+            let (_, _, _, ck, omit, _) = parse_tag(child);
             if omit && is_empty_json(cv) {
                 continue;
             }
@@ -1580,7 +1605,7 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
                 if cv.is_null() {
                     continue;
                 }
-                let (aname, ax, _, _, _) = parse_tag(child);
+                let (aname, ax, _, _, _, _) = parse_tag(child);
                 attrs.push(Attr {
                     name: Name {
                         space: ax,
@@ -1597,7 +1622,7 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
         enc.write_start(&start_name, &attrs)?;
         for child in children {
             let cv = obj.and_then(|o| o.get(&child_key(child))).unwrap_or(&Value::Null);
-            let (_, _, _, ck, omit) = parse_tag(child);
+            let (_, _, _, ck, omit, cdata) = parse_tag(child);
             if omit && is_empty_json(cv) {
                 continue;
             }
@@ -1605,7 +1630,12 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
                 "attr" => {}
                 "chardata" => {
                     if !cv.is_null() {
-                        enc.encode_token(&Token::CharData(scalar_text(child, cv)?))?;
+                        let bytes = scalar_text(child, cv)?;
+                        if cdata {
+                            enc.write_cdata(&bytes)?;
+                        } else {
+                            enc.encode_token(&Token::CharData(bytes))?;
+                        }
                     }
                 }
                 "comment" => {
@@ -1789,7 +1819,7 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
     let mut comment = Vec::new();
     let inner_start = dec.input_offset().max(0) as usize;
     for child in &children {
-        let (cname, _, _, kind, _) = parse_tag(child);
+        let (cname, _, _, kind, _, _) = parse_tag(child);
         if kind == "attr" {
             if let Some(a) = attr.iter().find(|a| a.name.local == cname) {
                 obj.insert(child.name.clone(), parse_scalar(child.typ.as_deref(), a.value.as_bytes())?);
@@ -1818,7 +1848,7 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
                     return parse_scalar(schema.typ.as_deref(), &chardata);
                 }
                 for child in &children {
-                    let (_, _, _, kind, _) = parse_tag(child);
+                    let (_, _, _, kind, _, _) = parse_tag(child);
                     match kind {
                         "chardata" => {
                             obj.insert(child.name.clone(), parse_scalar(child.typ.as_deref(), &chardata)?);
@@ -1852,7 +1882,7 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
                     attr: attr.clone(),
                 };
                 if let Some(child) = children.iter().find(|c| {
-                    let (n, _, parents, k, _) = parse_tag(c);
+                    let (n, _, parents, k, _, _) = parse_tag(c);
                     k == "element" && parents.is_empty() && n == name.local
                 }) {
                     let val = unmarshal_element(dec, child, tok)?;
@@ -1863,10 +1893,10 @@ fn unmarshal_element(dec: &mut Decoder, schema: &Schema, start: Token) -> Result
                     };
                     insert_child(&mut obj, key, val);
                 } else if let Some(child) = children.iter().find(|c| {
-                    let (_, _, parents, k, _) = parse_tag(c);
+                    let (_, _, parents, k, _, _) = parse_tag(c);
                     k == "element" && parents.first().is_some_and(|p| p == &name.local)
                 }) {
-                    let (_, _, parents, _, _) = parse_tag(child);
+                    let (_, _, parents, _, _, _) = parse_tag(child);
                     let val = unmarshal_path(dec, &parents, child, tok)?;
                     let key = if child.name.is_empty() {
                         parse_tag(child).0

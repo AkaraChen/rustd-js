@@ -300,6 +300,18 @@ type xmlWrap struct {
 	Inner   string   `xml:",innerxml"`
 }
 
+type xmlCdata struct {
+	XMLName xml.Name `xml:"c"`
+	Body    string   `xml:",cdata"`
+}
+
+type xmlCdataMix struct {
+	XMLName xml.Name `xml:"mixc"`
+	A       string   `xml:"a"`
+	Body    string   `xml:",cdata"`
+	B       string   `xml:"b"`
+}
+
 type xmlPathDoc struct {
 	XMLName xml.Name `xml:"doc"`
 	City    string   `xml:"a>b>c"`
@@ -369,6 +381,10 @@ func generateXmlEncodes() []XmlEncodeCase {
 	if err != nil {
 		fail(err)
 	}
+	indentCdata, err := xml.MarshalIndent(xmlCdata{Body: "hi"}, "", "  ")
+	if err != nil {
+		fail(err)
+	}
 	dashErr := ""
 	if _, err := xml.Marshal(xmlCmt{Msg: "a--b"}); err != nil {
 		dashErr = err.Error()
@@ -390,6 +406,17 @@ func generateXmlEncodes() []XmlEncodeCase {
 		encodeCase("mix-order", "mix", mustXML(xmlMix{A: "1", Msg: "c", Inner: "<z/>", B: "2"}), map[string]any{"a": "1", "msg": "c", "inner": "<z/>", "b": "2"}, "", "", ""),
 		encodeCase("comment-indent", "comment", indentCmt, map[string]any{"msg": "hi"}, "", "", "  "),
 		encodeCase("inner-indent", "inner", indentInner, map[string]any{"inner": "<x>1</x>"}, "", "", "  "),
+		encodeCase("cdata-hi", "cdata", mustXML(xmlCdata{Body: "hi"}), map[string]any{"body": "hi"}, "", "", ""),
+		encodeCase("cdata-empty", "cdata", mustXML(xmlCdata{Body: ""}), map[string]any{"body": ""}, "", "", ""),
+		encodeCase("cdata-spaces", "cdata", mustXML(xmlCdata{Body: " hi "}), map[string]any{"body": " hi "}, "", "", ""),
+		encodeCase("cdata-raw", "cdata", mustXML(xmlCdata{Body: "1<2&3>"}), map[string]any{"body": "1<2&3>"}, "", "", ""),
+		encodeCase("cdata-close", "cdata", mustXML(xmlCdata{Body: "a]]>b"}), map[string]any{"body": "a]]>b"}, "", "", ""),
+		encodeCase("cdata-nested", "cdata", mustXML(xmlCdata{Body: "Literal <![CDATA[Nested]]>!"}), map[string]any{"body": "Literal <![CDATA[Nested]]>!"}, "", "", ""),
+		encodeCase("cdata-nested2", "cdata", mustXML(xmlCdata{Body: "<![CDATA[Nested]]> Literal!"}), map[string]any{"body": "<![CDATA[Nested]]> Literal!"}, "", "", ""),
+		encodeCase("cdata-double", "cdata", mustXML(xmlCdata{Body: "<![CDATA[Nested]]> Literal! <![CDATA[Nested]]> Literal!"}), map[string]any{"body": "<![CDATA[Nested]]> Literal! <![CDATA[Nested]]> Literal!"}, "", "", ""),
+		encodeCase("cdata-triple", "cdata", mustXML(xmlCdata{Body: "<![CDATA[<![CDATA[Nested]]>]]>"}), map[string]any{"body": "<![CDATA[<![CDATA[Nested]]>]]>"}, "", "", ""),
+		encodeCase("cdata-indent", "cdata", indentCdata, map[string]any{"body": "hi"}, "", "", "  "),
+		encodeCase("cdata-mix", "cdatamix", mustXML(xmlCdataMix{A: "1", Body: "x<y", B: "2"}), map[string]any{"a": "1", "body": "x<y", "b": "2"}, "", "", ""),
 	}
 }
 
@@ -414,6 +441,11 @@ func generateXmlDecodes() []XmlDecodeCase {
 	if err := xml.Unmarshal(wrapXML, &wrap); err != nil {
 		fail(err)
 	}
+	cdataXML := []byte(`<c><![CDATA[hello & <café>]]></c>`)
+	var cd xmlCdata
+	if err := xml.Unmarshal(cdataXML, &cd); err != nil {
+		fail(err)
+	}
 	pathXML := []byte(`<doc><a><b><c>Paris</c></b></a></doc>`)
 	var path xmlPathDoc
 	if err := xml.Unmarshal(pathXML, &path); err != nil {
@@ -435,6 +467,7 @@ func generateXmlDecodes() []XmlDecodeCase {
 		decodeCase("note-chardata", "note", noteXML, map[string]any{"body": note.Body}),
 		decodeCase("comment", "comment", cmtXML, map[string]any{"msg": cmt.Msg}),
 		decodeCase("innerxml", "inner", wrapXML, map[string]any{"inner": wrap.Inner}),
+		decodeCase("cdata", "cdata", cdataXML, map[string]any{"body": cd.Body}),
 		decodeCase("path-abc", "path", pathXML, map[string]any{"city": path.City}),
 		decodeCase("items-slice", "items", itemsXML, map[string]any{"item": items.Item}),
 		decodeCase("omitempty-marshal", "omit", omitXML, map[string]any{"xmlHex": hx(omitXML)}),
@@ -493,6 +526,16 @@ func verifyXml(packet XmlVerifyPacket) {
 			}
 		case "inner":
 			var v xmlWrap
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "cdata":
+			var v xmlCdata
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "cdatamix":
+			var v xmlCdataMix
 			if err := xml.Unmarshal(raw, &v); err != nil {
 				fail(fmt.Errorf("%s: %v", c.ID, err))
 			}
