@@ -4,8 +4,10 @@
 //! and hides that header. `NextRawPart` leaves the CTE and body alone. `write`
 //! may split a boundary across chunks; `next_part` returns `Ok(None)` until a
 //! complete part (or the closing delimiter) is buffered. `read_form` applies
-//! the Go `multipartmaxparts` cap (default 1000) and Go `maxMemory + 10MB`
-//! accounting for non-file values (headers + name overhead + body). File spill later.
+//! the Go `multipartmaxparts` cap (default 1000), Go `maxMemory + 10MB`
+//! accounting for non-file values, and Go `maxMemory` for in-memory file
+//! content. File parts that would spill to a temp file in Go throw
+//! `multipart: message too large` instead (issue #9 decision 3).
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
 use crate::mediatype::parse_media_type;
@@ -106,11 +108,18 @@ impl MultipartReader {
         self.next_part_opt(true, i64::MAX)
     }
 
-    /// Go `Reader.ReadForm`: `multipartmaxparts` (default 1000) and
-    /// `maxMemory + 10MB` for non-file values. File spill stays later.
+    /// Go `Reader.ReadForm`: `multipartmaxparts` (default 1000),
+    /// `maxMemory + 10MB` for non-file values, and `maxMemory` for in-memory
+    /// file content. Over the file budget throws instead of writing a temp file.
     pub fn read_form(&mut self, max_memory: i64) -> Result<MultipartForm, String> {
         const MAP_ENTRY_OVERHEAD: i64 = 200;
+        const FILE_HEADER_SIZE: i64 = 100;
         let mut max_memory_bytes = read_form_max_memory_bytes(max_memory);
+        let mut max_file_memory_bytes = if max_memory == i64::MAX {
+            max_memory - 1
+        } else {
+            max_memory
+        };
         let mut remaining = self.max_parts;
         let mut form = MultipartForm::default();
         loop {
@@ -137,14 +146,25 @@ impl MultipartReader {
                         let value = String::from_utf8_lossy(&part.body).into_owned();
                         append_value(&mut form.value, part.form_name, value);
                     } else {
-                        let size = part.body.len() as i64;
+                        max_memory_bytes -= mime_header_size(&part.header);
+                        max_memory_bytes -= MAP_ENTRY_OVERHEAD;
+                        max_memory_bytes -= FILE_HEADER_SIZE;
+                        if max_memory_bytes < 0 {
+                            return Err("multipart: message too large".into());
+                        }
+                        let n = part.body.len() as i64;
+                        if n > max_file_memory_bytes {
+                            return Err("multipart: message too large".into());
+                        }
+                        max_file_memory_bytes -= n;
+                        max_memory_bytes -= n;
                         append_file(
                             &mut form.file,
                             part.form_name,
                             FormFileHeader {
                                 filename: part.file_name,
                                 header: part.header,
-                                size,
+                                size: n,
                                 content: part.body,
                             },
                         );
@@ -437,6 +457,18 @@ fn read_form_max_memory_bytes(max_memory: i64) -> i64 {
         Some(_) if max_memory < 0 => 0,
         _ => i64::MAX,
     }
+}
+
+fn mime_header_size(header: &[(String, Vec<String>)]) -> i64 {
+    let mut size = 400;
+    for (key, values) in header {
+        size += key.len() as i64;
+        size += 200;
+        for value in values {
+            size += value.len() as i64;
+        }
+    }
+    size
 }
 
 fn read_mime_header(
@@ -1237,6 +1269,71 @@ Content-Transfer-Encoding: quoted-printable\r\n\
         let body = value_form_body("x", "hello");
         assert_eq!(
             read_form_err(&body, -(10 << 20)).unwrap_err(),
+            "multipart: message too large"
+        );
+    }
+
+    fn file_form_body(name: &str, filename: &str, content: &[u8]) -> Vec<u8> {
+        let mut w = MultipartWriter::new(Some("b".into())).unwrap();
+        let id = w.create_form_file(name, filename).unwrap();
+        w.write_part(id, content).unwrap();
+        w.end_part(id).unwrap();
+        w.finish().unwrap()
+    }
+
+    fn read_form_file_ok(body: &[u8], max_memory: i64) -> MultipartForm {
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        r.read_form(max_memory).unwrap()
+    }
+
+    fn read_form_file_err(body: &[u8], max_memory: i64) -> String {
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        r.read_form(max_memory).unwrap_err()
+    }
+
+    #[test]
+    fn read_form_file_over_max_memory_is_too_large() {
+        let body = file_form_body("f", "f.txt", &vec![b'x'; 1024]);
+        assert_eq!(
+            read_form_file_err(&body, 1023),
+            "multipart: message too large"
+        );
+        let form = read_form_file_ok(&body, 1024);
+        assert_eq!(form.file[0].1[0].content.len(), 1024);
+        assert_eq!(form.file[0].1[0].size, 1024);
+        assert_eq!(form.file[0].1[0].filename, "f.txt");
+    }
+
+    #[test]
+    fn read_form_two_files_share_max_memory_budget() {
+        let mut w = MultipartWriter::new(Some("b".into())).unwrap();
+        for name in ["a", "b"] {
+            let id = w.create_form_file(name, &format!("{name}.txt")).unwrap();
+            w.write_part(id, &vec![b'y'; 600]).unwrap();
+            w.end_part(id).unwrap();
+        }
+        let body = w.finish().unwrap();
+        assert_eq!(
+            read_form_file_err(&body, 1000),
+            "multipart: message too large"
+        );
+        let form = read_form_file_ok(&body, 1200);
+        assert_eq!(form.file.len(), 2);
+        assert_eq!(form.file[0].1[0].content.len(), 600);
+        assert_eq!(form.file[1].1[0].content.len(), 600);
+    }
+
+    #[test]
+    fn read_form_empty_file_fits_zero_max_memory() {
+        let body = file_form_body("f", "empty.txt", b"");
+        let form = read_form_file_ok(&body, 0);
+        assert_eq!(form.file[0].1[0].content.len(), 0);
+        assert_eq!(form.file[0].1[0].size, 0);
+        let one = file_form_body("f", "one.txt", b"x");
+        assert_eq!(
+            read_form_file_err(&one, 0),
             "multipart: message too large"
         );
     }

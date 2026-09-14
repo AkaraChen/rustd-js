@@ -814,7 +814,7 @@ type mpReadOut struct {
 type mpFormIn struct {
 	Boundary  string `json:"boundary"`
 	BodyHex   string `json:"bodyHex"`
-	MaxMemory int64  `json:"maxMemory"`
+	MaxMemory *int64 `json:"maxMemory"`
 }
 
 type mpFileOut struct {
@@ -822,6 +822,7 @@ type mpFileOut struct {
 	Header   map[string][]string `json:"header"`
 	Size     int64               `json:"size"`
 	BodyHex  string              `json:"bodyHex"`
+	Spilled  bool                `json:"spilled"`
 }
 
 type mpFormOut struct {
@@ -1005,9 +1006,9 @@ func handleMultipartReadForm() {
 	decodeStdinJSON(&in)
 	body := unhex(in.BodyHex)
 	r := multipart.NewReader(bytes.NewReader(body), in.Boundary)
-	maxMemory := in.MaxMemory
-	if maxMemory == 0 {
-		maxMemory = 1 << 20
+	maxMemory := int64(1 << 20)
+	if in.MaxMemory != nil {
+		maxMemory = *in.MaxMemory
 	}
 	out := mpFormOut{Value: map[string][]string{}, File: map[string][]mpFileOut{}}
 	form, err := r.ReadForm(maxMemory)
@@ -1039,6 +1040,7 @@ func handleMultipartReadForm() {
 				emitJSON(out)
 				return
 			}
+			_, part.Spilled = f.(*os.File)
 			slurp, readErr := io.ReadAll(f)
 			_ = f.Close()
 			part.BodyHex = hexOf(slurp)
