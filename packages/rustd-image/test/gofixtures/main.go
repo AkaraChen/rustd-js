@@ -87,6 +87,109 @@ func hex(b []byte) string {
 	return fmt.Sprintf("%x", b)
 }
 
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func dumpGifDecoded(raw []byte) map[string]any {
+	gall, err := gif.DecodeAll(bytes.NewReader(raw))
+	if err != nil {
+		panic(err)
+	}
+	var frames []gifFrame
+	for i, fr := range gall.Image {
+		tr := -1
+		for pi, c := range fr.Palette {
+			if n, ok := c.(color.NRGBA); ok && n.A == 0 {
+				tr = pi
+				break
+			}
+		}
+		palHex := ""
+		for _, c := range fr.Palette {
+			r, g, b, a := c.RGBA()
+			palHex += fmt.Sprintf("%02x%02x%02x%02x", r>>8, g>>8, b>>8, a>>8)
+		}
+		disp := byte(0)
+		if i < len(gall.Disposal) {
+			disp = gall.Disposal[i]
+		}
+		dly := 0
+		if i < len(gall.Delay) {
+			dly = gall.Delay[i]
+		}
+		frames = append(frames, gifFrame{
+			Pix:              pixdump(fr),
+			Width:            fr.Bounds().Dx(),
+			Height:           fr.Bounds().Dy(),
+			MinX:             fr.Bounds().Min.X,
+			MinY:             fr.Bounds().Min.Y,
+			Delay:            dly,
+			Disposal:         disp,
+			Palette:          palHex,
+			TransparentIndex: tr,
+		})
+	}
+	return map[string]any{
+		"bytesHex":         hex(raw),
+		"loopCount":        gall.LoopCount,
+		"backgroundIndex":  gall.BackgroundIndex,
+		"width":            gall.Config.Width,
+		"height":           gall.Config.Height,
+		"frames":           frames,
+	}
+}
+
+func stripJPEGDht(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	i := 0
+	if len(b) >= 2 {
+		out = append(out, b[0], b[1])
+		i = 2
+	}
+	for i < len(b) {
+		if b[i] != 0xff {
+			out = append(out, b[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(b) && b[j] == 0xff {
+			j++
+		}
+		if j >= len(b) {
+			out = append(out, b[i:]...)
+			break
+		}
+		marker := b[j]
+		if marker == 0xd8 || marker == 0xd9 || (marker >= 0xd0 && marker <= 0xd7) {
+			out = append(out, b[i:j+1]...)
+			i = j + 1
+			continue
+		}
+		if j+2 >= len(b) {
+			out = append(out, b[i:]...)
+			break
+		}
+		n := int(b[j+1])<<8 | int(b[j+2])
+		end := j + 1 + n
+		if end > len(b) {
+			out = append(out, b[i:]...)
+			break
+		}
+		if marker == 0xc4 {
+			i = end
+			continue
+		}
+		out = append(out, b[i:end]...)
+		i = end
+	}
+	return out
+}
+
 func dumpPNGFile(path, name string) dump {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -357,6 +460,80 @@ func main() {
 	srcPlan9 := image.NewPaletted(grad.Bounds(), palette.Plan9)
 	draw.Draw(srcPlan9, srcPlan9.Bounds(), grad, image.Point{}, draw.Src)
 
+	crcRaw, err := os.ReadFile(filepath.Join(pngDir, "invalid-crc32.png"))
+	if err != nil {
+		panic(err)
+	}
+	_, crcErr := png.Decode(bytes.NewReader(crcRaw))
+	_, crcCfgErr := png.DecodeConfig(bytes.NewReader(crcRaw))
+	zlibRaw, err := os.ReadFile(filepath.Join(pngDir, "invalid-zlib.png"))
+	if err != nil {
+		panic(err)
+	}
+	_, zlibErr := png.Decode(bytes.NewReader(zlibRaw))
+	zcfg, zcfgErr := png.DecodeConfig(bytes.NewReader(zlibRaw))
+
+	var j75 bytes.Buffer
+	if err := jpeg.Encode(&j75, nrgba, &jpeg.Options{Quality: 75}); err != nil {
+		panic(err)
+	}
+	noDht := stripJPEGDht(j75.Bytes())
+	_, jpegErr := jpeg.Decode(bytes.NewReader(noDht))
+	jcfgNo, jcfgErr := jpeg.DecodeConfig(bytes.NewReader(noDht))
+
+	singleGif := gif.GIF{Image: []*image.Paletted{f1}, Delay: []int{10}, LoopCount: 1}
+	var singleBuf bytes.Buffer
+	if err := gif.EncodeAll(&singleBuf, &singleGif); err != nil {
+		panic(err)
+	}
+
+	loop1Gif := gif.GIF{
+		Image:     []*image.Paletted{f1, f2},
+		Delay:     []int{10, 20},
+		LoopCount: 1,
+		Disposal:  []byte{gif.DisposalNone, gif.DisposalPrevious},
+		Config:    image.Config{ColorModel: color.Palette(palette.Plan9), Width: 8, Height: 8},
+	}
+	var loop1Buf bytes.Buffer
+	if err := gif.EncodeAll(&loop1Buf, &loop1Gif); err != nil {
+		panic(err)
+	}
+
+	cycleGif := gif.GIF{
+		Image:     []*image.Paletted{f1, f2},
+		Delay:     []int{10, 10},
+		LoopCount: 0,
+		Disposal:  []byte{gif.DisposalPrevious, gif.DisposalPrevious},
+		Config:    image.Config{ColorModel: color.Palette(palette.Plan9), Width: 8, Height: 8},
+	}
+	var cycleBuf bytes.Buffer
+	if err := gif.EncodeAll(&cycleBuf, &cycleGif); err != nil {
+		panic(err)
+	}
+
+	var gif256, gif300 bytes.Buffer
+	if err := gif.Encode(&gif256, nrgba, &gif.Options{NumColors: 256}); err != nil {
+		panic(err)
+	}
+	if err := gif.Encode(&gif300, nrgba, &gif.Options{NumColors: 300}); err != nil {
+		panic(err)
+	}
+	g256, err := gif.Decode(bytes.NewReader(gif256.Bytes()))
+	if err != nil {
+		panic(err)
+	}
+	g300, err := gif.Decode(bytes.NewReader(gif300.Bytes()))
+	if err != nil {
+		panic(err)
+	}
+
+	officialLoop1 := []byte("GIF89a000\x00000" +
+		"!\xff\vNETSCAPE2.0\x03\x01\x01\x00\x00" +
+		",0\x00\x00\x00\n\x00\n\x00\x80000000" +
+		"\x02\b\xf01u\xb9\xfdal\x05\x00" +
+		",0\x00\x00\x00\n\x00\n\x00\x80000000" +
+		"\x02\b\xf01u\xb9\xfdal\x05\x00;")
+
 	rng := rand.New(rand.NewSource(1))
 	var plan9Rand []idx
 	var webRand []idx
@@ -390,6 +567,41 @@ func main() {
 			"loopCount":       gall.LoopCount,
 			"backgroundIndex": gall.BackgroundIndex,
 			"frames":          gframes,
+		},
+		"pngCrcError": map[string]any{
+			"bytesHex":    hex(crcRaw),
+			"decodeError": errString(crcErr),
+			"configError": errString(crcCfgErr),
+		},
+		"pngZlibError": map[string]any{
+			"bytesHex":    hex(zlibRaw),
+			"decodeError": errString(zlibErr),
+			"configError": errString(zcfgErr),
+			"width":       zcfg.Width,
+			"height":      zcfg.Height,
+			"colorModel":  modelName(zcfg.ColorModel),
+		},
+		"jpegNoDht": map[string]any{
+			"bytesHex":    hex(noDht),
+			"decodeError": errString(jpegErr),
+			"configError": errString(jcfgErr),
+			"width":       jcfgNo.Width,
+			"height":      jcfgNo.Height,
+			"colorModel":  modelName(jcfgNo.ColorModel),
+		},
+		"gifSingle":     dumpGifDecoded(singleBuf.Bytes()),
+		"gifLoop1":      dumpGifDecoded(loop1Buf.Bytes()),
+		"gifCycle":      dumpGifDecoded(cycleBuf.Bytes()),
+		"gifOfficialLoop1": dumpGifDecoded(officialLoop1),
+		"gifNumColors256": map[string]any{
+			"pix":     pixdump(g256),
+			"palLen":  len(g256.(*image.Paletted).Palette),
+			"bytesHex": hex(gif256.Bytes()),
+		},
+		"gifNumColors300": map[string]any{
+			"pix":     pixdump(g300),
+			"palLen":  len(g300.(*image.Paletted).Palette),
+			"bytesHex": hex(gif300.Bytes()),
 		},
 	}
 

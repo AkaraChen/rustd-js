@@ -4,8 +4,10 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  pngDecode, pngDecodeConfig, pngEncode, jpegDecodeConfig, gifDecode, gifDecodeAll, gifDecodeConfig,
-  plan9Palette, webSafePalette, nrgba, draw, drawMask, quantize, Image, rect, PngFormatError,
+  pngDecode, pngDecodeConfig, pngEncode, jpegDecode, jpegDecodeConfig,
+  gifDecode, gifDecodeAll, gifDecodeConfig, gifEncode,
+  plan9Palette, webSafePalette, nrgba, draw, drawMask, quantize, Image, rect,
+  PngFormatError, JpegFormatError,
 } from '../index.mjs';
 
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -224,6 +226,101 @@ test('every truncated prefix of the Go 1×1 PNG throws PngFormatError', () => {
     );
   }
   pngDecode(buf);
+});
+
+function assertGifDecoded(name, extra) {
+  const buf = hexToBytes(extra.bytesHex);
+  const cfg = gifDecodeConfig(buf);
+  assert.equal(cfg.width, extra.width, `${name} config width`);
+  assert.equal(cfg.height, extra.height, `${name} config height`);
+  const decoded = gifDecodeAll(buf);
+  assert.equal(decoded.loopCount, extra.loopCount, `${name} loopCount`);
+  assert.equal(decoded.image.length, extra.frames.length, `${name} frame count`);
+  for (let i = 0; i < extra.frames.length; i++) {
+    const got = decoded.image[i];
+    const exp = extra.frames[i];
+    assert.equal(got.width, exp.width, `${name} frame ${i} width`);
+    assert.equal(got.height, exp.height, `${name} frame ${i} height`);
+    assert.equal(decoded.delay[i], exp.delay, `${name} frame ${i} delay`);
+    assert.equal(decoded.disposal[i], exp.disposal, `${name} frame ${i} disposal`);
+    assert.equal(pixdump(got), exp.pix, `${name} frame ${i} pixdump`);
+    got.dispose();
+  }
+}
+
+test('PNG CRC error is PngFormatError like Go invalid-crc32.png', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const buf = hexToBytes(extra.pngCrcError.bytesHex);
+  assert.match(extra.pngCrcError.decodeError, /checksum/);
+  assert.match(extra.pngCrcError.configError, /checksum/);
+  assert.throws(() => pngDecode(buf), PngFormatError);
+  assert.throws(() => pngDecodeConfig(buf), PngFormatError);
+});
+
+test('PNG zlib Adler-32 damage is PngFormatError; DecodeConfig still works', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const z = extra.pngZlibError;
+  const buf = hexToBytes(z.bytesHex);
+  assert.match(z.decodeError, /zlib/);
+  assert.equal(z.configError, '');
+  const cfg = pngDecodeConfig(buf);
+  assert.equal(cfg.width, z.width);
+  assert.equal(cfg.height, z.height);
+  assert.equal(cfg.colorModel, z.colorModel);
+  assert.throws(() => pngDecode(buf), PngFormatError);
+});
+
+test('JPEG missing DHT is JpegFormatError; DecodeConfig still works', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const j = extra.jpegNoDht;
+  const buf = hexToBytes(j.bytesHex);
+  assert.match(j.decodeError, /Huffman|huffman|DHT/i);
+  assert.equal(j.configError, '');
+  const cfg = jpegDecodeConfig(buf);
+  assert.equal(cfg.width, j.width);
+  assert.equal(cfg.height, j.height);
+  assert.equal(cfg.colorModel, j.colorModel);
+  assert.throws(() => jpegDecode(buf), JpegFormatError);
+});
+
+test('GIF NumberOfFrames=1 and LoopCount=1 match Go EncodeAll/DecodeAll', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  assert.equal(extra.gifSingle.frames.length, 1);
+  assert.equal(extra.gifSingle.loopCount, -1, 'Go omits NETSCAPE on a 1-frame GIF');
+  assertGifDecoded('gifSingle', extra.gifSingle);
+  assert.equal(extra.gifLoop1.frames.length, 2);
+  assert.equal(extra.gifLoop1.loopCount, 1);
+  assertGifDecoded('gifLoop1', extra.gifLoop1);
+  // Go's reader_test loopcount-1 bytes only promise LoopCount + two frames.
+  const official = gifDecodeAll(hexToBytes(extra.gifOfficialLoop1.bytesHex));
+  assert.equal(official.loopCount, extra.gifOfficialLoop1.loopCount);
+  assert.equal(official.image.length, extra.gifOfficialLoop1.frames.length);
+});
+
+test('GIF DisposalPrevious frame-reference cycle matches Go and does not hang', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  assert.deepEqual(extra.gifCycle.frames.map((_, i) => extra.gifCycle.frames[i].disposal), [3, 3]);
+  assert.equal(extra.gifCycle.loopCount, 0);
+  assertGifDecoded('gifCycle', extra.gifCycle);
+});
+
+test('gifEncode numColors>256 clamps like Go and pixdump matches', () => {
+  const { extra } = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  assert.equal(extra.gifNumColors256.pix, extra.gifNumColors300.pix);
+  assert.equal(extra.gifNumColors256.palLen, 256);
+  assert.equal(extra.gifNumColors300.palLen, 256);
+  const src = sampleNRGBA8();
+  const a = gifEncode(src, { numColors: 256 });
+  const b = gifEncode(src, { numColors: 300 });
+  const c = gifEncode(src, { numColors: 512 });
+  assert.equal(Buffer.compare(Buffer.from(a), Buffer.from(b)), 0);
+  assert.equal(Buffer.compare(Buffer.from(a), Buffer.from(c)), 0);
+  const fromGo256 = gifDecode(hexToBytes(extra.gifNumColors256.bytesHex));
+  const fromGo300 = gifDecode(hexToBytes(extra.gifNumColors300.bytesHex));
+  assert.equal(pixdump(fromGo256), extra.gifNumColors256.pix);
+  assert.equal(pixdump(fromGo300), extra.gifNumColors300.pix);
+  fromGo256.dispose();
+  fromGo300.dispose();
 });
 
 test('Plan9 and WebSafe Index match Go on 1024 random NRGBA colors', () => {

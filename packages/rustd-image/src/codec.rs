@@ -73,8 +73,16 @@ fn png_reject_empty(width: u32, height: u32) -> Result<(), ImageError> {
     Ok(())
 }
 
+/// Go verifies zlib Adler-32 (`png: invalid format: zlib: invalid checksum`).
+/// The `png` crate defaults to `ignore_adler32 = true`.
+fn png_decoder(buf: &[u8]) -> png::Decoder<Cursor<&[u8]>> {
+    let mut opts = png::DecodeOptions::default();
+    opts.set_ignore_adler32(false);
+    png::Decoder::new_with_options(Cursor::new(buf), opts)
+}
+
 pub fn png_decode_config(buf: &[u8]) -> Result<Config, ImageError> {
-    let decoder = png::Decoder::new(Cursor::new(buf));
+    let decoder = png_decoder(buf);
     let reader = decoder.read_info().map_err(map_png)?;
     let info = reader.info();
     png_reject_empty(info.width, info.height)?;
@@ -185,7 +193,7 @@ fn put_nrgba64(pix: &mut [u8], i: usize, r: u16, g: u16, b: u16, a: u16) {
 
 pub fn png_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageError> {
     png_require_iend(buf)?;
-    let decoder = png::Decoder::new(Cursor::new(buf));
+    let decoder = png_decoder(buf);
     let mut reader = decoder.read_info().map_err(map_png)?;
     let info = reader.info().clone();
     png_reject_empty(info.width, info.height)?;
@@ -530,9 +538,65 @@ pub fn jpeg_decode_config(buf: &[u8]) -> Result<Config, ImageError> {
     jpeg_config_from_bytes(buf)
 }
 
+/// Go's `jpeg.Decode` errors with `uninitialized Huffman table` when no DHT
+/// appears before SOS. `DecodeConfig` only needs SOF and must still succeed.
+fn jpeg_require_dht(buf: &[u8]) -> Result<(), ImageError> {
+    if buf.len() < 2 || buf[0] != 0xff || buf[1] != 0xd8 {
+        return Err(ImageError::new("JpegFormatError", "jpeg: missing SOI"));
+    }
+    let mut i = 2usize;
+    let mut seen_dht = false;
+    while i + 1 <= buf.len() {
+        if buf[i] != 0xff {
+            i += 1;
+            continue;
+        }
+        while i < buf.len() && buf[i] == 0xff {
+            i += 1;
+        }
+        if i >= buf.len() {
+            break;
+        }
+        let marker = buf[i];
+        i += 1;
+        if marker == 0xd8 || marker == 0xd9 || (0xd0..=0xd7).contains(&marker) {
+            continue;
+        }
+        if i + 2 > buf.len() {
+            break;
+        }
+        let len = u16::from_be_bytes([buf[i], buf[i + 1]]) as usize;
+        if len < 2 || i + len > buf.len() {
+            return Err(ImageError::new("JpegFormatError", "jpeg: truncated marker"));
+        }
+        i += len;
+        match marker {
+            0xc4 => seen_dht = true,
+            0xda => {
+                if !seen_dht {
+                    return Err(ImageError::new(
+                        "JpegFormatError",
+                        "jpeg: uninitialized Huffman table",
+                    ));
+                }
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+    if !seen_dht {
+        return Err(ImageError::new(
+            "JpegFormatError",
+            "jpeg: uninitialized Huffman table",
+        ));
+    }
+    Ok(())
+}
+
 pub fn jpeg_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageError> {
     let cfg = jpeg_config_from_bytes(buf)?;
     too_large(cfg.width, cfg.height, max_pixels)?;
+    jpeg_require_dht(buf)?;
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(buf));
     let pixels = decoder
         .decode()
@@ -738,13 +802,17 @@ pub fn gif_encode_all(
     {
         let mut encoder = gif::Encoder::new(&mut out, w, h, &global)
             .map_err(|e| ImageError::new("GifFormatError", e.to_string()))?;
-        encoder
-            .set_repeat(if loop_count < 0 {
-                gif::Repeat::Infinite
-            } else {
-                gif::Repeat::Finite(loop_count as u16)
-            })
-            .map_err(|e| ImageError::new("GifFormatError", e.to_string()))?;
+        // Match Go EncodeAll: NETSCAPE only when there are 2+ frames and LoopCount >= 0.
+        // LoopCount 0 = infinite; negative = play once (omit the extension).
+        if frames.len() > 1 && loop_count >= 0 {
+            encoder
+                .set_repeat(if loop_count == 0 {
+                    gif::Repeat::Infinite
+                } else {
+                    gif::Repeat::Finite(loop_count as u16)
+                })
+                .map_err(|e| ImageError::new("GifFormatError", e.to_string()))?;
+        }
         for (i, frame_img) in frames.iter().enumerate() {
             let mut indices = vec![0u8; (w as usize) * (h as usize)];
             for y in 0..frame_img.height() {
