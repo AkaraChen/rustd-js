@@ -8,28 +8,26 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | 包名 | 已合 / 对应分支 | 状态 |
 |---|---|---|
 | rustd-checksum | `pkg/rustd-checksum-grok-bulk-3` | merged |
-| rustd-containers | `pkg/rustd-containers-grok-bulk-2` | merged |
-| rustd-compress | `pkg/rustd-compress-grok-bulk-9` @ `4af21a6` | merged (initial `59e3167` + follow-up bzip2 hello-9 truncation tests) |
+| rustd-containers | `pkg/rustd-containers-grok-bulk-2` | merged; follow-up `d0fe087` pending (`7ed487b` **is** an ancestor) |
+| rustd-compress | `pkg/rustd-compress-grok-bulk-9` @ `4af21a6` | merged; follow-up `760570d` pending (`4af21a6` **is** an ancestor; LZW leftover bits) |
 | rustd-compress | `pkg/rustd-compress-grok-bulk-worker` | superseded by `pkg/rustd-compress-grok-bulk-9` (ancestor of the merge) |
-| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `a23cfc0` | merged |
+| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `a23cfc0` | merged; follow-up `cb16c2a` pending (`a23cfc0` **is** an ancestor; pax mtime) |
 | rustd-archive | `pkg/rustd-archive-grok-bulk-3` | superseded by `pkg/rustd-archive-grok-bulk-6` |
-| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `f2d0491` | superseded — rewritten parallel history; replaced by later tip `8f86f68` |
-| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `8f86f68` | pending follow-up (`a23cfc0` **is** an ancestor; GNU L/K + unknown pax/typeflag tests) |
-| rustd-serial | `pkg/rustd-serial-grok-bulk-7` @ `39a26ca` | merged |
+| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `f2d0491` | superseded — rewritten parallel history; replaced by later descendant tips |
+| rustd-serial | `pkg/rustd-serial-grok-bulk-7` @ `39a26ca` | merged; follow-up `0a51358` pending (`39a26ca` **is** an ancestor; XML Decode schema) |
 | rustd-serial | `pkg/rustd-serial-grok-bulk-worker` | superseded by `pkg/rustd-serial-grok-bulk-7` (ancestor of the merge) |
-| rustd-serial | `pkg/rustd-serial-grok-bulk-7` @ `1a50b16` | **do not merge** — rewritten parallel history after merge (not a descendant of `39a26ca`) |
-| rustd-image | `pkg/rustd-image-grok-bulk-8` @ `ac8f590` | merged |
+| rustd-serial | `pkg/rustd-serial-grok-bulk-7` @ `1a50b16` | superseded — rewritten parallel history; replaced by descendant `0a51358` |
+| rustd-image | `pkg/rustd-image-grok-bulk-8` @ `ac8f590` | merged; follow-up `a4fa7cb` pending (`ac8f590` **is** an ancestor; reverse interop) |
 | rustd-image | `pkg/rustd-image-grok-bulk-2` | superseded by `pkg/rustd-image-grok-bulk-8` |
-| rustd-image | `pkg/rustd-image-grok-bulk-8` @ `cfcb031` | pending follow-up (`0da14ff` **is** an ancestor; npm pack CJS/ESM smoke) |
 | rustd-log | `pkg/rustd-log-grok-bulk-4` | merged |
+| rustd-unicode | `pkg/rustd-unicode-grok-bulk-worker` @ `f210fc7` | merged (`b03be1c`) |
+| rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` @ `38c8e45` | merged (`837c659`) |
+| rustd-encoding | `pkg/rustd-encoding-grok-bulk-2` @ `b5f930e` | rejected this round — `pnpm-lock.yaml` conflict vs `rustd-log`; tests were green |
+| rustd-mathx | `pkg/rustd-mathx-grok-bulk-10` | pending |
+| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `ca892a9` | pending — still pre-log merge-base `0da14ff`; likely same lockfile conflict |
 | rustd-testing | `pkg/rustd-testing-grok-bulk-6` | rejected-by-owner (issue #20, 2026-09-14) |
 | rustd-std | `pkg/rustd-std-*` | rejected-by-owner (issue #29, 2026-09-14); no current unmerged branch |
-| rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` | pending |
-| rustd-unicode | `pkg/rustd-unicode-grok-bulk-worker` | pending |
-| rustd-encoding | `pkg/rustd-encoding-grok-bulk-2` | pending |
-| rustd-mathx | `pkg/rustd-mathx-grok-bulk-10` | pending |
-| rustd-mime | `pkg/rustd-mime-grok-bulk-3` @ `40d4345` | rejected this round — `pnpm-lock.yaml` conflict vs `rustd-log`; tests were green |
-| rustd-debugfmt | `pkg/rustd-debugfmt-grok-bulk-5` | pending |
+| rustd-debugfmt | `pkg/rustd-debugfmt-grok-bulk-5` | rejected-by-owner (issue #18; owner cut 2026-09-15: largest binary, niche) |
 
 ## Round 2026-09-14T17:33:03+02:00
 
@@ -198,6 +196,78 @@ Suggested next three: image follow-up (`cfcb031`), `rustd-mathx` (`bulk-10`), `r
 ### Notes
 
 - Owner skip list now in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29).
+- `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
+- `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
+- Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
+- Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
+
+## Round 2026-09-14T18:31:51+02:00
+
+Agent: `grok-integrator`  
+`origin/main` before: `befb9d6`  
+`origin/main` after: `837c659` (this file lands as a follow-up commit)
+
+Priority this round: first-time remaining packages from the owner 12 (`unicode`, `encoding`, `gotool`). Follow-ups of already-merged packages deferred.
+
+### Merged (verified green, `--no-ff`, pushed)
+
+| 分支 | 包 | 验证 | merge sha |
+|---|---|---|---|
+| `pkg/rustd-unicode-grok-bulk-worker` @ `f210fc7` | rustd-unicode | build + 24 tests pass | `b03be1c` |
+| `pkg/rustd-gotool-grok-bulk-4` @ `38c8e45` | rustd-gotool | build + 14 tests pass (6 `unused_assignments`/`dead_code` warnings in parser/scanner/ast/print/token, not a failure) | `837c659` |
+
+### Rejected
+
+- `pkg/rustd-encoding-grok-bulk-2` @ `b5f930e` — **build+test green** (17 tests) but `git merge --no-ff` conflicted. `git merge --abort`. Not merged.
+  First 40 lines of conflict:
+
+```
+Auto-merging pnpm-lock.yaml
+CONFLICT (content): Merge conflict in pnpm-lock.yaml
+Automatic merge failed; fix conflicts and then commit the result.
+--- conflicted files ---
+pnpm-lock.yaml
+--- importers on origin/main ---
+  packages/_template: {}
+  packages/rustd-crypto: {}
+  packages/rustd-log: {}
+--- importers on encoding branch ---
+  packages/_template: {}
+  packages/rustd-crypto: {}
+  packages/rustd-encoding: {}
+```
+
+  Cause: encoding merge-base is `0d5273d` (pre-log). After `rustd-log` landed, both sides add a different `importers` entry. Worker should rebase onto current `origin/main` and re-push. LoopX `todo update --note` on `todo_2f742a305406` was refused (`agent_id=grok-integrator` cannot update a todo `claimed_by=grok-bulk-worker`).
+
+- `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20). Skipped, branch not modified.
+- `pkg/rustd-debugfmt-grok-bulk-5` — `rejected-by-owner` (issue #18; owner cut: largest binary, niche). Skipped, branch not modified.
+
+### Superseded / do-not-merge
+
+- `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — still superseded by `pkg/rustd-image-grok-bulk-8`.
+- `pkg/rustd-serial-grok-bulk-7` @ `1a50b16` — superseded; later tip `0a51358` **is** a descendant of merged `39a26ca`.
+- `pkg/rustd-compress-grok-bulk-9` @ `27cc87d` — earlier non-descendant rewrite; later tip `760570d` **is** a descendant of merged `4af21a6`.
+
+### Not processed this round (oldest first; max 3 packages/round)
+
+1. `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — skip; superseded
+2. `pkg/rustd-testing-grok-bulk-6` (`9fc9508`) — skip; rejected-by-owner
+3. `pkg/rustd-serial-grok-bulk-7` follow-up `0a51358` — safe (`39a26ca` is ancestor); deferred (first-time packages first)
+4. `pkg/rustd-encoding-grok-bulk-2` (`b5f930e`) — waiting on rebase after lockfile conflict
+5. `pkg/rustd-mathx-grok-bulk-10` (`c6b8e8e`) — first-time remaining
+6. `pkg/rustd-containers-grok-bulk-2` follow-up `d0fe087` — safe (`7ed487b` is ancestor)
+7. `pkg/rustd-image-grok-bulk-8` follow-up `a4fa7cb` — safe (`ac8f590` is ancestor)
+8. `pkg/rustd-debugfmt-grok-bulk-5` (`f17e348`) — skip; rejected-by-owner
+9. `pkg/rustd-archive-grok-bulk-6` follow-up `cb16c2a` — safe (`a23cfc0` is ancestor)
+10. `pkg/rustd-compress-grok-bulk-9` follow-up `760570d` — safe (`4af21a6` is ancestor)
+11. `pkg/rustd-mime-grok-bulk-3` (`ca892a9`) — waiting on rebase (merge-base still `0da14ff`)
+
+Suggested next three: `rustd-mathx` (`bulk-10`), encoding after rebase, mime after rebase. If encoding/mime still un-rebased, take mathx + oldest safe follow-ups (serial `0a51358`, containers `d0fe087`).
+
+### Notes
+
+- Owner skip list now in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
+- First-time remaining of the owner 12: `encoding` (rebase), `mime` (rebase), `mathx`. `mail` still in progress on grok-bulk-worker.
 - `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
 - `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
