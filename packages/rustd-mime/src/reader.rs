@@ -1,7 +1,7 @@
 //! Go `mime/multipart.Reader.NextPart` (Go 1.24 `multipart.go`) for a complete body.
 //!
-//! This slice parses a fully buffered body. Incremental 1-byte `write`/`nextPart`
-//! interleaving and ReadForm limits are later.
+//! This slice parses a fully buffered one-part or multi-field body. Incremental
+//! 1-byte `write`/`nextPart` interleaving and ReadForm limits are later.
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
 use crate::mediatype::parse_media_type;
@@ -486,5 +486,69 @@ mod tests {
         let mut r = MultipartReader::new(String::new());
         r.write(b"--\r\n\r\n--\r\n");
         assert_eq!(r.next_part().unwrap_err(), "multipart: boundary is empty");
+    }
+
+    fn collect_parts(boundary: &str, body: &[u8]) -> Vec<MultipartPart> {
+        let mut r = MultipartReader::new(boundary.into());
+        r.write(body);
+        let mut parts = Vec::new();
+        loop {
+            match r.next_part().unwrap() {
+                Some(p) => parts.push(p),
+                None => break,
+            }
+        }
+        assert!(r.next_part().unwrap().is_none());
+        parts
+    }
+
+    #[test]
+    fn next_part_multi_field_matches_writer() {
+        let mut w = MultipartWriter::new(Some("boundary".into())).unwrap();
+        w.write_field("foo", "bar").unwrap();
+        w.write_field("a\"b", "x\\y").unwrap();
+        w.write_field("empty", "").unwrap();
+        let body = w.finish().unwrap();
+        let parts = collect_parts("boundary", &body);
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].form_name, "foo");
+        assert_eq!(parts[0].file_name, "");
+        assert_eq!(parts[0].body, b"bar");
+        assert_eq!(parts[1].form_name, "a\"b");
+        assert_eq!(parts[1].body, b"x\\y");
+        assert_eq!(parts[2].form_name, "empty");
+        assert_eq!(parts[2].body, b"");
+        assert_eq!(
+            parts[1].header.iter().find(|(k, _)| k == "Content-Disposition").unwrap().1,
+            ["form-data; name=\"a\\\"b\""]
+        );
+    }
+
+    #[test]
+    fn next_part_mixed_create_form_field_and_write_field() {
+        let mut w = MultipartWriter::new(Some("MIMEBOUNDARY".into())).unwrap();
+        let id = w.create_form_field("note").unwrap();
+        w.write_part(id, b"hello\r\nworld").unwrap();
+        w.end_part(id).unwrap();
+        w.write_field("n", "1").unwrap();
+        let body = w.finish().unwrap();
+        let parts = collect_parts("MIMEBOUNDARY", &body);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].form_name, "note");
+        assert_eq!(parts[0].body, b"hello\r\nworld");
+        assert_eq!(parts[1].form_name, "n");
+        assert_eq!(parts[1].body, b"1");
+    }
+
+    #[test]
+    fn next_part_body_containing_boundary_without_crlf_prefix() {
+        let mut w = MultipartWriter::new(Some("bound".into())).unwrap();
+        w.write_field("keep", "hello--bound--world").unwrap();
+        w.write_field("after", "ok").unwrap();
+        let body = w.finish().unwrap();
+        let parts = collect_parts("bound", &body);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].body, b"hello--bound--world");
+        assert_eq!(parts[1].body, b"ok");
     }
 }

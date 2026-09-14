@@ -106,3 +106,78 @@ test('nextPart returns null after the last part', () => {
   assert.equal(reader.nextPart(), null);
   assert.equal(reader.nextPart(), null);
 });
+
+function assertPartsMatch(parts, goParts) {
+  assert.equal(goParts.error ?? '', '');
+  assert.equal(parts.length, goParts.parts.length);
+  for (let i = 0; i < parts.length; i++) {
+    assert.equal(parts[i].formName, goParts.parts[i].formName, `formName[${i}]`);
+    assert.equal(parts[i].fileName, goParts.parts[i].fileName, `fileName[${i}]`);
+    assert.equal(parts[i].bodyHex, goParts.parts[i].bodyHex, `bodyHex[${i}]`);
+    assert.equal(
+      parts[i].header['Content-Disposition'][0],
+      goParts.parts[i].header['Content-Disposition'][0],
+      `Content-Disposition[${i}]`,
+    );
+  }
+}
+
+test('nextPart of Go Writer multi-field body matches Go NewReader', () => {
+  const fields = [
+    { name: 'foo', value: 'bar', mode: 'writeField' },
+    { name: 'a"b', value: 'x\\y', mode: 'writeField' },
+    { name: 'empty', value: '', mode: 'writeField' },
+  ];
+  const golden = goWrite(fields, 'boundary');
+  assert.equal(golden.error ?? '', '');
+  const body = unhex(golden.bodyHex);
+  const goParts = goRead(body, 'boundary');
+  const parts = readAll('boundary', body);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts.length, 3);
+  assert.equal(parts[2].bodyHex, '');
+});
+
+test('nextPart of Go mixed CreateFormField+WriteField body matches Go NewReader', () => {
+  const fields = [
+    { name: 'note', value: 'hello\r\nworld', mode: 'createFormField' },
+    { name: 'n', value: '1', mode: 'writeField' },
+  ];
+  const golden = goWrite(fields, 'MIMEBOUNDARY');
+  assert.equal(golden.error ?? '', '');
+  const body = unhex(golden.bodyHex);
+  const goParts = goRead(body, 'MIMEBOUNDARY');
+  const parts = readAll('MIMEBOUNDARY', body);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].bodyHex, hex(Buffer.from('hello\r\nworld')));
+});
+
+test('nextPart of native Writer multi-field roundtrips vs Go NewReader', () => {
+  const w = new MultipartWriter({ boundary: 'abc' });
+  w.writeField('key', 'val');
+  w.writeField('empty', '');
+  const part = w.createFormField('note');
+  part.write(Buffer.from('chunk-a'));
+  part.write(Buffer.from('chunk-b'));
+  part.end();
+  const body = w.bytes();
+  const goParts = goRead(body, 'abc');
+  const parts = readAll('abc', body);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts.length, 3);
+  assert.equal(parts[2].formName, 'note');
+  assert.equal(parts[2].bodyHex, hex(Buffer.from('chunk-achunk-b')));
+});
+
+test('nextPart keeps a body that contains the boundary without a CRLF prefix', () => {
+  const fields = [
+    { name: 'keep', value: 'hello--bound--world', mode: 'writeField' },
+    { name: 'after', value: 'ok', mode: 'writeField' },
+  ];
+  const golden = goWrite(fields, 'bound');
+  const body = unhex(golden.bodyHex);
+  const goParts = goRead(body, 'bound');
+  const parts = readAll('bound', body);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].bodyHex, hex(Buffer.from('hello--bound--world')));
+});
