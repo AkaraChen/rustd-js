@@ -124,17 +124,56 @@ test('Go hello-9 truncation at every offset matches native error text', () => {
   assert.ok(errors >= 50, `hello-9-trunc errors ${errors}`);
 });
 
-test('bzip2DecompressStream yields the same bytes', async () => {
+test('bzip2DecompressStream matches one-shot and Bzip2Decompressor across splits', async () => {
   const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
-  const happy = packet.bzip.find((c) => c.id === 'lcg4k-9');
+  const ids = ['hello-1', 'hello-9', 'concat-hello', 'lcg4k-9'];
+  for (const id of ids) {
+    const fixture = packet.bzip.find((c) => c.id === id);
+    assert.ok(fixture, id);
+    const data = Buffer.from(fixture.compressedB64, 'base64');
+    const expected = bzip2Decompress(data);
+    assert.equal(sha(expected), fixture.sha256, `${id} one-shot`);
+    for (const size of [1, 2, 3, 7, 64, 1024, data.length]) {
+      const classChunks = [];
+      const dec = new Bzip2Decompressor();
+      for (let i = 0; i < data.length; i += size) {
+        dec.write(data.subarray(i, i + size));
+        for (;;) {
+          const part = dec.read();
+          if (!part.length) break;
+          classChunks.push(part);
+        }
+      }
+      dec.end();
+      for (;;) {
+        const part = dec.read();
+        if (!part.length) break;
+        classChunks.push(part);
+      }
+      assert.equal(sha(Buffer.concat(classChunks)), sha(expected), `${id} class split ${size}`);
+
+      async function* chunks() {
+        for (let i = 0; i < data.length; i += size) {
+          yield data.subarray(i, i + size);
+        }
+      }
+      const streamChunks = [];
+      for await (const part of bzip2DecompressStream(chunks())) streamChunks.push(part);
+      assert.equal(sha(Buffer.concat(streamChunks)), sha(expected), `${id} stream split ${size}`);
+    }
+  }
+});
+
+test('bzip2DecompressStream truncated input throws Bzip2FormatError', async () => {
+  const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const happy = packet.bzip.find((c) => c.id === 'hello-9');
   const data = Buffer.from(happy.compressedB64, 'base64');
   async function* chunks() {
-    yield data.subarray(0, 10);
-    yield data.subarray(10);
+    yield data.subarray(0, 2);
   }
-  const out = [];
-  for await (const part of bzip2DecompressStream(chunks())) out.push(part);
-  assert.equal(sha(Buffer.concat(out)), happy.sha256);
+  await assert.rejects(async () => {
+    for await (const part of bzip2DecompressStream(chunks())) void part;
+  }, Bzip2FormatError);
 });
 
 test('reset reuses a decompressor', () => {
@@ -149,6 +188,70 @@ test('reset reuses a decompressor', () => {
   dec.write(data);
   dec.end();
   assert.equal(sha(dec.read()), happy.sha256);
+});
+
+test('streaming write does not keep the full compressed input', () => {
+  const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+  const happy = packet.bzip.find((c) => c.id === 'lcg4k-9');
+  const data = Buffer.from(happy.compressedB64, 'base64');
+  const chunkSize = 64;
+  const dec = new Bzip2Decompressor({ chunkSize });
+  const out = [];
+  for (let i = 0; i < data.length; i += chunkSize) {
+    dec.write(data.subarray(i, i + chunkSize));
+    // Small members wait for end() because the vendor decoder wants a block's
+    // worth of input; pending may grow to the whole (tiny) stream.
+    assert.ok(dec.bufferedInputBytes() <= data.length, `buffered ${dec.bufferedInputBytes()} after ${i}`);
+    for (;;) {
+      const part = dec.read(32);
+      if (!part.length) break;
+      out.push(part);
+    }
+  }
+  dec.end();
+  assert.equal(dec.bufferedInputBytes(), 0);
+  for (;;) {
+    const part = dec.read(32);
+    if (!part.length) break;
+    out.push(part);
+  }
+  assert.equal(sha(Buffer.concat(out)), happy.sha256);
+});
+
+test('8MiB random bzip2 streams with bounded native input', () => {
+  const plain = Buffer.alloc(8 << 20);
+  for (let i = 0; i < plain.length; i += 4) plain.writeUInt32LE((i * 1103515245 + 12345) >>> 0, i);
+  const packed = spawnSync('bzip2', ['-1', '-c'], { input: plain, maxBuffer: 16 << 20, timeout: 60000 });
+  assert.equal(packed.status, 0, packed.stderr);
+  const data = packed.stdout;
+  assert.ok(data.length > 1 << 20, `compressed ${data.length}`);
+  const chunkSize = 64 << 10;
+  const dec = new Bzip2Decompressor({ chunkSize });
+  const out = [];
+  let peak = 0;
+  let produced = 0;
+  for (let i = 0; i < data.length; i += chunkSize) {
+    dec.write(data.subarray(i, i + chunkSize));
+    peak = Math.max(peak, dec.bufferedInputBytes());
+    const cap = produced ? chunkSize : 1 << 20;
+    assert.ok(dec.bufferedInputBytes() <= cap, `buffered ${dec.bufferedInputBytes()} cap ${cap}`);
+    for (;;) {
+      const part = dec.read(chunkSize);
+      if (!part.length) break;
+      produced += part.length;
+      out.push(part);
+    }
+  }
+  dec.end();
+  for (;;) {
+    const part = dec.read(chunkSize);
+    if (!part.length) break;
+    out.push(part);
+  }
+  assert.equal(Buffer.concat(out).length, plain.length);
+  assert.equal(sha(Buffer.concat(out)), sha(plain));
+  assert.ok(peak <= 1 << 20, `peak buffered ${peak}`);
+  assert.ok(produced > 0, 'first block must stream before end()');
 });
 
 test('outputs are independent copies', () => {

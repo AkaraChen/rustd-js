@@ -1,7 +1,7 @@
 mod lzw_go;
 
 use bzip2_rs::decoder::{Decoder, ReadState, WriteState};
-use lzw_go::{decode_all as lzw_go_decode, GoEncoder};
+use lzw_go::{decode_all as lzw_go_decode, GoDecoder, GoEncoder};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use weezl::BitOrder;
@@ -243,17 +243,55 @@ pub fn lzw_decompress(data: Uint8Array, order: String, lit_width: u32) -> Result
     Ok(lzw_decode_all(bit_order(&order)?, width, data.as_ref())?.into())
 }
 
+fn restart_concat(decoder: &mut Decoder, input: &mut Vec<u8>) {
+    let unread = decoder.unread_bytes().to_vec();
+    *decoder = Decoder::new();
+    if unread.is_empty() {
+        return;
+    }
+    let mut rest = unread;
+    rest.extend_from_slice(input);
+    *input = rest;
+}
+
+fn looks_like_member(bytes: &[u8]) -> bool {
+    bytes.len() >= 3 && bytes.starts_with(b"BZh")
+}
+
+fn pump_members(
+    decoder: &mut Decoder,
+    input: &mut Vec<u8>,
+    output: &mut Vec<u8>,
+    offset: &mut u64,
+    ended: bool,
+) -> Result<bool> {
+    loop {
+        let member_eof = pump_bzip(decoder, input, output, offset, ended)?;
+        if !member_eof {
+            return Ok(false);
+        }
+        let unread = decoder.unread_bytes();
+        if looks_like_member(unread) || (unread.is_empty() && looks_like_member(input)) {
+            restart_concat(decoder, input);
+            continue;
+        }
+        return Ok(true);
+    }
+}
+
 #[napi]
 pub struct NativeBzip2Decompressor {
     decoder: Decoder,
     input: Vec<u8>,
     output: Vec<u8>,
-    compressed: Vec<u8>,
-    emitted: usize,
+    /// Whole-input copy kept only until the first decompressed byte. The
+    /// vendor decoder over-reads, so small/concat streams still need this to
+    /// split members. Cleared once true streaming has started.
+    pending: Vec<u8>,
+    streamed: bool,
     offset: u64,
     chunk_size: usize,
     ended: bool,
-    eof: bool,
 }
 
 #[napi]
@@ -271,12 +309,11 @@ impl NativeBzip2Decompressor {
             decoder: Decoder::new(),
             input: Vec::new(),
             output: Vec::new(),
-            compressed: Vec::new(),
-            emitted: 0,
+            pending: Vec::new(),
+            streamed: false,
             offset: 0,
             chunk_size: chunk_size as usize,
             ended: false,
-            eof: false,
         })
     }
 
@@ -285,43 +322,49 @@ impl NativeBzip2Decompressor {
         if self.ended {
             return Err(bzip_err(self.offset, "write after end"));
         }
-        self.compressed.extend_from_slice(chunk.as_ref());
+        if !self.streamed {
+            self.pending.extend_from_slice(chunk.as_ref());
+        }
         self.input.extend_from_slice(chunk.as_ref());
-        self.eof = pump_bzip(
+        pump_members(
             &mut self.decoder,
             &mut self.input,
             &mut self.output,
             &mut self.offset,
             false,
         )?;
-        if self.input.len() > self.chunk_size {
-            self.eof = pump_bzip(
-                &mut self.decoder,
-                &mut self.input,
-                &mut self.output,
-                &mut self.offset,
-                false,
-            )?;
+        if !self.output.is_empty() {
+            self.streamed = true;
+            self.pending.clear();
         }
         Ok(())
     }
 
     #[napi]
     pub fn read(&mut self, max_bytes: Option<u32>) -> Uint8Array {
-        let out = take_out(&mut self.output, max_bytes);
-        self.emitted += out.len();
-        out
+        take_out(&mut self.output, max_bytes)
     }
 
     #[napi]
     pub fn end(&mut self) -> Result<()> {
         self.ended = true;
-        let full = decompress_all(&self.compressed)?;
-        if self.emitted > full.len() {
+        if !self.pending.is_empty() && !self.streamed {
+            let full = decompress_all(&self.pending)?;
+            self.output = full;
+            self.pending.clear();
+            self.input.clear();
+            return Ok(());
+        }
+        let done = pump_members(
+            &mut self.decoder,
+            &mut self.input,
+            &mut self.output,
+            &mut self.offset,
+            true,
+        )?;
+        if !done {
             return Err(bzip_err(self.offset, "unexpected EOF"));
         }
-        self.output = full[self.emitted..].to_vec();
-        self.eof = true;
         Ok(())
     }
 
@@ -331,13 +374,24 @@ impl NativeBzip2Decompressor {
             decoder: Decoder::new(),
             input: Vec::new(),
             output: Vec::new(),
-            compressed: Vec::new(),
-            emitted: 0,
+            pending: Vec::new(),
+            streamed: false,
             offset: 0,
             chunk_size: self.chunk_size,
             ended: false,
-            eof: false,
         };
+    }
+
+    /// Unconsumed write queue plus any pre-stream pending copy. After the first
+    /// decompressed byte this is only the decoder's unconsumed `input`.
+    #[napi]
+    pub fn debug_input_len(&self) -> u32 {
+        let n = if self.streamed {
+            self.input.len()
+        } else {
+            self.input.len().max(self.pending.len())
+        };
+        n as u32
     }
 }
 
@@ -345,9 +399,9 @@ impl NativeBzip2Decompressor {
 pub struct NativeLzwDecompressor {
     order: BitOrder,
     lit_width: u8,
-    compressed: Vec<u8>,
+    decoder: GoDecoder,
     output: Vec<u8>,
-    emitted: usize,
+    consumed: u64,
     ended: bool,
 }
 
@@ -360,43 +414,49 @@ impl NativeLzwDecompressor {
         Ok(Self {
             order,
             lit_width: width,
-            compressed: Vec::new(),
+            decoder: GoDecoder::new(order, width),
             output: Vec::new(),
-            emitted: 0,
+            consumed: 0,
             ended: false,
         })
+    }
+
+    fn bit_loc(&self) -> u64 {
+        self.consumed.saturating_mul(8)
+    }
+
+    fn drain(&mut self) {
+        self.output.extend(self.decoder.take_decoded());
     }
 
     #[napi]
     pub fn write(&mut self, chunk: Uint8Array) -> Result<()> {
         if self.ended {
-            return Err(lzw_fmt(
-                (self.compressed.len() as u64).saturating_mul(8),
-                "lzw: write after end",
-            ));
+            return Err(lzw_fmt(self.bit_loc(), "lzw: write after end"));
         }
-        self.compressed.extend_from_slice(chunk.as_ref());
+        self.consumed += chunk.len() as u64;
+        self.decoder
+            .write(chunk.as_ref())
+            .map_err(|err| lzw_fmt(self.bit_loc(), err.message()))?;
+        self.drain();
         Ok(())
     }
 
     #[napi]
     pub fn read(&mut self, max_bytes: Option<u32>) -> Uint8Array {
-        let out = take_out(&mut self.output, max_bytes);
-        self.emitted += out.len();
-        out
+        take_out(&mut self.output, max_bytes)
     }
 
     #[napi]
     pub fn end(&mut self) -> Result<()> {
-        self.ended = true;
-        let full = lzw_decode_all(self.order, self.lit_width, &self.compressed)?;
-        if self.emitted > full.len() {
-            return Err(lzw_fmt(
-                (self.compressed.len() as u64).saturating_mul(8),
-                "unexpected EOF",
-            ));
+        if self.ended {
+            return Ok(());
         }
-        self.output = full[self.emitted..].to_vec();
+        self.ended = true;
+        self.decoder
+            .finish()
+            .map_err(|err| lzw_fmt(self.bit_loc(), err.message()))?;
+        self.drain();
         Ok(())
     }
 
@@ -405,11 +465,18 @@ impl NativeLzwDecompressor {
         *self = Self {
             order: self.order,
             lit_width: self.lit_width,
-            compressed: Vec::new(),
+            decoder: GoDecoder::new(self.order, self.lit_width),
             output: Vec::new(),
-            emitted: 0,
+            consumed: 0,
             ended: false,
         };
+    }
+
+    /// Unconsumed compressed bytes plus leftover bit-buffer bytes. After each
+    /// `write` this stays O(code width), not the whole stream.
+    #[napi]
+    pub fn debug_input_len(&self) -> u32 {
+        self.decoder.pending_len() as u32
     }
 }
 

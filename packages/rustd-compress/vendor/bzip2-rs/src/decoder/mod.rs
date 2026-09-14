@@ -155,7 +155,7 @@ impl Decoder {
                 self.in_buf.extend_from_slice(&buf[..written]);
 
                 if self.in_buf.len() < 4 {
-                    return Ok(WriteState::Written(buf.len()));
+                    return Ok(WriteState::Written(written));
                 }
 
                 let header = Header::parse(self.in_buf[..4].try_into().unwrap())?;
@@ -217,6 +217,18 @@ impl Decoder {
                 Ok(ReadState::Read(read))
             }
             None => Ok(ReadState::NeedsWrite(self.space())),
+        }
+    }
+
+    /// Compressed bytes not yet consumed, starting at the current bit-aligned
+    /// byte. Used to chain concatenated bzip2 members without keeping a second
+    /// copy of the whole input.
+    pub fn unread_bytes(&self) -> &[u8] {
+        let n = self.skip_bits / 8;
+        if n >= self.in_buf.len() {
+            &[]
+        } else {
+            &self.in_buf[n..]
         }
     }
 }

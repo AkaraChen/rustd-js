@@ -114,6 +114,8 @@ class Bzip2Decompressor {
   }
   end() { native(() => this._handle.end()); }
   reset() { native(() => this._handle.reset()); }
+  /** Unconsumed write queue after pump; not part of the public .d.ts surface. */
+  bufferedInputBytes() { return native(() => this._handle.debugInputLen()); }
 }
 
 class LzwDecompressor {
@@ -132,6 +134,8 @@ class LzwDecompressor {
   }
   end() { native(() => this._handle.end()); }
   reset() { native(() => this._handle.reset()); }
+  /** Unconsumed compressed bytes plus leftover bit-buffer; not in public .d.ts. */
+  bufferedInputBytes() { return native(() => this._handle.debugInputLen()); }
 }
 
 class LzwCompressor {
@@ -169,9 +173,19 @@ async function* lzwCompressStream(chunks, opts) {
   if (done.length) yield done;
 }
 
+async function* lzwDecompressStream(chunks, opts) {
+  const decoder = new LzwDecompressor(opts);
+  for await (const chunk of chunks) {
+    decoder.write(chunk);
+    yield* pull(decoder, false);
+  }
+  decoder.end();
+  yield* pull(decoder, true);
+}
+
 module.exports = {
   bzip2Decompress, lzwCompress, lzwDecompress,
   Bzip2Decompressor, LzwDecompressor, LzwCompressor,
-  bzip2DecompressStream, lzwCompressStream,
+  bzip2DecompressStream, lzwCompressStream, lzwDecompressStream,
   Bzip2FormatError, LzwFormatError, LzwConfigError,
 };

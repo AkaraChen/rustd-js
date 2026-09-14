@@ -34,6 +34,10 @@ export function lzwCompressStream(
   chunks: AsyncIterable<Uint8Array>,
   opts: LzwOptions,
 ): AsyncIterable<Uint8Array>;
+export function lzwDecompressStream(
+  chunks: AsyncIterable<Uint8Array>,
+  opts: LzwOptions,
+): AsyncIterable<Uint8Array>;
 
 export class Bzip2FormatError extends Error {
   constructor(message: string, offset: number, options?: ErrorOptions);
