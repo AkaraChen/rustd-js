@@ -239,6 +239,7 @@ type fixtureFile struct {
 	TableCount int                   `json:"tableCount"`
 	Predicates map[string][][2]uint32 `json:"predicates"`
 	CaseNonID  [][5]int32            `json:"caseNonIdentity"`
+	CaseFull   caseFull              `json:"caseFull"`
 	Special    map[string][][4]int32 `json:"specialCase"`
 	Utf8       utf8Fix               `json:"utf8"`
 	Utf16      utf16Fix              `json:"utf16"`
@@ -285,6 +286,11 @@ type utf16Full struct {
 	DecodeRuneSurrChecksum uint32 `json:"decodeRuneSurrChecksum"`
 }
 
+type caseFull struct {
+	NonIdentityCount int    `json:"nonIdentityCount"`
+	Checksum         uint32 `json:"checksum"`
+}
+
 type utf16Enc struct {
 	R     int32   `json:"r"`
 	Units []uint16 `json:"units"`
@@ -298,6 +304,23 @@ type jsDiffs struct {
 func mix32(h, v uint32) uint32 {
 	h ^= v
 	return h * 16777619
+}
+
+func caseFullChecksums() caseFull {
+	h := uint32(2166136261)
+	nonID := 0
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		u, l, t := unicode.ToUpper(r), unicode.ToLower(r), unicode.ToTitle(r)
+		f := unicode.SimpleFold(r)
+		h = mix32(h, uint32(u))
+		h = mix32(h, uint32(l))
+		h = mix32(h, uint32(t))
+		h = mix32(h, uint32(f))
+		if u != r || l != r || t != r || f != r {
+			nonID++
+		}
+	}
+	return caseFull{NonIdentityCount: nonID, Checksum: h}
 }
 
 func utf16FullChecksums() utf16Full {
@@ -423,6 +446,7 @@ func writeFixtures(dir string, named []namedTable) {
 			fx.CaseNonID = append(fx.CaseNonID, [5]int32{r, u, l, t, f})
 		}
 	}
+	fx.CaseFull = caseFullChecksums()
 	samples := []rune{'I', 'i', 0x0130, 0x0131, 'A', 'a', 0x00DF, 0xFB01, ' '}
 	for _, r := range samples {
 		fx.Special["turkish"] = append(fx.Special["turkish"], [4]int32{

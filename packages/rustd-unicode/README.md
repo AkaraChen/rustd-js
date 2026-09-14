@@ -55,9 +55,9 @@ reports false.
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **508,408 bytes** (issue cap 2 MB).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **511,224 bytes** (issue cap 2 MB).
 
 ```text
 $ ls -l packages/rustd-unicode/*.node
--rwxrwxr-x 1 akrc akrc 508408 Sep 14 16:51 packages/rustd-unicode/rustd-unicode.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 511224 Sep 14 17:05 packages/rustd-unicode/rustd-unicode.linux-x64-gnu.node
 ```

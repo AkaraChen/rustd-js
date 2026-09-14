@@ -48,6 +48,8 @@ import {
   utf16IsSurrogate,
   utf16RuneLen,
   firstIsTableMismatch,
+  firstCaseMismatch,
+  caseFullChecksum,
   UnknownTableError,
   InvalidRuneError,
 } from '../index.mjs';
@@ -160,6 +162,32 @@ test('simple case mapping matches Go non-identity list', () => {
     const row = go.caseNonIdentity.find((row) => row[0] === r);
     if (!row) {
       assert.equal(toUpper(r), r >= 97 && r <= 122 ? r - 32 : r);
+    }
+  }
+});
+
+test('full codepoint sweep of ToUpper/ToLower/ToTitle/SimpleFold including identity', () => {
+  assert.equal(go.caseNonIdentity.length, go.caseFull.nonIdentityCount);
+  const packed = new Uint32Array(go.caseNonIdentity.length * 5);
+  for (let i = 0; i < go.caseNonIdentity.length; i++) {
+    const row = go.caseNonIdentity[i];
+    packed[i * 5] = row[0] >>> 0;
+    packed[i * 5 + 1] = row[1] >>> 0;
+    packed[i * 5 + 2] = row[2] >>> 0;
+    packed[i * 5 + 3] = row[3] >>> 0;
+    packed[i * 5 + 4] = row[4] >>> 0;
+  }
+  const mismatch = firstCaseMismatch(packed);
+  assert.equal(mismatch, -1, `case mismatch at U+${(mismatch >>> 0).toString(16)}`);
+  assert.equal(caseFullChecksum(), go.caseFull.checksum);
+
+  const nonId = new Set(go.caseNonIdentity.map((row) => row[0]));
+  for (const r of [0, 0x20, 0x7f, 0x80, 0x4e00, 0x1f600, 0x10ffff]) {
+    if (!nonId.has(r)) {
+      assert.equal(toUpper(r), r, `identity ToUpper ${r}`);
+      assert.equal(toLower(r), r, `identity ToLower ${r}`);
+      assert.equal(toTitle(r), r, `identity ToTitle ${r}`);
+      assert.equal(simpleFold(r), r, `identity SimpleFold ${r}`);
     }
   }
 });

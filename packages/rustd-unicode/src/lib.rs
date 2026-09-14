@@ -282,3 +282,58 @@ pub fn first_is_table_mismatch(name: String, lo: Uint32Array, hi: Uint32Array) -
     }
     Ok(-1)
 }
+
+fn mix32(h: u32, v: u32) -> u32 {
+    (h ^ v).wrapping_mul(16777619)
+}
+
+/// Packed Go non-identity rows: `[r, upper, lower, title, fold] * n`, sorted by `r`.
+/// Every other code point in `0..=0x10FFFF` must map to itself on all four functions.
+/// Returns the first mismatch, or `-1`.
+#[napi]
+pub fn first_case_mismatch(rows: Uint32Array) -> Result<i32> {
+    let rows = rows.as_ref();
+    if rows.len() % 5 != 0 {
+        return Err(err("TypeError:case rows must be a multiple of 5".into()));
+    }
+    let n = rows.len() / 5;
+    let mut i = 0;
+    for r in 0..=0x10FFFFu32 {
+        while i < n && rows[i * 5] < r {
+            i += 1;
+        }
+        let rr = r as i32;
+        let (want_u, want_l, want_t, want_f) = if i < n && rows[i * 5] == r {
+            (
+                rows[i * 5 + 1] as i32,
+                rows[i * 5 + 2] as i32,
+                rows[i * 5 + 3] as i32,
+                rows[i * 5 + 4] as i32,
+            )
+        } else {
+            (rr, rr, rr, rr)
+        };
+        if case::to_upper(rr) != want_u
+            || case::to_lower(rr) != want_l
+            || case::to_title(rr) != want_t
+            || case::simple_fold(rr) != want_f
+        {
+            return Ok(rr);
+        }
+    }
+    Ok(-1)
+}
+
+/// FNV-1a-style checksum of `(ToUpper, ToLower, ToTitle, SimpleFold)` over `0..=0x10FFFF`.
+#[napi]
+pub fn case_full_checksum() -> u32 {
+    let mut h: u32 = 2166136261;
+    for r in 0..=0x10FFFFu32 {
+        let rr = r as i32;
+        h = mix32(h, case::to_upper(rr) as u32);
+        h = mix32(h, case::to_lower(rr) as u32);
+        h = mix32(h, case::to_title(rr) as u32);
+        h = mix32(h, case::simple_fold(rr) as u32);
+    }
+    h
+}

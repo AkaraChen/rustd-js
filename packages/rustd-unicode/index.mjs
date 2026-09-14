@@ -53,6 +53,8 @@ export const {
   utf16RuneLen,
   utf16AppendRune,
   firstIsTableMismatch,
+  firstCaseMismatch,
+  caseFullChecksum,
   UnknownTableError,
   InvalidRuneError,
   UnknownSpecialCaseError,
