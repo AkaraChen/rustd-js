@@ -49,8 +49,8 @@ export interface BinaryFile {
   entryPoint(): bigint;
   hasDebugInfo(): boolean;
   buildInfo(): BuildInfo | null;
-  dwarf(): null;
-  gosym(): null;
+  dwarf(): DwarfReader | null;
+  gosym(): GoSymTable | null;
   dynamicStrings(): string[];
   dynamicValue(tag: string): bigint | null;
 }
@@ -104,6 +104,89 @@ export interface BuildInfo {
 }
 export interface Module { path: string; version: string; sum: string; replace?: Module }
 export interface BuildSetting { key: string; value: string }
+
+export class DwarfReader {
+  readonly version: 2 | 3 | 4 | 5;
+  readonly addressSize: number;
+  readonly byteOrder: 'little' | 'big';
+  entries(): DwarfEntry[];
+  iterateEntries(cb: (e: DwarfEntry) => boolean | void): void;
+  entryAt(offset: bigint): DwarfEntry | null;
+  seekPC(addr: bigint): DwarfEntry | null;
+  lineReader(): LineReader;
+  ranges(entry: DwarfEntry): { low: bigint; high: bigint }[];
+  types(): TypeInfo[];
+}
+export interface DwarfEntry {
+  tag: string;
+  tagValue: number;
+  offset: bigint;
+  children: boolean;
+  attrs: { attr: string; class: string; value: DwarfValue }[];
+  type(): TypeInfo | null;
+}
+export type DwarfValue =
+  | { kind: 'addr'; value: bigint }
+  | { kind: 'u64'; value: bigint }
+  | { kind: 'i64'; value: bigint }
+  | { kind: 'str'; value: string }
+  | { kind: 'block'; value: Uint8Array }
+  | { kind: 'ref'; value: bigint }
+  | { kind: 'bool'; value: boolean }
+  | { kind: 'float'; value: number }
+  | { kind: 'flag'; value: boolean };
+export class LineReader {
+  next(): LineEntry | null;
+  seek(addr: bigint): void;
+  seekPC(pc: bigint): string | null;
+  files(): string[];
+  reset(): void;
+  tell(): bigint;
+}
+export interface LineEntry {
+  address: bigint;
+  file: string;
+  line: number;
+  column: number;
+  isStmt: boolean;
+  endSequence: boolean;
+  prologueEnd: boolean;
+  epilogueBegin: boolean;
+  discriminator: number;
+}
+export interface TypeInfo {
+  kind: 'basic' | 'struct' | 'union' | 'enum' | 'array' | 'ptr' | 'typedef' | 'func' | 'unsupported';
+  name: string;
+  byteSize: bigint | null;
+  members?: { name: string; offset: bigint; typeName: string }[];
+  elementType?: string;
+  goKind?: string;
+}
+export class GoSymTable {
+  pcToLine(pc: bigint): { file: string; line: number; fn: FuncInfo | null; inlineFrames: { file: string; line: number; fn: string }[] };
+  lineToPC(file: string, line: number): bigint;
+  pcToFunc(pc: bigint): FuncInfo | null;
+  lookupFunc(name: string): FuncInfo | null;
+  lookupSym(name: string): SymInfo | null;
+  symByAddr(addr: bigint): SymInfo | null;
+  funcs(): FuncInfo[];
+}
+export interface FuncInfo {
+  entry: bigint;
+  end: bigint;
+  name: string;
+  package: string;
+  receiver: string;
+  base: string;
+  static: boolean;
+}
+export interface SymInfo {
+  name: string;
+  addr: bigint;
+  kind: 'text' | 'data' | 'bss';
+  goType: number;
+  goVersion: number;
+}
 
 export class ElfFile {
   static open(path: string, opts?: OpenOptions): ElfFile;

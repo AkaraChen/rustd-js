@@ -10,29 +10,31 @@ use object::{
 };
 
 use crate::buildinfo;
+use crate::dwarf::NativeDwarfReader;
+use crate::gosym::NativeGoSymTable;
 use crate::plan9;
 use crate::sniff::{self, Kind};
 
 const DEFAULT_MAX_SECTION: u64 = 256 * 1024 * 1024;
 
-enum Source {
+pub(crate) enum Source {
     Map(Mmap),
     Bytes(Vec<u8>),
 }
 
-struct Shared {
-    kind: Kind,
-    size: u64,
-    is_fat: bool,
-    selected_off: usize,
-    selected_len: usize,
-    max_section_bytes: u64,
-    base: u64,
+pub(crate) struct Shared {
+    pub(crate) kind: Kind,
+    pub(crate) size: u64,
+    pub(crate) is_fat: bool,
+    pub(crate) selected_off: usize,
+    pub(crate) selected_len: usize,
+    pub(crate) max_section_bytes: u64,
+    pub(crate) base: u64,
     source: Mutex<Option<Source>>,
 }
 
 impl Shared {
-    fn with_bytes<T>(&self, f: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
+    pub(crate) fn with_bytes<T>(&self, f: impl FnOnce(&[u8]) -> Result<T>) -> Result<T> {
         let guard = self
             .source
             .lock()
@@ -54,7 +56,7 @@ impl Shared {
         f(&bytes[self.selected_off..end])
     }
 
-    fn closed(&self) -> bool {
+    pub(crate) fn closed(&self) -> bool {
         self.source
             .lock()
             .map(|g| g.is_none())
@@ -196,18 +198,18 @@ pub struct JsCoffHeader {
     pub characteristics: u32,
 }
 
-fn fail(code: &str, message: impl ToString) -> Error {
+pub(crate) fn fail(code: &str, message: impl ToString) -> Error {
     Error::new(Status::GenericFailure, format!("{code}: {}", message.to_string()))
 }
 
-fn format_err(kind: &str, offset: u64, message: impl ToString) -> Error {
+pub(crate) fn format_err(kind: &str, offset: u64, message: impl ToString) -> Error {
     Error::new(
         Status::GenericFailure,
         format!("BinaryFormatError:{kind}:{offset}:{}", message.to_string()),
     )
 }
 
-fn u64_big(v: u64) -> BigInt {
+pub(crate) fn u64_big(v: u64) -> BigInt {
     BigInt::from(v)
 }
 
@@ -367,6 +369,10 @@ pub fn native_open_bytes(
         bigint_u64(max_section_bytes, DEFAULT_MAX_SECTION)?,
         bigint_u64(base, 0)?,
     )
+}
+
+pub(crate) fn bigint_to_u64(value: BigInt) -> Result<u64> {
+    bigint_u64(Some(value), 0)
 }
 
 fn bigint_u64(value: Option<BigInt>, default: u64) -> Result<u64> {
@@ -620,6 +626,16 @@ impl NativeBinaryFile {
     }
 
     #[napi]
+    pub fn dwarf(&self) -> Result<Option<NativeDwarfReader>> {
+        crate::dwarf::open(self.inner.clone())
+    }
+
+    #[napi]
+    pub fn gosym(&self) -> Result<Option<NativeGoSymTable>> {
+        crate::gosym::open(self.inner.clone())
+    }
+
+    #[napi]
     pub fn has_debug_info(&self) -> Result<bool> {
         Ok(self.sections()?.iter().any(|s| {
             s.name.starts_with(".debug_")
@@ -789,7 +805,7 @@ impl NativeBinaryFile {
     }
 }
 
-fn parse_object(bytes: &[u8]) -> Result<object::File<'_>> {
+pub(crate) fn parse_object(bytes: &[u8]) -> Result<object::File<'_>> {
     object::File::parse(bytes).map_err(|e| format_err("object", 0, e))
 }
 
@@ -810,7 +826,7 @@ fn section_info(section: &object::Section<'_, '_>, base: u64) -> JsSection {
     }
 }
 
-fn is_compressed(section: &object::Section<'_, '_>) -> bool {
+pub(crate) fn is_compressed(section: &object::Section<'_, '_>) -> bool {
     if section.name().map(|n| n.starts_with(".zdebug_")).unwrap_or(false) {
         return true;
     }
@@ -956,7 +972,7 @@ fn plan9_kind(t: u8) -> String {
     }
 }
 
-fn go_name(name: &str) -> Option<JsGoName> {
+pub(crate) fn go_name(name: &str) -> Option<JsGoName> {
     if name.is_empty() || name.starts_with('_') {
         return None;
     }

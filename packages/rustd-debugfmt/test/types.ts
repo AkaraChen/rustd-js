@@ -1,7 +1,7 @@
 import {
   sniff, open, openBytes, readBuildInfoFile, readBuildInfoBytes,
   ElfFile, BinaryFormatError, FileClosedError, BlockedRegionError,
-  type BinaryFile, type Symbol, type BuildInfo,
+  type BinaryFile, type Symbol, type BuildInfo, type DwarfReader, type GoSymTable,
 } from '../index.js';
 
 const kind = sniff(new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0, 0, 0, 0]));
@@ -17,6 +17,6 @@ void [kind, addr, symbols, info, elf, err, FileClosedError, BlockedRegionError, 
 sniff('ELF');
 // @ts-expect-error: addresses are bigint
 const asNumber: number = file.size;
-// @ts-expect-error: dwarf is null in this slice
-file.dwarf().entries();
-void asNumber;
+const dwarf: DwarfReader | null = file.dwarf();
+const gosym: GoSymTable | null = file.gosym();
+void [asNumber, dwarf, gosym];

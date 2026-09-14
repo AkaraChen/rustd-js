@@ -139,5 +139,101 @@ test('Java CAFEBABE is not sniffed as Mach-O fat', () => {
   assert.equal(sniff(java), null);
 });
 
+test('Go linux/amd64 with DWARF: dwarf entries, line table, gosym vs debug/gosym', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-dwarf-'));
+  const out = join(dir, 'hello');
+  const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+    cwd: join(pkg, 'gofixtures'),
+  });
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+
+  const file = open(out);
+  assert.equal(file.hasDebugInfo(), true);
+  const dwarf = file.dwarf();
+  assert.ok(dwarf, 'unstripped Go binary must expose DWARF');
+  assert.ok([2, 3, 4, 5].includes(dwarf.version), `dwarf version ${dwarf.version}`);
+  assert.equal(typeof dwarf.addressSize, 'number');
+  assert.equal(dwarf.byteOrder, 'little');
+
+  let compileUnits = 0;
+  let sampled = 0;
+  dwarf.iterateEntries((entry) => {
+    assert.equal(typeof entry.offset, 'bigint');
+    assert.equal(typeof entry.tagValue, 'number');
+    assert.ok(entry.tag.startsWith('DW_TAG_') || entry.tag.length > 0);
+    for (const attr of entry.attrs) {
+      assert.equal(typeof attr.attr, 'string');
+      assert.ok(attr.value && typeof attr.value.kind === 'string');
+      if (attr.value.kind === 'addr' || attr.value.kind === 'u64' || attr.value.kind === 'ref') {
+        assert.equal(typeof attr.value.value, 'bigint');
+      }
+    }
+    if (entry.tag === 'DW_TAG_compile_unit') compileUnits += 1;
+    sampled += 1;
+    if (sampled >= 200) return false;
+  });
+  assert.ok(compileUnits >= 1, 'at least one DW_TAG_compile_unit');
+
+  const types = dwarf.types();
+  assert.ok(types.some((t) => t.kind === 'struct' && t.name.includes('Box')));
+
+  const gosym = file.gosym();
+  assert.ok(gosym, 'Go binary must expose pclntab');
+  const mainFn = gosym.lookupFunc('main.main');
+  assert.ok(mainFn, 'pclntab lists main.main');
+  assert.equal(typeof mainFn.entry, 'bigint');
+  assert.equal(typeof mainFn.end, 'bigint');
+  assert.ok(mainFn.end > mainFn.entry);
+  assert.equal(mainFn.package, 'main');
+  assert.equal(mainFn.base, 'main');
+
+  const dump = go(['run', './cmd/dumpgosym', out], { cwd: join(pkg, 'gofixtures') });
+  assert.equal(dump.status, 0, dump.stderr + dump.stdout);
+  const match = dump.stdout.match(/name=(\S+) entry=(0x[0-9a-f]+) end=(0x[0-9a-f]+) file=(\S+) line=(\d+)/);
+  assert.ok(match, dump.stdout);
+  assert.equal(mainFn.name, match[1]);
+  assert.equal(mainFn.entry, BigInt(match[2]));
+  assert.equal(mainFn.end, BigInt(match[3]));
+
+  const atEntry = gosym.pcToLine(mainFn.entry);
+  assert.equal(atEntry.file, match[4]);
+  assert.equal(atEntry.line, Number(match[5]));
+  assert.equal(atEntry.fn?.name, 'main.main');
+  assert.deepEqual(atEntry.inlineFrames, []);
+
+  const mid = mainFn.entry + (mainFn.end - mainFn.entry) / 2n;
+  const atMid = gosym.pcToFunc(mid);
+  assert.equal(atMid?.name, 'main.main');
+
+  const lineReader = dwarf.lineReader();
+  const files = lineReader.files();
+  assert.ok(files.some((f) => f.endsWith('main.go')), files.slice(0, 8));
+  const lineFile = lineReader.seekPC(mainFn.entry);
+  assert.ok(!lineFile || lineFile.endsWith('main.go'), lineFile);
+
+  const sub = dwarf.seekPC(mainFn.entry);
+  if (sub) {
+    assert.ok(sub.tag === 'DW_TAG_subprogram' || sub.tag === 'DW_TAG_inlined_subroutine');
+    const ranges = dwarf.ranges(sub);
+    assert.ok(Array.isArray(ranges));
+  }
+
+  file.close();
+  const closed = open(out);
+  const d2 = closed.dwarf();
+  closed.close();
+  assert.throws(() => d2.entries(), FileClosedError);
+});
+
+test('stripped (-w) Go binary keeps gosym and hides dwarf', () => {
+  const path = buildHello();
+  const file = open(path);
+  assert.equal(file.dwarf(), null);
+  const gosym = file.gosym();
+  assert.ok(gosym);
+  assert.ok(gosym.lookupFunc('main.main'));
+  file.close();
+});
+
 void UnsupportedFeatureError;
 void root;

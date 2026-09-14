@@ -129,6 +129,107 @@ function liftBuildInfo(info) {
   };
 }
 
+function liftDwarfValue(attr) {
+  switch (attr.kind) {
+    case 'addr': return { kind: 'addr', value: attr.valueU64 ?? 0n };
+    case 'i64': return { kind: 'i64', value: attr.valueI64 ?? 0n };
+    case 'str': return { kind: 'str', value: attr.valueStr ?? '' };
+    case 'block': return { kind: 'block', value: attr.valueBuf ?? new Uint8Array() };
+    case 'ref': return { kind: 'ref', value: attr.valueU64 ?? 0n };
+    case 'bool':
+    case 'flag': return { kind: attr.kind, value: Boolean(attr.valueBool) };
+    case 'float': return { kind: 'float', value: attr.valueF64 ?? 0 };
+    default: return { kind: 'u64', value: attr.valueU64 ?? 0n };
+  }
+}
+
+function liftEntry(raw) {
+  return {
+    tag: raw.tag,
+    tagValue: raw.tagValue,
+    offset: raw.offset,
+    children: raw.children,
+    attrs: (raw.attrs ?? []).map((a) => ({ attr: a.attr, class: a.class, value: liftDwarfValue(a) })),
+    type() { return null; },
+  };
+}
+
+class LineReader {
+  constructor(rows) {
+    this._rows = rows ?? [];
+    this._i = 0;
+  }
+  next() {
+    if (this._i >= this._rows.length) return null;
+    return this._rows[this._i++];
+  }
+  reset() { this._i = 0; }
+  tell() { return this._i < this._rows.length ? this._rows[this._i].address : 0n; }
+  files() { return [...new Set(this._rows.map((r) => r.file).filter(Boolean))]; }
+  seek(addr) {
+    this._i = 0;
+    while (this._i < this._rows.length && this._rows[this._i].address < addr) this._i += 1;
+  }
+  seekPC(pc) {
+    let last = null;
+    for (const row of this._rows) {
+      if (row.endSequence) {
+        last = null;
+        continue;
+      }
+      if (row.address > pc) break;
+      last = row;
+    }
+    return last ? last.file : null;
+  }
+}
+
+function wrapDwarf(native) {
+  const reader = {
+    get version() { return native.version; },
+    get addressSize() { return native.addressSize; },
+    get byteOrder() { return native.byteOrder; },
+    entries() { return wrapNative(() => native.entries()).map(liftEntry); },
+    iterateEntries(cb) {
+      for (const entry of reader.entries()) {
+        if (cb(entry) === false) break;
+      }
+    },
+    entryAt(offset) {
+      const raw = wrapNative(() => native.entryAt(offset));
+      return raw ? liftEntry(raw) : null;
+    },
+    seekPC(addr) {
+      const raw = wrapNative(() => native.seekPc(addr));
+      return raw ? liftEntry(raw) : null;
+    },
+    lineReader() { return new LineReader(wrapNative(() => native.lineEntries())); },
+    ranges(entry) { return wrapNative(() => native.rangesForOffset(entry.offset)); },
+    types() { return wrapNative(() => native.types()); },
+  };
+  return reader;
+}
+
+function wrapGosym(native) {
+  return {
+    pcToLine(pc) {
+      const row = wrapNative(() => native.pcToLine(pc));
+      return {
+        file: row.file,
+        line: row.line,
+        fn: row.func ?? null,
+        inlineFrames: (row.inlineFrames ?? []).map((f) => ({ file: f.file, line: f.line, fn: f.fnName })),
+      };
+    },
+    lineToPC(file, line) { return wrapNative(() => native.lineToPc(file, line)); },
+    pcToFunc(pc) { return wrapNative(() => native.pcToFunc(pc)); },
+    lookupFunc(name) { return wrapNative(() => native.lookupFunc(name)); },
+    lookupSym(name) { return wrapNative(() => native.lookupSym(name)); },
+    symByAddr(addr) { return wrapNative(() => native.symByAddr(addr)); },
+    funcs() { return wrapNative(() => native.funcs()); },
+  };
+}
+
 function wrapFile(native) {
   const file = {
     get kind() { return native.kind; },
@@ -159,8 +260,14 @@ function wrapFile(native) {
       const info = wrapNative(() => native.buildInfo());
       return info ? liftBuildInfo(info) : null;
     },
-    dwarf() { return null; },
-    gosym() { return null; },
+    dwarf() {
+      const nativeDwarf = wrapNative(() => native.dwarf());
+      return nativeDwarf ? wrapDwarf(nativeDwarf) : null;
+    },
+    gosym() {
+      const nativeGosym = wrapNative(() => native.gosym());
+      return nativeGosym ? wrapGosym(nativeGosym) : null;
+    },
     dynamicStrings() { return wrapNative(() => native.dynamicStrings()); },
     dynamicValue(tag) { return wrapNative(() => native.dynamicValue(tag)); },
     _native: native,
@@ -245,6 +352,6 @@ class PeFile {
 
 module.exports = {
   sniff, open, openBytes, readBuildInfoFile, readBuildInfoBytes,
-  ElfFile, MachOFile, PeFile,
+  ElfFile, MachOFile, PeFile, LineReader,
   DebugfmtError, BinaryFormatError, UnsupportedFeatureError, FileClosedError, BlockedRegionError,
 };
