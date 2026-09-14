@@ -1,6 +1,9 @@
 mod asn1;
 mod csv;
 mod pem;
+mod xml;
+mod xml_entities;
+mod xml_names;
 
 use std::collections::HashMap;
 

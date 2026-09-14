@@ -120,3 +120,83 @@ export function asn1Unmarshal<T = unknown>(
   schema: Asn1Schema,
   params?: string,
 ): { value: T; rest: Uint8Array };
+
+export type XmlNodeType = 'start' | 'end' | 'chardata' | 'comment' | 'procinst' | 'directive';
+
+export interface XmlName {
+  space: string;
+  local: string;
+}
+
+export interface XmlAttr {
+  name: XmlName;
+  value: string;
+}
+
+export interface XmlToken {
+  type: XmlNodeType;
+  name?: XmlName;
+  attr?: XmlAttr[];
+  text?: string;
+  target?: string;
+  inst?: Uint8Array;
+}
+
+export interface XmlDecoderOptions {
+  strict?: boolean;
+  autoClose?: string[];
+  entity?: Record<string, string>;
+  defaultSpace?: string;
+  charsetReader?: (charset: string, input: Uint8Array) => Uint8Array;
+}
+
+export interface XmlSchema {
+  name: string;
+  tag?: string;
+  path?: string;
+  kind: 'element' | 'chardata' | 'attr' | 'comment' | 'any';
+  type?: 'string' | 'int' | 'uint' | 'float' | 'bool' | 'bytes' | 'time';
+  children?: XmlSchema[];
+  marshaler?: boolean;
+  omitempty?: boolean;
+}
+
+export class XmlDecoder {
+  constructor(input: Uint8Array | string, opts?: XmlDecoderOptions);
+  token(): XmlToken | null;
+  rawToken(): XmlToken | null;
+  decode(schema: XmlSchema, opts?: { start?: XmlToken }): unknown;
+  skip(): void;
+  inputOffset(): number;
+  inputPos(): [line: number, column: number];
+}
+
+export class XmlEncoder {
+  constructor(opts?: { indent?: string | { prefix: string; indent: string } });
+  encodeToken(token: XmlToken): void;
+  encode(value: unknown, schema: XmlSchema): void;
+  flush(): void;
+  bytes(): Uint8Array;
+}
+
+export function xmlMarshal(value: unknown, schema: XmlSchema): Uint8Array;
+export function xmlMarshalIndent(value: unknown, schema: XmlSchema, prefix: string, indent: string): Uint8Array;
+export function xmlUnmarshal<T = unknown>(input: Uint8Array | string, schema: XmlSchema): T;
+export function xmlEscape(text: Uint8Array): Uint8Array;
+export const XML_HEADER: string;
+export const HTML_ENTITY: Readonly<Record<string, string>>;
+export const HTML_AUTO_CLOSE: readonly string[];
+export function getHtmlEntity(): Record<string, string>;
+export function getHtmlAutoClose(): string[];
+
+export class XmlSyntaxError extends Error {
+  constructor(message: string, line: number, options?: ErrorOptions);
+  readonly code: 'XML_SYNTAX';
+  readonly line: number;
+}
+
+export class XmlUnsupportedTypeError extends Error {
+  constructor(message: string, typeName: string, options?: ErrorOptions);
+  readonly code: 'XML_UNSUPPORTED';
+  readonly typeName: string;
+}

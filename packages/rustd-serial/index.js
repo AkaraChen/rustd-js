@@ -58,6 +58,24 @@ class Asn1StructuralError extends Error {
   }
 }
 
+class XmlSyntaxError extends Error {
+  constructor(message, line, options) {
+    super(message, options);
+    this.name = 'XmlSyntaxError';
+    this.code = 'XML_SYNTAX';
+    this.line = line;
+  }
+}
+
+class XmlUnsupportedTypeError extends Error {
+  constructor(message, typeName, options) {
+    super(message, options);
+    this.name = 'XmlUnsupportedTypeError';
+    this.code = 'XML_UNSUPPORTED';
+    this.typeName = typeName;
+  }
+}
+
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
 function bytes(value) {
@@ -85,7 +103,9 @@ function validDelim(cp) {
 
 function native(fn) {
   try {
-    return fn();
+    const out = fn();
+    if (out instanceof Error) throw out;
+    return out;
   } catch (cause) {
     const text = String(cause.message ?? cause);
     if (text.startsWith('RangeError:')) {
@@ -119,6 +139,20 @@ function native(fn) {
     }
     if (text.startsWith('Asn1StructuralError:')) {
       throw new Asn1StructuralError(`asn1: structure error: ${text.slice('Asn1StructuralError:'.length)}`, { cause });
+    }
+    if (text.startsWith('XmlSyntaxError:')) {
+      const rest = text.slice('XmlSyntaxError:'.length);
+      const colon = rest.indexOf(':');
+      const line = Number(colon < 0 ? rest : rest.slice(0, colon));
+      const msg = colon < 0 ? rest : rest.slice(colon + 1);
+      throw new XmlSyntaxError(`XML syntax error on line ${line}: ${msg}`, line, { cause });
+    }
+    if (text.startsWith('XmlUnsupportedTypeError:')) {
+      const typeName = text.slice('XmlUnsupportedTypeError:'.length);
+      throw new XmlUnsupportedTypeError(`xml: unsupported type: ${typeName}`, typeName, { cause });
+    }
+    if (text.startsWith('XmlError:')) {
+      throw new Error(text.slice('XmlError:'.length), { cause });
     }
     throw cause;
   }
@@ -433,6 +467,209 @@ function asn1Unmarshal(input, schema, params) {
   return { value: fromIr(JSON.parse(row.valueJson)), rest: row.rest };
 }
 
+function xmlBytes(input) {
+  if (typeof input === 'string') return new TextEncoder().encode(input);
+  return bytes(input);
+}
+
+function sniffXmlEncoding(buf) {
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return 'utf-16le';
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return 'utf-16be';
+  const head = Buffer.from(buf.subarray(0, 512)).toString('latin1');
+  const match = /encoding\s*=\s*["']([^"']+)["']/i.exec(head);
+  return match ? match[1] : '';
+}
+
+function transcodeXml(input, charsetReader) {
+  const raw = xmlBytes(input);
+  const enc = sniffXmlEncoding(raw);
+  if (!enc || enc.toLowerCase() === 'utf-8' || enc.toLowerCase() === 'utf8') return raw;
+  if (typeof charsetReader === 'function') {
+    const out = charsetReader(enc, raw);
+    if (out == null) throw new Error(`xml: opening charset ${JSON.stringify(enc)}: nil reader`);
+    return xmlBytes(out);
+  }
+  try {
+    return new TextEncoder().encode(new TextDecoder(enc).decode(raw));
+  } catch (cause) {
+    throw new Error(`xml: encoding ${JSON.stringify(enc)} declared but Decoder.CharsetReader is nil`, { cause });
+  }
+}
+
+function parseXmlToken(json) {
+  if (json == null) return null;
+  const tok = JSON.parse(json);
+  if (tok.type === 'procinst') {
+    tok.inst = Uint8Array.from(Buffer.from(tok.instHex ?? '', 'hex'));
+    delete tok.instHex;
+  }
+  return tok;
+}
+
+function xmlTokenJson(token) {
+  if (token == null || typeof token !== 'object') {
+    throw new TypeError('serial: XmlToken must be an object');
+  }
+  const out = { ...token };
+  if (token.inst instanceof Uint8Array) {
+    out.instHex = hexOf(token.inst);
+    delete out.inst;
+  }
+  return JSON.stringify(out);
+}
+
+function xmlValueIr(value) {
+  if (value instanceof Date) return { $t: value.getTime() };
+  if (value instanceof Uint8Array) return { $b: hexOf(value) };
+  if (typeof value === 'bigint') return { $i: value.toString() };
+  if (Array.isArray(value)) return value.map(xmlValueIr);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = xmlValueIr(v);
+    return out;
+  }
+  return value;
+}
+
+function xmlFromIr(value) {
+  if (Array.isArray(value)) return value.map(xmlFromIr);
+  if (!value || typeof value !== 'object') return value;
+  if (Object.prototype.hasOwnProperty.call(value, '$b')) return Uint8Array.from(Buffer.from(value.$b, 'hex'));
+  if (Object.prototype.hasOwnProperty.call(value, '$i')) return BigInt(value.$i);
+  if (Object.prototype.hasOwnProperty.call(value, '$t')) return new Date(value.$t);
+  const out = {};
+  for (const [k, v] of Object.entries(value)) out[k] = xmlFromIr(v);
+  return out;
+}
+
+const HTML_ENTITY = Object.freeze(JSON.parse(binding.xmlHtmlEntity()));
+const HTML_AUTO_CLOSE = Object.freeze(JSON.parse(binding.xmlHtmlAutoClose()));
+const XML_HEADER = binding.xmlHeaderText();
+
+function getHtmlEntity() {
+  return { ...HTML_ENTITY };
+}
+
+function getHtmlAutoClose() {
+  return HTML_AUTO_CLOSE.slice();
+}
+
+class XmlDecoder {
+  constructor(input, opts) {
+    const options = opts === undefined ? {} : opts;
+    if (options === null || typeof options !== 'object') {
+      throw new TypeError('serial: XmlDecoder options must be an object');
+    }
+    const data = transcodeXml(input, options.charsetReader);
+    const autoClose = Array.isArray(options.autoClose) ? options.autoClose.map(String) : [];
+    const entity = options.entity && typeof options.entity === 'object' ? options.entity : {};
+    this._handle = new binding.NativeXmlDecoder(
+      data,
+      options.strict !== false,
+      autoClose,
+      JSON.stringify(entity),
+      typeof options.defaultSpace === 'string' ? options.defaultSpace : '',
+      true,
+    );
+  }
+
+  token() {
+    return parseXmlToken(native(() => this._handle.token()));
+  }
+
+  rawToken() {
+    return parseXmlToken(native(() => this._handle.rawToken()));
+  }
+
+  decode(schema, opts) {
+    if (schema == null || typeof schema !== 'object') {
+      throw new TypeError('serial: XmlSchema must be an object');
+    }
+    const start = opts && opts.start ? xmlTokenJson(opts.start) : undefined;
+    const json = native(() => this._handle.decode(JSON.stringify(schema), start));
+    return xmlFromIr(JSON.parse(json));
+  }
+
+  skip() {
+    native(() => this._handle.skip());
+  }
+
+  inputOffset() {
+    const n = this._handle.inputOffset();
+    return typeof n === 'bigint' ? Number(n) : n;
+  }
+
+  inputPos() {
+    const p = this._handle.inputPos();
+    return [p.line, p.column];
+  }
+}
+
+class XmlEncoder {
+  constructor(opts) {
+    const options = opts === undefined ? {} : opts;
+    if (options === null || typeof options !== 'object') {
+      throw new TypeError('serial: XmlEncoder options must be an object');
+    }
+    let prefix = '';
+    let indent = '';
+    if (typeof options.indent === 'string') indent = options.indent;
+    else if (options.indent && typeof options.indent === 'object') {
+      prefix = options.indent.prefix ?? '';
+      indent = options.indent.indent ?? '';
+    }
+    this._handle = new binding.NativeXmlEncoder(prefix, indent);
+  }
+
+  encodeToken(token) {
+    native(() => this._handle.encodeToken(xmlTokenJson(token)));
+  }
+
+  encode(value, schema) {
+    if (schema == null || typeof schema !== 'object') {
+      throw new TypeError('serial: XmlSchema must be an object');
+    }
+    native(() => this._handle.encode(JSON.stringify(schema), JSON.stringify(xmlValueIr(value))));
+  }
+
+  flush() {
+    this._handle.flush();
+  }
+
+  bytes() {
+    return this._handle.bytes();
+  }
+}
+
+function xmlMarshal(value, schema) {
+  if (schema == null || typeof schema !== 'object') {
+    throw new TypeError('serial: XmlSchema must be an object');
+  }
+  return native(() => binding.xmlMarshal(JSON.stringify(schema), JSON.stringify(xmlValueIr(value)), '', ''));
+}
+
+function xmlMarshalIndent(value, schema, prefix, indent) {
+  if (schema == null || typeof schema !== 'object') {
+    throw new TypeError('serial: XmlSchema must be an object');
+  }
+  if (typeof prefix !== 'string' || typeof indent !== 'string') {
+    throw new TypeError('serial: prefix and indent must be strings');
+  }
+  return native(() => binding.xmlMarshal(JSON.stringify(schema), JSON.stringify(xmlValueIr(value)), prefix, indent));
+}
+
+function xmlUnmarshal(input, schema) {
+  if (schema == null || typeof schema !== 'object') {
+    throw new TypeError('serial: XmlSchema must be an object');
+  }
+  const json = native(() => binding.xmlUnmarshal(transcodeXml(input), JSON.stringify(schema)));
+  return xmlFromIr(JSON.parse(json));
+}
+
+function xmlEscape(text) {
+  return binding.xmlEscape(bytes(text));
+}
+
 module.exports = {
   CsvReader,
   CsvWriter,
@@ -446,4 +683,17 @@ module.exports = {
   asn1Unmarshal,
   Asn1SyntaxError,
   Asn1StructuralError,
+  XmlDecoder,
+  XmlEncoder,
+  xmlMarshal,
+  xmlMarshalIndent,
+  xmlUnmarshal,
+  xmlEscape,
+  XML_HEADER,
+  HTML_ENTITY,
+  HTML_AUTO_CLOSE,
+  getHtmlEntity,
+  getHtmlAutoClose,
+  XmlSyntaxError,
+  XmlUnsupportedTypeError,
 };

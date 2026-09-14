@@ -5,6 +5,10 @@ import {
   type PemBlock, type PemDecodeResult,
   asn1Marshal, asn1Unmarshal, Asn1SyntaxError, Asn1StructuralError,
   type Asn1Schema, type Asn1BitString, type Asn1RawValue,
+  XmlDecoder, XmlEncoder, xmlMarshal, xmlUnmarshal, xmlEscape, xmlMarshalIndent,
+  XML_HEADER, HTML_ENTITY, HTML_AUTO_CLOSE, getHtmlEntity, getHtmlAutoClose,
+  XmlSyntaxError, XmlUnsupportedTypeError,
+  type XmlSchema, type XmlToken, type XmlDecoderOptions,
 } from '../index.js';
 
 const opts: CsvReaderOptions = { comma: ',', fieldsPerRecord: -1, lazyQuotes: true, trimLeadingSpace: true };
@@ -38,7 +42,24 @@ const bits: Asn1BitString = { bytes: new Uint8Array([0x80]), bitLength: 1 };
 const rawVal: Asn1RawValue = { class: 0, tag: 2, isCompound: false, bytes: new Uint8Array([1]), fullBytes: new Uint8Array([2, 1, 1]) };
 const syn: Asn1SyntaxError = new Asn1SyntaxError('x');
 const st: Asn1StructuralError = new Asn1StructuralError('x');
-void [row, raw, all, pos, off, out, err, parse, enc, pem, blocks, encoded, pemErr, decoded, bits, rawVal, syn, st];
+const xmlOpts: XmlDecoderOptions = { strict: true, autoClose: getHtmlAutoClose(), entity: getHtmlEntity() };
+const xd = new XmlDecoder('<a/>', xmlOpts);
+const tok: XmlToken | null = xd.token();
+const xmlSchema: XmlSchema = { name: 'person', kind: 'element', children: [{ name: 'id', kind: 'attr', type: 'int' }] };
+const xmlBytes: Uint8Array = xmlMarshal({ id: 1 }, xmlSchema);
+const xmlVal = xmlUnmarshal(xmlBytes, xmlSchema);
+const esc: Uint8Array = xmlEscape(new Uint8Array([60]));
+const indented: Uint8Array = xmlMarshalIndent({ id: 1 }, xmlSchema, '', '  ');
+const xe = new XmlEncoder({ indent: '  ' });
+xe.encodeToken({ type: 'start', name: { space: '', local: 'a' }, attr: [] });
+xe.flush();
+const xout: Uint8Array = xe.bytes();
+const xsyn: XmlSyntaxError = new XmlSyntaxError('x', 1);
+const xun: XmlUnsupportedTypeError = new XmlUnsupportedTypeError('x', 'chan');
+const header: string = XML_HEADER;
+const ent = HTML_ENTITY.nbsp;
+const ac = HTML_AUTO_CLOSE[0];
+void [row, raw, all, pos, off, out, err, parse, enc, pem, blocks, encoded, pemErr, decoded, bits, rawVal, syn, st, tok, xmlVal, esc, indented, xout, xsyn, xun, header, ent, ac, xd];
 
 // @ts-expect-error bytes required
 new CsvReader('a,b');
@@ -62,3 +83,9 @@ asn1Marshal(1, { tag: 1 });
 asn1Unmarshal(new Uint8Array(), { kind: 'int' }, 1);
 // @ts-expect-error code is readonly
 syn.code = 'OTHER';
+// @ts-expect-error XmlDecoder input is bytes or string, not number
+new XmlDecoder(1);
+// @ts-expect-error schema kind is required
+xmlMarshal({}, { name: 'a' });
+// @ts-expect-error line is readonly
+xsyn.line = 2;

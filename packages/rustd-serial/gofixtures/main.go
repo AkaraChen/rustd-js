@@ -344,6 +344,17 @@ func main() {
 			return
 		}
 		writeJSON(*out, generateAsn1())
+	case "serial-xml":
+		if *verifyFlag {
+			var packet XmlVerifyPacket
+			dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
+			if err := dec.Decode(&packet); err != nil {
+				fail(err)
+			}
+			verifyXml(packet)
+			return
+		}
+		writeJSON(*out, generateXml())
 	default:
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
