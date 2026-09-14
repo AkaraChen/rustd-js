@@ -3,6 +3,7 @@ mod ext;
 mod header;
 mod mediatype;
 mod qp;
+mod reader;
 mod writer;
 
 use napi::bindgen_prelude::*;
@@ -258,5 +259,57 @@ impl NativeMultipartWriter {
             .finish()
             .map(Into::into)
             .map_err(|e| error("MultipartError", &e))
+    }
+}
+
+#[napi(object)]
+pub struct NativeHeaderField {
+    pub key: String,
+    pub values: Vec<String>,
+}
+
+#[napi(object)]
+pub struct NativeMultipartPartData {
+    pub header: Vec<NativeHeaderField>,
+    pub form_name: String,
+    pub file_name: String,
+    pub body: Uint8Array,
+}
+
+#[napi]
+pub struct NativeMultipartReader {
+    inner: reader::MultipartReader,
+}
+
+#[napi]
+impl NativeMultipartReader {
+    #[napi(constructor)]
+    pub fn new(boundary: String) -> Self {
+        Self {
+            inner: reader::MultipartReader::new(boundary),
+        }
+    }
+
+    #[napi]
+    pub fn write(&mut self, data: Uint8Array) {
+        self.inner.write(data.as_ref());
+    }
+
+    #[napi]
+    pub fn next_part(&mut self) -> Result<Option<NativeMultipartPartData>> {
+        match self.inner.next_part() {
+            Ok(Some(part)) => Ok(Some(NativeMultipartPartData {
+                header: part
+                    .header
+                    .into_iter()
+                    .map(|(key, values)| NativeHeaderField { key, values })
+                    .collect(),
+                form_name: part.form_name,
+                file_name: part.file_name,
+                body: part.body.into(),
+            })),
+            Ok(None) => Ok(None),
+            Err(e) => Err(error("MultipartError", &e)),
+        }
     }
 }

@@ -62,3 +62,16 @@ export class MultipartWriter {
   writeField(fieldname: string, value: string): void
   bytes(): Uint8Array
 }
+export class MultipartReader {
+  constructor(opts: { boundary: string; maxHeadersPerPart?: number; maxTotalHeaders?: number })
+  write(chunk: Uint8Array): void
+  nextPart(): MultipartPart | null
+}
+export class MultipartPart {
+  readonly header: MIMEHeader
+  formName(): string
+  fileName(): string
+  read(): Uint8Array
+  readChunk(maxBytes?: number): Uint8Array
+  close(): void
+}

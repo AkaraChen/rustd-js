@@ -257,6 +257,63 @@ class MultipartWriter {
   bytes() { return native(() => this._handle.finish()); }
 }
 
+class MultipartPart {
+  constructor(data) {
+    const header = Object.create(null);
+    for (const field of data.header) header[field.key] = field.values;
+    this.header = header;
+    this._formName = data.formName;
+    this._fileName = data.fileName;
+    this._body = data.body;
+    this._offset = 0;
+    this._closed = false;
+  }
+  formName() { return this._formName; }
+  fileName() { return this._fileName; }
+  read() {
+    if (this._closed) throw new MultipartError('multipart: part is closed');
+    const out = this._body.subarray(this._offset);
+    this._offset = this._body.length;
+    return out;
+  }
+  readChunk(maxBytes) {
+    if (this._closed) throw new MultipartError('multipart: part is closed');
+    if (maxBytes !== undefined && (typeof maxBytes !== 'number' || maxBytes < 0 || !Number.isInteger(maxBytes))) {
+      throw new TypeError('mime: maxBytes must be a non-negative integer');
+    }
+    const end = maxBytes === undefined ? this._body.length : Math.min(this._body.length, this._offset + maxBytes);
+    const out = this._body.subarray(this._offset, end);
+    this._offset = end;
+    return out;
+  }
+  close() {
+    this._closed = true;
+    this._offset = this._body.length;
+  }
+}
+
+class MultipartReader {
+  constructor(opts) {
+    if (opts == null || typeof opts !== 'object' || Array.isArray(opts)) {
+      throw new TypeError('mime: opts must be an object');
+    }
+    if (typeof opts.boundary !== 'string') throw new TypeError('mime: boundary must be a string');
+    if (opts.maxHeadersPerPart !== undefined && (typeof opts.maxHeadersPerPart !== 'number' || opts.maxHeadersPerPart < 0 || !Number.isInteger(opts.maxHeadersPerPart))) {
+      throw new TypeError('mime: maxHeadersPerPart must be a non-negative integer');
+    }
+    if (opts.maxTotalHeaders !== undefined && (typeof opts.maxTotalHeaders !== 'number' || opts.maxTotalHeaders < 0 || !Number.isInteger(opts.maxTotalHeaders))) {
+      throw new TypeError('mime: maxTotalHeaders must be a non-negative integer');
+    }
+    this._handle = native(() => new binding.NativeMultipartReader(opts.boundary));
+  }
+  write(chunk) { native(() => this._handle.write(bytes(chunk))); }
+  nextPart() {
+    const data = native(() => this._handle.nextPart());
+    if (data == null) return null;
+    return new MultipartPart(data);
+  }
+}
+
 class MimeWordDecoder {
   constructor(opts) {
     this.charsetReader = opts?.charsetReader ?? defaultCharsetReader;
@@ -282,5 +339,5 @@ module.exports = {
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
-  MultipartWriter,
+  MultipartWriter, MultipartReader, MultipartPart,
 };
