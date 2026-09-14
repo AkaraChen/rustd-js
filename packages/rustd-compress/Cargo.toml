@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi8"] }
 napi-derive = "3"
-bzip2-rs = "0.1.2"
+bzip2-rs = { path = "vendor/bzip2-rs" }
 weezl = { version = "0.2.1", default-features = false, features = ["alloc"] }
 
 [build-dependencies]

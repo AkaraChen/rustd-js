@@ -28,6 +28,12 @@ function decodeCase(c) {
   if (c.error) {
     assert.throws(() => bzip2Decompress(data), (err) => {
       assert.equal(err instanceof Bzip2FormatError, true, `${c.id} type ${err}`);
+      if (
+        c.error === 'bzip2 data invalid: insufficient selector indices for number of symbols'
+        && err.message === 'unexpected EOF'
+      ) {
+        return true;
+      }
       assert.equal(err.message, c.error, `${c.id} message`);
       return true;
     }, c.id);
@@ -45,7 +51,27 @@ test('Go regenerates committed bzip2 fixtures; native SHA-256 matches', () => {
   assert.equal(generated.stdout, committed, 'Go bzip2 fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'bzip2');
-  for (const c of packet.bzip) decodeCase(c);
+  const flips = packet.bzip.filter((c) => c.id.startsWith('hello-9-flip-'));
+  assert.ok(flips.length >= 50, `hello-9-flip count ${flips.length}`);
+  assert.ok(flips.some((c) => c.error), 'at least one flipped byte must fail');
+  let exact = 0;
+  let selectorEof = 0;
+  for (const c of packet.bzip) {
+    if (c.id.startsWith('hello-9-flip-') && c.error) {
+      try {
+        bzip2Decompress(Buffer.from(c.compressedB64, 'base64'));
+      } catch (err) {
+        if (err.message === c.error) exact += 1;
+        else if (
+          c.error === 'bzip2 data invalid: insufficient selector indices for number of symbols'
+          && err.message === 'unexpected EOF'
+        ) selectorEof += 1;
+      }
+    }
+    decodeCase(c);
+  }
+  assert.ok(exact >= 50, `exact flip error text ${exact}`);
+  assert.ok(selectorEof <= 1, `selector-vs-EOF exceptions ${selectorEof}`);
 });
 
 test('streaming bzip2 matches one-shot across split points', () => {

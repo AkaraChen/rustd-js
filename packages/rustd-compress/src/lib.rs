@@ -18,15 +18,8 @@ fn bzip_reason(err: impl std::fmt::Display) -> String {
     let reason = text
         .strip_prefix("bzip2 data invalid: ")
         .unwrap_or(text.as_str());
-    if reason.contains("invalid file signature")
-        || reason.contains("invalid magic")
-        || reason.contains("bad magic")
-    {
-        return "bad magic value".into();
-    }
-    if reason.contains("bad crc") {
-        return "block checksum mismatch".into();
-    }
+    let reason = reason.strip_prefix("header: ").unwrap_or(reason);
+    let reason = reason.strip_prefix("block: ").unwrap_or(reason);
     if reason.contains("truncated")
         || reason.contains("unexpected EOF")
         || reason == "EOF"
@@ -34,7 +27,20 @@ fn bzip_reason(err: impl std::fmt::Display) -> String {
     {
         return "unexpected EOF".into();
     }
-    reason.to_string()
+    match reason {
+        "invalid file signature" | "invalid magic" | "bad magic value" => {
+            "bad magic value".into()
+        }
+        "bad magic value found" => "bad magic value found".into(),
+        "unsupported bzip2 version" => "non-Huffman entropy encoding".into(),
+        "invalid block-size" => "invalid compression level".into(),
+        "orig_ptr out of bounds" => "origPtr out of bounds".into(),
+        "huffman length out of range" => "Huffman length out of range".into(),
+        "bad crc" => "block checksum mismatch".into(),
+        "file checksum mismatch" => "file checksum mismatch".into(),
+        "randomised expected to be 'normal'" => "deprecated randomized files".into(),
+        other => other.to_string(),
+    }
 }
 
 fn bzip_err(offset: u64, err: impl std::fmt::Display) -> Error {

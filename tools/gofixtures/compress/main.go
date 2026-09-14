@@ -279,6 +279,21 @@ func generateBzip() []BzipCase {
 			SHA256:        sha(plain),
 		})
 	}
+	for i := 0; i < len(level9); i++ {
+		mut := bytes.Clone(level9)
+		mut[i] ^= 0x01
+		plain, err := bzDecompress(mut)
+		c := BzipCase{
+			ID:            fmt.Sprintf("hello-9-flip-%d", i),
+			CompressedB64: base64.StdEncoding.EncodeToString(mut),
+		}
+		if err != nil {
+			c.Error = err.Error()
+		} else {
+			c.SHA256 = sha(plain)
+		}
+		out = append(out, c)
+	}
 	for i := 0; i < len(level1); i++ {
 		cut := level1[:i]
 		plain, err := bzDecompress(cut)
