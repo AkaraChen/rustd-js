@@ -4,7 +4,7 @@ import {
   QuotedPrintableReader, QuotedPrintableWriter, InvalidMediaParameterError, type MediaType,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
   type MIMEHeader, MultipartWriter, MultipartReader, MultipartPart, MultipartError,
-  MessageTooLargeError, fileContentDisposition,
+  MessageTooLargeError, fileContentDisposition, type MultipartForm, type FileHeader,
 } from '../index.js';
 const parsed: MediaType = parseMediaType('text/plain; charset=utf-8');
 const formatted: string = formatMediaType('text/plain', { charset: 'utf-8' });
@@ -57,11 +57,14 @@ const fileName: string = next?.fileName() ?? '';
 const partBody: Uint8Array = next?.read() ?? new Uint8Array();
 const mpErr: MultipartError = new MultipartError('x');
 const tooLarge: MessageTooLargeError = new MessageTooLargeError('multipart: message too large');
-const limited = new MultipartReader({ boundary: 'boundary', maxHeadersPerPart: 10000 });
+const limited = new MultipartReader({ boundary: 'boundary', maxHeadersPerPart: 10000, maxParts: 1000 });
+const form: MultipartForm = mpReader.readForm(1024);
+const formFile: FileHeader | undefined = form.file.file?.[0];
+const formValue: string[] = form.value.foo ?? [];
 // @ts-expect-error parseMediaType is not a number
 const wrong: number = parsed;
 // @ts-expect-error encoding must be b or q
 encodeWord('utf-8', 'x', 'x');
 // @ts-expect-error bytes required
 quotedPrintableEncode('ascii');
-void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, tooLarge, limited, raw, disp, streamedPart, midPart];
+void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, formName, fileName, partBody, mpErr, tooLarge, limited, raw, disp, streamedPart, midPart, form, formFile, formValue];
