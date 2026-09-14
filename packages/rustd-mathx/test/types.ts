@@ -1,6 +1,7 @@
 import {
   leadingZeros32, leadingZeros64, rotateLeft64, add32, add64, div64, rem32,
   cAbs, cPolar, cSqrt, cIsInf, type Complex,
+  newPCG, newChaCha8, randFromState, type Rand,
 } from '../index.js';
 const lz: number = leadingZeros32(1);
 const lz64: number = leadingZeros64(1n);
@@ -22,6 +23,13 @@ const abs: number = cAbs(z);
 const polar: { r: number; φ: number } = cPolar(z);
 const sqrt: Complex = cSqrt(z);
 const inf: boolean = cIsInf(z, 0);
+const rng: Rand = newPCG(1n, 2n);
+const u: bigint = rng.uint64();
+const st: Uint8Array = rng.state();
+const c8: Rand = newChaCha8(new Uint8Array(32));
+const restored: Rand = randFromState(st);
 // @ts-expect-error Complex is a two-number tuple, not a number.
 cAbs(1);
-void [lz, lz64, rotated, sum32, sum64, div, rem, abs, polar, sqrt, inf];
+// @ts-expect-error PCG seeds are bigint.
+newPCG(1, 2);
+void [lz, lz64, rotated, sum32, sum64, div, rem, abs, polar, sqrt, inf, u, c8, restored];

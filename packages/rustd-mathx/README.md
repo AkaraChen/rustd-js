@@ -1,7 +1,7 @@
 # rustd-mathx
 
-Go `math/bits` and `math/cmplx` (and later `math/rand`) for Node via Rust + napi-rs.
-This is checkpoint 2 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx`**. PRNG APIs are not exported yet.
+Go `math/bits`, `math/cmplx`, and `math/rand/v2` PCG/ChaCha8 for Node via Rust + napi-rs.
+This is checkpoint 3 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 `uint64` + `MarshalBinary`**. v1 lagged-Fibonacci, `intN`/`shuffle`/`Zipf`/`defaultRand` are not exported yet.
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -57,7 +57,9 @@ Required signed-zero cases: `cSqrt([-1, 0]) === [0, 1]`, `cPolar([-1, 0]) === { 
 
 - No platform-width `bits.Len`, `LeadingZeros`, `Add`, … Use `len32`/`len64` (and the matching width for every other op). A `uint` in Go is 32 or 64 bits depending on the platform; this package never hides that.
 - Panic becomes `RangeError`.
-- `math` and `math/big` are out of the 28-package split. `math/rand` is the next checkpoint.
+- `math` and `math/big` are out of the 28-package split.
+- `math/rand` checkpoint 1 exports `newPCG` / `newChaCha8` / `randFromState` with `uint64()` and `state()` only. v1 `Read`, `intN`, `shuffle`, Zipf, and `defaultRand` come later. `seedDefault` is **not** exported pending review (issue #21 shape decision 8).
+- `Shuffle` will use copy + in-place typed-array APIs rather than Go's `swap` callback (issue #21 recommended shape).
 - `cLog10` is not exported (issue #21 TS draft has `cLog` only).
 - `cNorm` is extra (`re²+im²`). `cIsInf` accepts an optional sign that Go `cmplx.IsInf` does not.
 - NaN payloads from explicit `cNaN()` / Go `math.NaN()` use `0x7ff8000000000001`. Libc `sin`/`exp`/… NaN payloads may still differ; those rows go in the known-diff list if tests find them.
@@ -73,9 +75,27 @@ Compared on Linux x64 GNU against Go 1.24.13 `math/cmplx`, cartesian of `{±0,±
 | Finite libm ULP (typically 1–7, occasionally ~300 on `cPow` of π-heavy inputs) | Same special-value branches as Go; `sin`/`exp`/`pow` come from glibc vs Go `math` |
 | `cmplx.Pow(0, NaN+Infi)` | Go panics (`not reached`); we do not throw and follow the `modulus == 0` path |
 
+## API (`math/rand` checkpoint 1)
+
+**This is a PRNG, not a CSPRNG.** Do not use it for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto.randomBytes` for anything security-sensitive.
+
+```js
+import { newPCG, newChaCha8, randFromState } from 'rustd-mathx';
+
+const r = newPCG(1n, 2n);
+r.uint64(); // 14192431797130687760n  (same as Go rand/v2.NewPCG(1,2))
+const bytes = r.state();           // 20 bytes, Go MarshalBinary
+const r2 = randFromState(bytes);   // continues the same stream
+
+const c = newChaCha8(Uint8Array.of(1, ...new Uint8Array(31)));
+c.state(); // 48 bytes (`chacha8:` + used + seed)
+```
+
+`state()` / `randFromState()` bytes match Go `encoding.BinaryMarshaler` / `BinaryUnmarshaler` exactly, including the ChaCha8 `"readbuf:"` prefix when a Go `Read` left unconsumed bytes.
+
 ## Not a CSPRNG
 
-When `math/rand` lands in a later checkpoint it will be a **PRNG**, not suitable for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto` for anything security-sensitive. That warning is repeated here so callers do not treat this package name as cryptographic.
+`newPCG` / `newChaCha8` / `randFromState` are **predictable PRNGs**. Do not use them for tokens, keys, nonces, or session IDs. Use `crypto.getRandomValues` or `rustd-crypto` for anything security-sensitive.
 
 ## Performance
 

@@ -11,4 +11,5 @@ export const {
   cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cPow, cSqrt,
   cSin, cCos, cTan, cSinh, cCosh, cTanh, cAsin, cAcos, cAtan, cAsinh, cAcosh, cAtanh, cCot,
   cInf, cNaN, cIsInf, cIsNaN,
+  Rand, newPCG, newChaCha8, randFromState,
 } = api;

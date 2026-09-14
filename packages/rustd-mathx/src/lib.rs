@@ -1,4 +1,5 @@
 mod cmplx;
+mod rand;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;

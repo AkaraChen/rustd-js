@@ -173,6 +173,36 @@ function cIsInf(x, sign) {
 }
 function cIsNaN(x) { const [re, im] = asComplex(x); return binding.cIsNaN(re, im); }
 
+class Rand {
+  constructor(native) {
+    this._native = native;
+  }
+  uint64() {
+    return native(() => this._native.uint64());
+  }
+  state() {
+    return Uint8Array.from(this._native.state());
+  }
+}
+
+function newPCG(seed1, seed2) {
+  return new Rand(native(() => binding.newPcg(u64('seed1', seed1), u64('seed2', seed2))));
+}
+
+function newChaCha8(seed) {
+  if (!(seed instanceof Uint8Array) || seed.byteLength !== 32) {
+    throw new RangeError('math/rand: ChaCha8 seed must be 32 bytes');
+  }
+  return new Rand(native(() => binding.newChaCha8(seed)));
+}
+
+function randFromState(state) {
+  if (!(state instanceof Uint8Array)) {
+    throw new RangeError('math/rand: state must be Uint8Array');
+  }
+  return new Rand(native(() => binding.randFromState(state)));
+}
+
 module.exports = {
   leadingZeros8, leadingZeros16, leadingZeros32, leadingZeros64,
   trailingZeros8, trailingZeros16, trailingZeros32, trailingZeros64,
@@ -185,4 +215,5 @@ module.exports = {
   cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cPow, cSqrt,
   cSin, cCos, cTan, cSinh, cCosh, cTanh, cAsin, cAcos, cAtan, cAsinh, cAcosh, cAtanh, cCot,
   cInf, cNaN, cIsInf, cIsNaN,
+  Rand, newPCG, newChaCha8, randFromState,
 };

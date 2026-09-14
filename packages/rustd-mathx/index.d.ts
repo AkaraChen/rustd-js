@@ -66,3 +66,17 @@ export function cInf(): Complex;
 export function cNaN(): Complex;
 export function cIsInf(x: Complex, sign?: number): boolean;
 export function cIsNaN(x: Complex): boolean;
+
+/**
+ * math/rand v2 PCG / ChaCha8 (checkpoint 1).
+ * This is a PRNG, not a CSPRNG: do not use for tokens, keys, nonces, or session IDs.
+ * Remaining Rand methods (intN, shuffle, Zipf, v1 Read, defaultRand) land in later checkpoints.
+ */
+export class Rand {
+  uint64(): bigint;
+  /** Go `MarshalBinary` bytes: PCG is 20 bytes (`pcg:` + BE hi/lo); ChaCha8 is 48 bytes (`chacha8:` + BE used + LE seed), optionally prefixed with `readbuf:`. */
+  state(): Uint8Array;
+}
+export function newPCG(seed1: bigint, seed2: bigint): Rand;
+export function newChaCha8(seed: Uint8Array): Rand;
+export function randFromState(state: Uint8Array): Rand;
