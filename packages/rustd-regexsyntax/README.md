@@ -1,8 +1,9 @@
 # rustd-regexsyntax
 
 Synchronous Rust + Node-API port of Go `regexp/syntax` (parse + print).
-Compile, Simplify, Unicode `\p` tables, and Go→JS translation are later
-checkpoints (issue #29).
+Unicode `\p` / `\P` tables are generated from Go 1.24.13
+`unicode.Categories` / `unicode.Scripts` (Unicode 15.0.0). Compile,
+Simplify, and Go→JS translation are later checkpoints (issue #30).
 
 Runtime Node >=20; no JavaScript runtime dependencies.
 
@@ -21,9 +22,11 @@ matches Go `syntax.Perl`. `OP` values match Go's `Op` iota (NoMatch starts at 1)
 
 ## Differences from Go
 
-- Unicode character classes (`\p{Han}`, `\pL`, `\P{...}`) are not in this
-  checkpoint. They return `SyntaxError` with code `invalid character class range`,
-  matching Go's unknown-name path until the generated Unicode tables land.
+- Unicode property tables (`unicode.Properties`, e.g. `\p{White_Space}`) are
+  not generated in this checkpoint. Unknown names still return
+  `invalid character class range`, matching Go.
+- Unicode tables match **Go 1.24.13 / Unicode 15.0.0**, not a later Go 1.25
+  snapshot.
 - `Simplify()`, `syntaxCompile()`, `Prog`, and `toJavaScriptRegExp()` are not
   exported yet.
 - `OP` numbering follows Go (`NoMatch = 1`), not the 0-based sketch in issue #29.
@@ -32,9 +35,9 @@ matches Go `syntax.Perl`. `OP` values match Go's `Op` iota (NoMatch starts at 1)
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **481,264 bytes** (issue cap 2.5 MB for this package).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **545,632 bytes** (issue cap 2.5 MB for this package).
 
 ```text
 $ ls -l packages/rustd-regexsyntax/*.node
--rwxrwxr-x 1 akrc akrc 481264 Sep 14 18:29 packages/rustd-regexsyntax/rustd-regexsyntax.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 545632 Sep 14 18:46 packages/rustd-regexsyntax/rustd-regexsyntax.linux-x64-gnu.node
 ```

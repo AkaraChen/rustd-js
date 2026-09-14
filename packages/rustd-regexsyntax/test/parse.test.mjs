@@ -31,7 +31,9 @@ test('Go regenerates committed parse fixtures; native dump and String match', ()
   assert.equal(generated.stdout, committed, 'Go regexsyntax fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'regexsyntax');
-  assert.ok(packet.cases.length >= 80, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 95, `cases ${packet.cases.length}`);
+  const pCases = packet.cases.filter((c) => /\\p|\\P/.test(c.pattern));
+  assert.ok(pCases.length >= 14, `p-cases ${pCases.length}`);
 
   for (const c of packet.cases) {
     if (c.error) {

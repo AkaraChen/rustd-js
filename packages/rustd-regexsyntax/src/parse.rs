@@ -1,6 +1,7 @@
 use crate::fold::simple_fold;
 use crate::perl_groups::{perl_group, posix_group, CharGroup};
 use crate::regexp::*;
+use crate::unicode_tables::{unicode_table, RangeTable};
 use std::collections::HashMap;
 
 pub const ERR_INTERNAL: &str = "regexp/syntax: internal error";
@@ -1203,10 +1204,14 @@ impl Parser {
         }
     }
 
-    fn parse_unicode_class<'a>(&self, s: &'a str) -> Result<Option<(Vec<i32>, &'a str)>, SyntaxError> {
+    fn parse_unicode_class<'a>(&mut self, s: &'a str) -> Result<Option<(Vec<i32>, &'a str)>, SyntaxError> {
         if self.flags & UNICODE_GROUPS == 0 || s.len() < 2 || s.as_bytes()[0] != b'\\' || (s.as_bytes()[1] != b'p' && s.as_bytes()[1] != b'P')
         {
             return Ok(None);
+        }
+        let mut sign = 1i32;
+        if s.as_bytes()[1] == b'P' {
+            sign = -1;
         }
         let mut t = &s[2..];
         let (c, rest) = next_rune(t)?;
@@ -1230,11 +1235,33 @@ impl Parser {
             check_utf8(name)?;
         }
         if !name.is_empty() && name.as_bytes()[0] == b'^' {
+            sign = -sign;
             name = &name[1..];
         }
-        // Unicode tables land in a later checkpoint. Unknown names match Go's error.
-        let _ = name;
-        Err(SyntaxError::new(ERR_INVALID_CHAR_RANGE, seq))
+        let Some((tab, fold)) = unicode_table(name) else {
+            return Err(SyntaxError::new(ERR_INVALID_CHAR_RANGE, seq));
+        };
+        let r = if self.flags & FOLD_CASE == 0 || fold.is_none() {
+            if sign > 0 {
+                append_table(Vec::new(), tab)
+            } else {
+                append_negated_table(Vec::new(), tab)
+            }
+        } else {
+            self.tmp_class.clear();
+            self.tmp_class = append_table(std::mem::take(&mut self.tmp_class), tab);
+            if let Some(fold_tab) = fold {
+                self.tmp_class = append_table(std::mem::take(&mut self.tmp_class), fold_tab);
+            }
+            self.tmp_class = clean_class(&self.tmp_class);
+            let tmp = self.tmp_class.clone();
+            if sign > 0 {
+                append_class(Vec::new(), &tmp)
+            } else {
+                append_negated_class(Vec::new(), &tmp)
+            }
+        };
+        Ok(Some((r, t)))
     }
 
     fn parse_class<'a>(&mut self, s: &'a str) -> Result<&'a str, SyntaxError> {
@@ -1267,7 +1294,7 @@ impl Parser {
             }
             match self.parse_unicode_class(t) {
                 Ok(Some((nclass, nt))) => {
-                    class.extend(nclass);
+                    class = append_class(class, &nclass);
                     t = nt;
                     continue;
                 }
@@ -1492,6 +1519,86 @@ fn append_folded_range(mut r: Vec<i32>, mut lo: i32, mut hi: i32) -> Vec<i32> {
             f = simple_fold(f);
         }
         c += 1;
+    }
+    r
+}
+
+fn append_table(mut r: Vec<i32>, x: &RangeTable) -> Vec<i32> {
+    for xr in x.r16 {
+        let lo = xr.lo as i32;
+        let hi = xr.hi as i32;
+        let stride = xr.stride as i32;
+        if stride == 1 {
+            r = append_range(r, lo, hi);
+        } else {
+            let mut c = lo;
+            while c <= hi {
+                r = append_range(r, c, c);
+                c += stride;
+            }
+        }
+    }
+    for xr in x.r32 {
+        let lo = xr.lo as i32;
+        let hi = xr.hi as i32;
+        let stride = xr.stride as i32;
+        if stride == 1 {
+            r = append_range(r, lo, hi);
+        } else {
+            let mut c = lo;
+            while c <= hi {
+                r = append_range(r, c, c);
+                c += stride;
+            }
+        }
+    }
+    r
+}
+
+fn append_negated_table(mut r: Vec<i32>, x: &RangeTable) -> Vec<i32> {
+    let mut next_lo = 0i32;
+    for xr in x.r16 {
+        let lo = xr.lo as i32;
+        let hi = xr.hi as i32;
+        let stride = xr.stride as i32;
+        if stride == 1 {
+            if next_lo <= lo - 1 {
+                r = append_range(r, next_lo, lo - 1);
+            }
+            next_lo = hi + 1;
+        } else {
+            let mut c = lo;
+            while c <= hi {
+                if next_lo <= c - 1 {
+                    r = append_range(r, next_lo, c - 1);
+                }
+                next_lo = c + 1;
+                c += stride;
+            }
+        }
+    }
+    for xr in x.r32 {
+        let lo = xr.lo as i32;
+        let hi = xr.hi as i32;
+        let stride = xr.stride as i32;
+        if stride == 1 {
+            if next_lo <= lo - 1 {
+                r = append_range(r, next_lo, lo - 1);
+            }
+            next_lo = hi + 1;
+        } else {
+            let mut c = lo;
+            while c <= hi {
+                if next_lo <= c - 1 {
+                    r = append_range(r, next_lo, c - 1);
+                }
+                next_lo = c + 1;
+                c += stride;
+            }
+        }
+    }
+    if next_lo <= MAX_RUNE {
+        r = append_range(r, next_lo, MAX_RUNE);
     }
     r
 }

@@ -3,6 +3,7 @@ mod parse;
 mod perl_groups;
 mod print;
 mod regexp;
+mod unicode_tables;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
