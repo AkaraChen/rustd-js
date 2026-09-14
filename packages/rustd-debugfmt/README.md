@@ -15,8 +15,10 @@ Addresses, offsets, and sizes are `bigint`. `open(path)` maps the file with
   `rustd-compress` is a shared rust crate. Zstd-compressed DWARF is unsupported.
 - `iterateEntries` currently walks a materialized DIE list (same pattern as
   `iterateSymbols`). A lazy gimli cursor is a follow-up if DIE counts demand it.
-- `gosym().pcToLine` returns the outer `pclntab` frame; `inlineFrames` is empty
-  until the inlined-tree decoder is added.
+- `gosym().pcToLine` returns the physical `pclntab` function in `fn` and the
+  innermost source location in `file`/`line`. Inlined callees from
+  `FUNCDATA_InlTree` / `PCDATA_InlTreeIndex` are listed innermost-first in
+  `inlineFrames`.
 - `DwarfEntry.type()` is a stub (`null`); use `types()` for DIE-derived types.
 - `dynamicValue` always returns `null` in this slice.
 - Fat Mach-O selects the current process architecture and errors if that slice

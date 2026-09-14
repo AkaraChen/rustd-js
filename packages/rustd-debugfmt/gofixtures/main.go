@@ -17,7 +17,19 @@ func helper(n int) int {
 	return helper(n-1) + helper(n-2)
 }
 
+//go:noinline
+func opaque() int { return 3 }
+
+func inlineAdd(a, b int) int {
+	return a + b
+}
+
+func inlineMul(a, b int) int {
+	return inlineAdd(a, 1) + a*b
+}
+
 func main() {
 	box := &Box{Label: version}
-	fmt.Println(box.Name(), helper(8))
+	x := opaque()
+	fmt.Println(box.Name(), helper(8), inlineMul(x, x+1))
 }

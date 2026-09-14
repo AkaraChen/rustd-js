@@ -291,17 +291,63 @@ fn convert_attr(
             value_bool: None,
             value_f64: None,
         }),
-        other => Ok(JsDwarfAttr {
-            attr: name,
-            class: "ClassConstant".into(),
-            kind: "u64".into(),
-            value_u64: Some(u64_big(attr.udata_value().unwrap_or(0))),
-            value_i64: None,
-            value_str: Some(format!("{other:?}")),
-            value_buf: None,
-            value_bool: None,
-            value_f64: None,
-        }),
+        other => {
+            let class = match other {
+                AttributeValue::DebugLineRef(_) => "ClassLinePtr",
+                AttributeValue::LocationListsRef(_) => "ClassLocListPtr",
+                AttributeValue::RangeListsRef(_) => "ClassRangeListPtr",
+                AttributeValue::SecOffset(_) => match name.as_str() {
+                    "DW_AT_stmt_list" => "ClassLinePtr",
+                    "DW_AT_ranges" => "ClassRangeListPtr",
+                    "DW_AT_location" | "DW_AT_string_length" | "DW_AT_return_addr"
+                    | "DW_AT_data_member_location" | "DW_AT_frame_base"
+                    | "DW_AT_segment" | "DW_AT_static_link" | "DW_AT_use_location"
+                    | "DW_AT_vtable_elem_location" => "ClassLocListPtr",
+                    _ => "ClassConstant",
+                },
+                _ => "ClassConstant",
+            };
+            let n = attr
+                .udata_value()
+                .or_else(|| attr.offset_value().map(|o| o as u64))
+                .or_else(|| match other {
+                    AttributeValue::DebugLineRef(v) => Some(v.0 as u64),
+                    AttributeValue::LocationListsRef(v) => Some(v.0 as u64),
+                    AttributeValue::RangeListsRef(v) => Some(v.0 as u64),
+                    AttributeValue::DebugMacinfoRef(v) => Some(v.0 as u64),
+                    AttributeValue::DebugMacroRef(v) => Some(v.0 as u64),
+                    AttributeValue::DebugAddrIndex(v) => Some(v.0 as u64),
+                    AttributeValue::DebugLocListsIndex(v) => Some(v.0 as u64),
+                    AttributeValue::DebugRngListsIndex(v) => Some(v.0 as u64),
+                    AttributeValue::DebugStrOffsetsIndex(v) => Some(v.0 as u64),
+                    AttributeValue::Language(v) => Some(u64::from(v.0)),
+                    AttributeValue::Encoding(v) => Some(u64::from(v.0)),
+                    AttributeValue::Inline(v) => Some(u64::from(v.0)),
+                    AttributeValue::CallingConvention(v) => Some(u64::from(v.0)),
+                    AttributeValue::Virtuality(v) => Some(u64::from(v.0)),
+                    AttributeValue::Accessibility(v) => Some(u64::from(v.0)),
+                    AttributeValue::Visibility(v) => Some(u64::from(v.0)),
+                    AttributeValue::IdentifierCase(v) => Some(u64::from(v.0)),
+                    AttributeValue::DecimalSign(v) => Some(u64::from(v.0)),
+                    AttributeValue::Endianity(v) => Some(u64::from(v.0)),
+                    AttributeValue::Ordering(v) => Some(u64::from(v.0)),
+                    AttributeValue::AddressClass(v) => Some(u64::from(v.0)),
+                    AttributeValue::FileIndex(v) => Some(v),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            Ok(JsDwarfAttr {
+                attr: name,
+                class: class.into(),
+                kind: "u64".into(),
+                value_u64: Some(u64_big(n)),
+                value_i64: None,
+                value_str: None,
+                value_buf: None,
+                value_bool: None,
+                value_f64: None,
+            })
+        }
     }
 }
 

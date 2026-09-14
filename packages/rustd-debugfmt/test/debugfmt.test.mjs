@@ -199,7 +199,6 @@ test('Go linux/amd64 with DWARF: dwarf entries, line table, gosym vs debug/gosym
   assert.equal(atEntry.file, match[4]);
   assert.equal(atEntry.line, Number(match[5]));
   assert.equal(atEntry.fn?.name, 'main.main');
-  assert.deepEqual(atEntry.inlineFrames, []);
 
   const mid = mainFn.entry + (mainFn.end - mainFn.entry) / 2n;
   const atMid = gosym.pcToFunc(mid);
@@ -232,6 +231,174 @@ test('stripped (-w) Go binary keeps gosym and hides dwarf', () => {
   const gosym = file.gosym();
   assert.ok(gosym);
   assert.ok(gosym.lookupFunc('main.main'));
+  file.close();
+});
+
+function parseReadelfDies(text) {
+  const dies = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    const die = line.match(
+      /^\s*<\d+><([0-9a-f]+)>:\s+Abbrev Number:\s+(\d+)(?:\s+\(([^)]+)\))?/i,
+    );
+    if (die) {
+      if (current) dies.push(current);
+      if (die[2] === '0') {
+        current = null;
+        continue;
+      }
+      current = { offset: BigInt(`0x${die[1]}`), tag: die[3] || '', attrs: [] };
+      continue;
+    }
+    const attr = line.match(/^\s*<[0-9a-f]+>\s+(DW_AT_\w+)\s*:\s*(.*)$/i);
+    if (attr && current) {
+      current.attrs.push({ attr: attr[1], raw: attr[2].trim() });
+    }
+  }
+  if (current) dies.push(current);
+  return dies;
+}
+
+function extractReadelfString(raw) {
+  const labeled = raw.match(/\):\s*(.*)$/);
+  if (labeled) return labeled[1];
+  if (raw.startsWith('"') && raw.endsWith('"')) return raw.slice(1, -1);
+  if (/^<[^>]+>$/.test(raw) || raw.includes('(')) return null;
+  if (/^[^\s:]+$/.test(raw) && !raw.startsWith('0x') && Number.isNaN(Number(raw))) return raw;
+  return null;
+}
+
+function extractReadelfInt(raw) {
+  const hex = raw.match(/0x[0-9a-f]+/i);
+  if (hex) return BigInt(hex[0]);
+  const dec = raw.match(/-?\d+/);
+  if (!dec) return null;
+  const n = BigInt(dec[0]);
+  return n;
+}
+
+function attrComparable(ourAttr, raw) {
+  const value = ourAttr.value;
+  if (value.kind === 'str') {
+    const s = extractReadelfString(raw);
+    if (s == null) return true;
+    return s === value.value || raw.includes(value.value);
+  }
+  if (value.kind === 'addr' || value.kind === 'u64' || value.kind === 'ref') {
+    if (raw.includes('DW_OP_') || raw.includes('length of')) return true;
+    const n = extractReadelfInt(raw);
+    if (n == null) return true;
+    return n === value.value;
+  }
+  if (value.kind === 'i64') {
+    const n = extractReadelfInt(raw);
+    if (n == null) return true;
+    return n === value.value;
+  }
+  if (value.kind === 'flag' || value.kind === 'bool') {
+    if (/yes|true|\b1\b/i.test(raw)) return value.value === true;
+    if (/no|false|\b0\b/i.test(raw)) return value.value === false;
+    return true;
+  }
+  return true;
+}
+
+test('sample 100 DIE attrs against readelf --debug-dump=info', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-dwarf-sample-'));
+  const out = join(dir, 'hello');
+  const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+    cwd: join(pkg, 'gofixtures'),
+  });
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+
+  const dump = spawnSync('readelf', ['--debug-dump=info', out], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: 60000,
+  });
+  assert.equal(dump.status, 0, dump.stderr);
+  const oracle = parseReadelfDies(dump.stdout);
+  assert.ok(oracle.length >= 100, `readelf DIE count ${oracle.length}`);
+
+  const file = open(out);
+  const dwarf = file.dwarf();
+  assert.ok(dwarf);
+  const byOffset = new Map();
+  dwarf.iterateEntries((entry) => {
+    byOffset.set(entry.offset, entry);
+    if (byOffset.size >= 20000) return false;
+  });
+
+  let compared = 0;
+  const mismatches = [];
+  for (const die of oracle) {
+    if (compared >= 100) break;
+    const ours = byOffset.get(die.offset);
+    if (!ours) {
+      mismatches.push(`missing offset 0x${die.offset.toString(16)} tag=${die.tag}`);
+      continue;
+    }
+    if (die.tag && ours.tag !== die.tag) {
+      mismatches.push(`offset 0x${die.offset.toString(16)} tag ${ours.tag} != ${die.tag}`);
+      compared += 1;
+      continue;
+    }
+    const ourAttrs = new Map(ours.attrs.map((a) => [a.attr, a]));
+    for (const attr of die.attrs) {
+      const oursAttr = ourAttrs.get(attr.attr);
+      if (!oursAttr) {
+        mismatches.push(`offset 0x${die.offset.toString(16)} missing ${attr.attr}`);
+        continue;
+      }
+      if (!attrComparable(oursAttr, attr.raw)) {
+        const shown = `${oursAttr.value.kind}:${String(oursAttr.value.value)}`;
+        mismatches.push(
+          `offset 0x${die.offset.toString(16)} ${attr.attr} ours=${shown} readelf=${attr.raw}`,
+        );
+      }
+    }
+    compared += 1;
+  }
+  file.close();
+  assert.equal(compared, 100, `compared ${compared} DIEs`);
+  assert.equal(mismatches.length, 0, mismatches.slice(0, 12).join('\n'));
+});
+
+test('gosym inlineFrames match pclntab inlined tree dump for main.*', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-inline-'));
+  const out = join(dir, 'hello');
+  const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+    cwd: join(pkg, 'gofixtures'),
+  });
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+
+  const dumped = go(['run', './cmd/dumpinline', out], { cwd: join(pkg, 'gofixtures') });
+  assert.equal(dumped.status, 0, dumped.stderr + dumped.stdout);
+  const rows = JSON.parse(dumped.stdout);
+  assert.ok(Array.isArray(rows) && rows.length > 0, dumped.stdout.slice(0, 200));
+  const withInline = rows.filter((r) => r.inlineFrames && r.inlineFrames.length > 0);
+  assert.ok(withInline.length > 0, 'fixture must produce at least one inlined PC');
+  const inlineNames = [...new Set(withInline.flatMap((r) => r.inlineFrames.map((f) => f.fn)))];
+  assert.ok(
+    inlineNames.some((n) => n.includes('inlineAdd') || n.includes('inlineMul')),
+    `inlined names: ${inlineNames.join(', ')}`,
+  );
+
+  const file = open(out);
+  const gosym = file.gosym();
+  assert.ok(gosym);
+  for (const row of rows) {
+    const pc = BigInt(row.pc);
+    const got = gosym.pcToLine(pc);
+    assert.equal(got.fn?.name, row.fn, `fn at ${row.pc}`);
+    assert.equal(got.file, row.file, `file at ${row.pc}`);
+    assert.equal(got.line, row.line, `line at ${row.pc}`);
+    assert.deepEqual(
+      got.inlineFrames,
+      (row.inlineFrames ?? []).map((f) => ({ file: f.file, line: f.line, fn: f.fn })),
+      `inlineFrames at ${row.pc} ${row.name}`,
+    );
+  }
   file.close();
 });
 

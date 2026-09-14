@@ -21,6 +21,7 @@ enum Version {
 
 struct Table {
     data: Vec<u8>,
+    gofunc: Vec<u8>,
     version: Version,
     little: bool,
     quantum: u32,
@@ -36,6 +37,10 @@ struct Table {
     funcdata_off: usize,
     functab: Vec<u8>,
 }
+
+const PCDATA_INL_TREE_INDEX: u32 = 2;
+const FUNCDATA_INL_TREE: u8 = 3;
+const INL_CALL_SIZE: usize = 16;
 
 #[napi]
 pub struct NativeGoSymTable {
@@ -304,6 +309,102 @@ impl Table {
         })
     }
 
+    fn nfuncdata(&self, func: &[u8]) -> Result<u8> {
+        let sz0 = if matches!(self.version, Version::V118 | Version::V120) {
+            4
+        } else {
+            self.ptrsize as usize
+        };
+        let off = sz0 + 9 * 4 + 3;
+        Ok(*func
+            .get(off)
+            .ok_or_else(|| format_err("pclntab", off as u64, "nfuncdata out of range"))?)
+    }
+
+    fn pcdata_start(&self, func: &[u8], table: u32) -> Result<Option<u32>> {
+        let npc = self.field(func, 7)?;
+        if table >= npc {
+            return Ok(None);
+        }
+        let sz0 = if matches!(self.version, Version::V118 | Version::V120) {
+            4
+        } else {
+            self.ptrsize as usize
+        };
+        let off = sz0 + 9 * 4 + 4 + table as usize * 4;
+        let v = u32_at(func, off, self.little)?;
+        if v == 0 {
+            return Ok(None);
+        }
+        Ok(Some(v))
+    }
+
+    fn funcdata_off(&self, func: &[u8], i: u8) -> Result<Option<u32>> {
+        let nfd = self.nfuncdata(func)?;
+        if i >= nfd {
+            return Ok(None);
+        }
+        let npc = self.field(func, 7)?;
+        let sz0 = if matches!(self.version, Version::V118 | Version::V120) {
+            4
+        } else {
+            self.ptrsize as usize
+        };
+        let off = sz0 + 9 * 4 + 4 + npc as usize * 4 + i as usize * 4;
+        let v = u32_at(func, off, self.little)?;
+        if v == u32::MAX {
+            return Ok(None);
+        }
+        Ok(Some(v))
+    }
+
+    fn inline_frames(&self, func: &[u8], entry: u64, pc: u64) -> Result<Vec<JsInlineFrame>> {
+        if self.gofunc.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(tree_off) = self.funcdata_off(func, FUNCDATA_INL_TREE)? else {
+            return Ok(Vec::new());
+        };
+        let Some(pcdata_off) = self.pcdata_start(func, PCDATA_INL_TREE_INDEX)? else {
+            return Ok(Vec::new());
+        };
+        let mut frames = Vec::new();
+        let mut current = pc;
+        for _ in 0..64 {
+            let idx = self.pcvalue(pcdata_off, entry, current)?;
+            if idx < 0 {
+                break;
+            }
+            let base = (tree_off as usize).saturating_add(idx as usize * INL_CALL_SIZE);
+            let call = match self.gofunc.get(base..base.saturating_add(INL_CALL_SIZE)) {
+                Some(c) if c.len() == INL_CALL_SIZE => c,
+                _ => break,
+            };
+            let name_off = u32_at(call, 4, self.little)? as usize;
+            let parent_pc = i32::from_le_bytes(
+                if self.little {
+                    [call[8], call[9], call[10], call[11]]
+                } else {
+                    [call[11], call[10], call[9], call[8]]
+                },
+            );
+            let name = cstring(&self.data[self.funcnametab_off..], name_off)?;
+            let line = self.pcvalue(self.field(func, 6)?, entry, current)?;
+            let fno = self.pcvalue(self.field(func, 5)?, entry, current)?;
+            let file = self.file_name(func, fno)?;
+            frames.push(JsInlineFrame {
+                file,
+                line: if line < 0 { 0 } else { line as u32 },
+                fn_name: name,
+            });
+            if parent_pc < 0 {
+                break;
+            }
+            current = entry.saturating_add(parent_pc as u64);
+        }
+        Ok(frames)
+    }
+
     fn line_to_pc(&self, file: &str, line: i32) -> Result<u64> {
         for i in 0..self.nfunctab {
             let func = self.func_bytes(i)?;
@@ -427,6 +528,7 @@ fn parse_table(data: Vec<u8>, text_start: u64) -> Result<Table> {
         .to_vec();
     Ok(Table {
         data,
+        gofunc: Vec::new(),
         version,
         little,
         quantum,
@@ -443,7 +545,41 @@ fn parse_table(data: Vec<u8>, text_start: u64) -> Result<Table> {
     })
 }
 
-fn load_pclntab(obj: &object::File<'_>) -> Result<Option<(Vec<u8>, u64)>> {
+fn load_gofunc(obj: &object::File<'_>) -> Result<Vec<u8>> {
+    for sym in obj.symbols() {
+        let Ok(name) = sym.name() else {
+            continue;
+        };
+        if name != "go:func.*" {
+            continue;
+        }
+        let addr = sym.address();
+        let size = sym.size();
+        let section = match sym.section() {
+            object::SymbolSection::Section(idx) => obj.section_by_index(idx).ok(),
+            _ => None,
+        };
+        let Some(section) = section else {
+            continue;
+        };
+        let data = section
+            .data()
+            .map_err(|e| format_err("gofunc", 0, e))?;
+        let rel = addr.saturating_sub(section.address()) as usize;
+        if rel > data.len() {
+            continue;
+        }
+        let end = if size > 0 {
+            rel.saturating_add(size as usize).min(data.len())
+        } else {
+            data.len()
+        };
+        return Ok(data.get(rel..end).unwrap_or(&[]).to_vec());
+    }
+    Ok(Vec::new())
+}
+
+fn load_pclntab(obj: &object::File<'_>) -> Result<Option<(Vec<u8>, u64, Vec<u8>)>> {
     let mut data = None;
     for name in [".gopclntab", "__gopclntab", ".pclntab", "runtime.pclntab"] {
         if let Some(section) = obj.section_by_name(name) {
@@ -474,6 +610,7 @@ fn load_pclntab(obj: &object::File<'_>) -> Result<Option<(Vec<u8>, u64)>> {
     let Some(data) = data else {
         return Ok(None);
     };
+    let gofunc = load_gofunc(obj)?;
     let mut text = 0u64;
     for sym in obj.symbols() {
         if matches!(sym.name(), Ok("runtime.text")) {
@@ -486,7 +623,7 @@ fn load_pclntab(obj: &object::File<'_>) -> Result<Option<(Vec<u8>, u64)>> {
             text = section.address();
         }
     }
-    Ok(Some((data, text)))
+    Ok(Some((data, text, gofunc)))
 }
 
 pub fn open(file: Arc<Shared>) -> Result<Option<NativeGoSymTable>> {
@@ -498,10 +635,11 @@ pub fn open(file: Arc<Shared>) -> Result<Option<NativeGoSymTable>> {
             return Ok(None);
         }
         let obj = crate::file::parse_object(bytes)?;
-        let Some((data, text)) = load_pclntab(&obj)? else {
+        let Some((data, text, gofunc)) = load_pclntab(&obj)? else {
             return Ok(None);
         };
-        let table = parse_table(data, text.saturating_add(file.base))?;
+        let mut table = parse_table(data, text.saturating_add(file.base))?;
+        table.gofunc = gofunc;
         Ok(Some(NativeGoSymTable {
             file: file.clone(),
             table: Arc::new(table),
@@ -570,11 +708,12 @@ impl NativeGoSymTable {
         let line = self.table.pcvalue(self.table.field(func, 6)?, entry, pc)?;
         let fno = self.table.pcvalue(self.table.field(func, 5)?, entry, pc)?;
         let file = self.table.file_name(func, fno)?;
+        let inline_frames = self.table.inline_frames(func, entry, pc)?;
         Ok(JsPcToLine {
             file,
             line: if line < 0 { 0 } else { line as u32 },
             func: Some(self.table.func_info(i)?),
-            inline_frames: Vec::new(),
+            inline_frames,
         })
     }
 
