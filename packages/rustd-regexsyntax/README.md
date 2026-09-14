@@ -5,7 +5,11 @@ Unicode `\p` / `\P` tables are generated from Go 1.24.13
 `unicode.Categories` / `unicode.Scripts` (Unicode 15.0.0). Matching engine
 and Go→JS translation stay out of scope (issue #30). Parse fixtures cover
 430 Go `syntax.Parse` cases (dump + String), including POSIX/Perl dual-mode
-and 121 illegal samples.
+and 121 illegal samples. Reverse restring (issue #30 §4.2): `syntaxParse` →
+`toString()` → Go `regexp.Compile` MatchString / FindString /
+FindStringSubmatch vs the original pattern, on the 69 Perl-flag parse fixtures
+plus a shared haystack corpus. Matching stays in Go; this package does not
+ship an engine.
 
 Runtime Node >=20; no JavaScript runtime dependencies.
 

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"regexp/syntax"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -1023,6 +1025,70 @@ func verifyEmptyOp(packet EmptyOpPacket) {
 	fmt.Printf("Go verified %d emptyop pairs + %d word cases\n", len(packet.Pairs), len(packet.Word))
 }
 
+type MatchCase struct {
+	ID        string   `json:"id"`
+	Pattern   string   `json:"pattern"`
+	Flags     uint16   `json:"flags"`
+	Printed   string   `json:"printed"`
+	Haystacks []string `json:"haystacks"`
+}
+
+type MatchPacket struct {
+	Schema  int         `json:"schema"`
+	Package string      `json:"package"`
+	Cases   []MatchCase `json:"cases"`
+}
+
+func verifyMatch(packet MatchPacket) {
+	if packet.Schema != 1 || packet.Package != "regexsyntax-match" {
+		fail(fmt.Errorf("invalid match packet"))
+	}
+	if len(packet.Cases) < 50 {
+		fail(fmt.Errorf("match cases %d want >= 50", len(packet.Cases)))
+	}
+	comparisons := 0
+	for _, c := range packet.Cases {
+		if c.Printed == "" {
+			fail(fmt.Errorf("%s: missing printed restring", c.ID))
+		}
+		if len(c.Haystacks) == 0 {
+			fail(fmt.Errorf("%s: missing haystacks", c.ID))
+		}
+		orig, err := regexp.Compile(c.Pattern)
+		if err != nil {
+			fail(fmt.Errorf("%s: regexp.Compile(pattern=%q): %v", c.ID, c.Pattern, err))
+		}
+		got, err := regexp.Compile(c.Printed)
+		if err != nil {
+			fail(fmt.Errorf("%s: regexp.Compile(printed=%q) pattern=%q flags=%d: %v", c.ID, c.Printed, c.Pattern, c.Flags, err))
+		}
+		if !slices.Equal(orig.SubexpNames(), got.SubexpNames()) {
+			fail(fmt.Errorf("%s: SubexpNames original=%q printed=%q (pattern=%q printed=%q flags=%d)",
+				c.ID, orig.SubexpNames(), got.SubexpNames(), c.Pattern, c.Printed, c.Flags))
+		}
+		for i, h := range c.Haystacks {
+			path := fmt.Sprintf("%s.haystacks[%d]", c.ID, i)
+			om, gm := orig.MatchString(h), got.MatchString(h)
+			if om != gm {
+				fail(fmt.Errorf("%s: MatchString(%q) original=%v printed=%v (pattern=%q printed=%q flags=%d)",
+					path, h, om, gm, c.Pattern, c.Printed, c.Flags))
+			}
+			of, gf := orig.FindString(h), got.FindString(h)
+			if of != gf {
+				fail(fmt.Errorf("%s: FindString(%q) original=%q printed=%q (pattern=%q printed=%q flags=%d)",
+					path, h, of, gf, c.Pattern, c.Printed, c.Flags))
+			}
+			osub, gsub := orig.FindStringSubmatch(h), got.FindStringSubmatch(h)
+			if !slices.Equal(osub, gsub) {
+				fail(fmt.Errorf("%s: FindStringSubmatch(%q) original=%q printed=%q (pattern=%q printed=%q flags=%d)",
+					path, h, osub, gsub, c.Pattern, c.Printed, c.Flags))
+			}
+			comparisons++
+		}
+	}
+	fmt.Printf("Go verified %d regexsyntax-match cases (%d haystack comparisons)\n", len(packet.Cases), comparisons)
+}
+
 func verify(packet Packet) {
 	if packet.Schema != 1 || (packet.Package != "regexsyntax" && packet.Package != "regexsyntax-simplify" && packet.Package != "regexsyntax-compile") {
 		fail(fmt.Errorf("invalid packet"))
@@ -1101,8 +1167,11 @@ func main() {
 	out := flag.String("out", "", "output JSON file")
 	verifyFlag := flag.Bool("verify", false, "verify stdin packet")
 	flag.Parse()
-	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" && *pkg != "regexsyntax-emptyop" && *pkg != "regexsyntax-errors" {
+	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" && *pkg != "regexsyntax-emptyop" && *pkg != "regexsyntax-errors" && *pkg != "regexsyntax-match" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
+	}
+	if *pkg == "regexsyntax-match" && !*verifyFlag {
+		fail(fmt.Errorf("regexsyntax-match requires -verify"))
 	}
 	if *verifyFlag {
 		raw, err := io.ReadAll(io.LimitReader(os.Stdin, 32<<20))
@@ -1123,6 +1192,14 @@ func main() {
 				fail(err)
 			}
 			verifyErrors(packet)
+			return
+		}
+		if *pkg == "regexsyntax-match" {
+			var packet MatchPacket
+			if err := json.Unmarshal(raw, &packet); err != nil {
+				fail(err)
+			}
+			verifyMatch(packet)
 			return
 		}
 		var packet Packet
