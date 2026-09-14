@@ -1,9 +1,9 @@
 //! Go `mime/multipart.Writer` (Go 1.24 `writer.go` + Go 1.25 `FileContentDisposition`).
 //!
-//! This slice is CreateFormField / CreateFormFile / WriteField / Close.
-//! No CreatePart (generic MIMEHeader part).
+//! This slice is CreatePart / CreateFormField / CreateFormFile / WriteField / Close.
 
 use getrandom::getrandom;
+use std::collections::BTreeMap;
 
 pub struct MultipartWriter {
     buf: Vec<u8>,
@@ -54,22 +54,40 @@ impl MultipartWriter {
         format!("multipart/form-data; boundary={b}")
     }
 
-    pub fn create_form_field(&mut self, fieldname: &str) -> Result<u32, String> {
+    /// Go `Writer.CreatePart`: keys sorted, each value as `Key: value\r\n`, then blank line.
+    /// Keys are written as given (Go does not re-canonicalize here).
+    pub fn create_part(&mut self, header: &[(String, Vec<String>)]) -> Result<u32, String> {
         self.start_part()?;
-        let disp = format!("form-data; name=\"{}\"", escape_quotes(fieldname));
-        self.buf.extend_from_slice(b"Content-Disposition: ");
-        self.buf.extend_from_slice(disp.as_bytes());
-        self.buf.extend_from_slice(b"\r\n\r\n");
+        let mut map: BTreeMap<&str, &Vec<String>> = BTreeMap::new();
+        for (k, vs) in header {
+            map.entry(k.as_str()).or_insert(vs);
+        }
+        for (k, vs) in map {
+            for v in vs {
+                self.buf.extend_from_slice(k.as_bytes());
+                self.buf.extend_from_slice(b": ");
+                self.buf.extend_from_slice(v.as_bytes());
+                self.buf.extend_from_slice(b"\r\n");
+            }
+        }
+        self.buf.extend_from_slice(b"\r\n");
         Ok(self.open_part())
     }
 
+    pub fn create_form_field(&mut self, fieldname: &str) -> Result<u32, String> {
+        let disp = format!("form-data; name=\"{}\"", escape_quotes(fieldname));
+        self.create_part(&[("Content-Disposition".into(), vec![disp])])
+    }
+
     pub fn create_form_file(&mut self, fieldname: &str, filename: &str) -> Result<u32, String> {
-        self.start_part()?;
         let disp = file_content_disposition(fieldname, filename);
-        self.buf.extend_from_slice(b"Content-Disposition: ");
-        self.buf.extend_from_slice(disp.as_bytes());
-        self.buf.extend_from_slice(b"\r\nContent-Type: application/octet-stream\r\n\r\n");
-        Ok(self.open_part())
+        self.create_part(&[
+            ("Content-Disposition".into(), vec![disp]),
+            (
+                "Content-Type".into(),
+                vec!["application/octet-stream".into()],
+            ),
+        ])
     }
 
     pub fn write_part(&mut self, part_id: u32, data: &[u8]) -> Result<(), String> {
@@ -161,8 +179,9 @@ pub fn validate_boundary(boundary: &str) -> Result<(), String> {
             continue;
         }
         match b {
-            b'\'' | b'(' | b')' | b'+' | b'_' | b',' | b'-' | b'.' | b'/' | b':' | b'='
-            | b'?' => continue,
+            b'\'' | b'(' | b')' | b'+' | b'_' | b',' | b'-' | b'.' | b'/' | b':' | b'=' | b'?' => {
+                continue
+            }
             b' ' if i != end => continue,
             _ => return Err("mime: invalid boundary character".into()),
         }
@@ -207,6 +226,22 @@ mod tests {
             file_content_disposition("file", "a.txt"),
             "form-data; name=\"file\"; filename=\"a.txt\""
         );
+    }
+
+    #[test]
+    fn create_part_sorts_keys_like_go() {
+        let mut w = MultipartWriter::new(Some("boundary".into())).unwrap();
+        let id = w
+            .create_part(&[
+                ("X-Z".into(), vec!["z".into()]),
+                ("Content-Type".into(), vec!["text/plain".into()]),
+                ("X-A".into(), vec!["a1".into(), "a2".into()]),
+            ])
+            .unwrap();
+        w.write_part(id, b"body").unwrap();
+        let got = w.finish().unwrap();
+        let want = b"--boundary\r\nContent-Type: text/plain\r\nX-A: a1\r\nX-A: a2\r\nX-Z: z\r\n\r\nbody\r\n--boundary--\r\n";
+        assert_eq!(got, want);
     }
 
     #[test]

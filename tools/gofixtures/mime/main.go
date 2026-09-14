@@ -774,11 +774,12 @@ func mimeHeaderCases() []MimeHeaderCase {
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
 type mpField struct {
-	Name     string `json:"name"`
-	Value    string `json:"value"`
-	ValueHex string `json:"valueHex"`
-	Filename string `json:"filename"`
-	Mode     string `json:"mode"`
+	Name     string              `json:"name"`
+	Value    string              `json:"value"`
+	ValueHex string              `json:"valueHex"`
+	Filename string              `json:"filename"`
+	Mode     string              `json:"mode"`
+	Header   map[string][]string `json:"header"`
 }
 
 type mpWriteIn struct {
@@ -904,6 +905,20 @@ func handleMultipartWrite() {
 			}
 		case "createFormFile":
 			p, err := w.CreateFormFile(f.Name, f.Filename)
+			if err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+			if _, err := p.Write(mpFieldBody(f)); err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+		case "createPart":
+			h := make(textproto.MIMEHeader)
+			for k, vs := range f.Header {
+				h[k] = append([]string{}, vs...)
+			}
+			p, err := w.CreatePart(h)
 			if err != nil {
 				emitJSON(mpWriteOut{Error: err.Error()})
 				return

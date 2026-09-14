@@ -194,6 +194,12 @@ pub fn decode_header_parts(header: String) -> Result<Vec<WordPart>> {
         .map_err(|e| error("MimeWordError", &e))
 }
 
+#[napi(object)]
+pub struct NativeHeaderField {
+    pub key: String,
+    pub values: Vec<String>,
+}
+
 #[napi]
 pub struct NativeMultipartWriter {
     inner: writer::MultipartWriter,
@@ -240,6 +246,15 @@ impl NativeMultipartWriter {
     }
 
     #[napi]
+    pub fn create_part(&mut self, header: Vec<NativeHeaderField>) -> Result<u32> {
+        let pairs: Vec<(String, Vec<String>)> =
+            header.into_iter().map(|f| (f.key, f.values)).collect();
+        self.inner
+            .create_part(&pairs)
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
     pub fn write_part(&mut self, part_id: u32, data: Uint8Array) -> Result<()> {
         self.inner
             .write_part(part_id, data.as_ref())
@@ -272,12 +287,6 @@ impl NativeMultipartWriter {
 #[napi]
 pub fn file_content_disposition(fieldname: String, filename: String) -> String {
     writer::file_content_disposition(&fieldname, &filename)
-}
-
-#[napi(object)]
-pub struct NativeHeaderField {
-    pub key: String,
-    pub values: Vec<String>,
 }
 
 #[napi(object)]

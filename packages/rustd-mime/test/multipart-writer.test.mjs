@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { MultipartWriter, MultipartError, fileContentDisposition } from '../index.mjs';
+import {
+  MultipartWriter, MultipartError, fileContentDisposition,
+  mimeHeaderSet, mimeHeaderAdd,
+} from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 function go(args = [], input) {
@@ -185,6 +188,78 @@ test('createFormFile empty filename and empty body vs Go NewReader', () => {
   assert.equal(parsed.parts[0].formName, 'upload');
   assert.equal(parsed.parts[0].fileName, '');
   assert.equal(parsed.parts[0].bodyHex, '');
+});
+
+test('createPart bytes match Go CreatePart with MIMEHeader Set/Add', () => {
+  const header = {};
+  mimeHeaderSet(header, 'content-type', 'text/plain');
+  mimeHeaderSet(header, 'content-disposition', 'form-data; name="note"');
+  mimeHeaderAdd(header, 'X-Custom', 'one');
+  mimeHeaderAdd(header, 'x-custom', 'two');
+  const fields = [
+    { mode: 'createPart', header, value: 'hello' },
+    { name: 'after', value: 'x', mode: 'writeField' },
+  ];
+  const w = new MultipartWriter({ boundary: 'boundary' });
+  const part = w.createPart(header);
+  part.write(Buffer.from('hello'));
+  part.end();
+  w.writeField('after', 'x');
+  const body = w.bytes();
+  const golden = goWrite(fields, 'boundary');
+  assert.equal(golden.error ?? '', '');
+  assert.equal(hex(body), golden.bodyHex);
+});
+
+test('createPart empty header and raw (non-canonical) keys vs Go', () => {
+  const empty = {};
+  const raw = {
+    'content-type': ['text/plain'],
+    'X-Z': ['z'],
+    'X-A': ['a1', 'a2'],
+  };
+  const fields = [
+    { mode: 'createPart', header: empty, value: '' },
+    { mode: 'createPart', header: raw, valueHex: hex(Buffer.from([0, 255])) },
+  ];
+  const w = new MultipartWriter({ boundary: 'MIMEBOUNDARY' });
+  w.createPart(empty).end();
+  const part = w.createPart(raw);
+  part.write(Buffer.from([0, 255]));
+  part.end();
+  const body = w.bytes();
+  const golden = goWrite(fields, 'MIMEBOUNDARY');
+  assert.equal(golden.error ?? '', '');
+  assert.equal(hex(body), golden.bodyHex);
+  const parsed = goRead(body, 'MIMEBOUNDARY');
+  assert.equal(parsed.error ?? '', '');
+  assert.equal(parsed.parts.length, 2);
+  assert.equal(parsed.parts[0].bodyHex, '');
+  assert.equal(parsed.parts[1].header['Content-Type'][0], 'text/plain');
+  assert.equal(parsed.parts[1].header['X-A'][0], 'a1');
+  assert.equal(parsed.parts[1].header['X-A'][1], 'a2');
+  assert.equal(parsed.parts[1].header['X-Z'][0], 'z');
+  assert.equal(parsed.parts[1].bodyHex, hex(Buffer.from([0, 255])));
+});
+
+test('createPart then createFormFile mix vs Go', () => {
+  const header = {};
+  mimeHeaderSet(header, 'Content-Type', 'text/plain; charset=utf-8');
+  mimeHeaderSet(header, 'Content-Disposition', 'form-data; name="meta"');
+  const fields = [
+    { mode: 'createPart', header, value: 'json-ish' },
+    { name: 'file', filename: 'a.txt', value: 'hi', mode: 'createFormFile' },
+  ];
+  const w = new MultipartWriter({ boundary: 'xyz' });
+  const part = w.createPart(header);
+  part.write(Buffer.from('json-ish'));
+  part.end();
+  const file = w.createFormFile('file', 'a.txt');
+  file.write(Buffer.from('hi'));
+  file.end();
+  const body = w.bytes();
+  const golden = goWrite(fields, 'xyz');
+  assert.equal(hex(body), golden.bodyHex);
 });
 
 test('random boundary is 60 hex chars from getrandom, not Math.random', () => {

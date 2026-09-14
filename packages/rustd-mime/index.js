@@ -260,6 +260,20 @@ class MultipartWriter {
     const partId = native(() => this._handle.createFormFile(fieldname, filename));
     return new MultipartPartWriter(this._handle, partId);
   }
+  createPart(header) {
+    const rec = requireMIMEHeader(header);
+    const fields = [];
+    for (const key of Object.keys(rec)) {
+      const values = rec[key];
+      if (!Array.isArray(values)) throw new TypeError('mime: MIMEHeader values must be string arrays');
+      for (const value of values) {
+        if (typeof value !== 'string') throw new TypeError('mime: MIMEHeader values must be strings');
+      }
+      fields.push({ key, values: values.slice() });
+    }
+    const partId = native(() => this._handle.createPart(fields));
+    return new MultipartPartWriter(this._handle, partId);
+  }
   writeField(fieldname, value) {
     if (typeof fieldname !== 'string' || typeof value !== 'string') throw new TypeError('mime: expected string');
     native(() => this._handle.writeField(fieldname, value));

@@ -1,8 +1,8 @@
 # rustd-mime
 
-Go `mime`, `mime/quotedprintable`, and `mime/multipart` (Writer WriteField / CreateFormField / CreateFormFile, Reader NextPart / NextRawPart on a complete body) for Node via napi-rs.
+Go `mime`, `mime/quotedprintable`, and `mime/multipart` (Writer WriteField / CreateFormField / CreateFormFile / CreatePart, Reader NextPart / NextRawPart on a complete body) for Node via napi-rs.
 
-This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values), `MultipartWriter.writeField` / `createFormField` / `createFormFile`, `fileContentDisposition`, and `MultipartReader.nextPart` / `nextRawPart` of a complete (non-chunked) body vs Go `multipart.Writer` / `NewReader`. `nextPart` matches Go's quoted-printable CTE auto-decode. `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). 1-byte feed, `CreatePart`, and ReadForm limits are still later.
+This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values), `MultipartWriter.writeField` / `createFormField` / `createFormFile` / `createPart`, `fileContentDisposition`, and `MultipartReader.nextPart` / `nextRawPart` of a complete (non-chunked) body vs Go `multipart.Writer` / `NewReader`. `nextPart` matches Go's quoted-printable CTE auto-decode. `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). 1-byte feed and ReadForm limits are still later.
 
 Checkpoint 2 expands Go fixtures to 200+ `ParseMediaType` cases (Go 1.24 `mediatype_test.go` plus generated parameter variants), Go 1.24 `FormatMediaType` / quoted-printable writer+reader / RFC 2047 `DecodeHeader` tables, TS→Go `formatMediaType` / quoted-printable verify, and 1-byte quoted-printable reads.
 
@@ -32,9 +32,11 @@ Checkpoint 14: `nextPart` auto-decodes `Content-Transfer-Encoding: quoted-printa
 
 Checkpoint 15: `MultipartWriter.createFormFile` matches Go `CreateFormFile` bytes (`Content-Disposition` + `Content-Type: application/octet-stream`). `fileContentDisposition` matches the `Content-Disposition` value Go `CreateFormFile` emits (Go 1.25 helper; Go 1.24 inlines the same format). `CreatePart`, 1-byte feed, and ReadForm stay later.
 
+Checkpoint 16: `MultipartWriter.createPart(header)` matches Go `CreatePart` (keys sorted, values written as given, no re-canonicalization). `MIMEHeader` from this package (`mimeHeaderSet` / `Add`) is the header type. 1-byte feed and ReadForm stay later.
+
 ## Differences from Go
 
-- **No 1-byte / chunked multipart feed yet.** `MultipartReader.write` + `nextPart` / `nextRawPart` parse a complete body. `Part.header` is this package's `MIMEHeader` (`Record<string, string[]>` with canonical keys). `net/textproto` itself is not exported. `Part.close()` then `read()` throws (`multipart: part is closed`); Go `Part.Close` then `Read` returns EOF. `MultipartWriter.createPart` is not exported.
+- **No 1-byte / chunked multipart feed yet.** `MultipartReader.write` + `nextPart` / `nextRawPart` parse a complete body. `Part.header` is this package's `MIMEHeader` (`Record<string, string[]>` with canonical keys). `net/textproto` itself is not exported. `Part.close()` then `read()` throws (`multipart: part is closed`); Go `Part.Close` then `Read` returns EOF. `createPart` writes header keys as provided (Go `CreatePart`); `mimeHeaderSet` / `Add` canonicalize first.
 - **QP CTE decode errors surface on `nextPart`**, because this slice slurps the part body. Go wraps `quotedprintable.Reader` and reports the error on `Part.Read`. Non-QP `Content-Transfer-Encoding` values (including `7bit` / `base64`) are left as-is.
 - **`MultipartWriter.bytes()` is idempotent** (second call returns the same buffer). Go `Writer.Close` writes a second trailer if called twice.
 - **`ReadForm` will not spill to temp files** once multipart lands. Over `maxMemory` it will throw `MessageTooLargeError`.
@@ -45,4 +47,4 @@ Checkpoint 15: `MultipartWriter.createFormFile` matches Go `CreateFormFile` byte
 
 ## Size
 
-Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14, checkpoint 15): **498,632 bytes** / 2,000,000.
+Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14, checkpoint 16): **505,464 bytes** / 2,000,000.

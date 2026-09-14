@@ -58,6 +58,7 @@ export class MultipartWriter {
   setBoundary(boundary: string): void
   boundary(): string
   formDataContentType(): string
+  createPart(header: MIMEHeader): MultipartPartWriter
   createFormField(fieldname: string): MultipartPartWriter
   createFormFile(fieldname: string, filename: string): MultipartPartWriter
   writeField(fieldname: string, value: string): void
