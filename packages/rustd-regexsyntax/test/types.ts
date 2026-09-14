@@ -1,4 +1,4 @@
-import { OP, INST_OP, EMPTY_OP, FLAGS, syntaxParse, syntaxSimplify, syntaxCompile, emptyOpContext, isWordChar, flagsToString, SyntaxRegexp } from '../index.js';
+import { OP, INST_OP, EMPTY_OP, FLAGS, ERROR_CODE, syntaxParse, syntaxSimplify, syntaxCompile, emptyOpContext, isWordChar, flagsToString, SyntaxRegexp, SyntaxError } from '../index.js';
 
 const re: SyntaxRegexp = syntaxParse('a(b)', FLAGS.Perl);
 const op: number = re.op;
@@ -13,6 +13,18 @@ const ctx: number = emptyOpContext(-1, 97);
 const word: boolean = isWordChar(97);
 const flagText: string = flagsToString(FLAGS.Perl | FLAGS.FoldCase);
 const n: number = OP.Literal + FLAGS.Perl + INST_OP.Rune1 + EMPTY_OP.BeginText + ctx;
+const nest: string = ERROR_CODE.NestingDepth;
+try {
+  syntaxParse('(', FLAGS.Perl);
+} catch (err) {
+  if (err instanceof SyntaxError) {
+    const code: string = err.code;
+    const expr: string = err.expr;
+    void code;
+    void expr;
+  }
+}
+void nest;
 
 // @ts-expect-error pattern must be a string
 syntaxParse(1, FLAGS.Perl);

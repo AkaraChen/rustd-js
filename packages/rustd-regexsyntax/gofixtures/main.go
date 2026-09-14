@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"regexp/syntax"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 type InstJSON struct {
@@ -19,16 +21,25 @@ type InstJSON struct {
 }
 
 type Case struct {
-	ID      string     `json:"id"`
-	Pattern string     `json:"pattern"`
-	Flags   uint16     `json:"flags"`
-	Dump    string     `json:"dump,omitempty"`
-	Printed string     `json:"printed,omitempty"`
-	Start   int        `json:"start,omitempty"`
-	NumCap  int        `json:"numCap,omitempty"`
-	Inst    []InstJSON `json:"inst,omitempty"`
-	Error   string     `json:"error,omitempty"`
-	Expr    string     `json:"expr,omitempty"`
+	ID          string     `json:"id"`
+	Pattern     string     `json:"pattern"`
+	PatternHex  string     `json:"patternHex,omitempty"`
+	Flags       uint16     `json:"flags"`
+	Dump        string     `json:"dump,omitempty"`
+	Printed     string     `json:"printed,omitempty"`
+	Start       int        `json:"start,omitempty"`
+	NumCap      int        `json:"numCap,omitempty"`
+	Inst        []InstJSON `json:"inst,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	Expr        string     `json:"expr,omitempty"`
+	ExprHex     string     `json:"exprHex,omitempty"`
+	NativeParse bool       `json:"nativeParse,omitempty"`
+}
+
+type ErrorCodeRow struct {
+	Name string `json:"name"`
+	Code string `json:"code"`
+	Used bool   `json:"used"`
 }
 
 type Packet struct {
@@ -446,6 +457,152 @@ func generate() Packet {
 	return Packet{Schema: 1, Package: "regexsyntax", Cases: cases}
 }
 
+func goErrorCodes() []ErrorCodeRow {
+	return []ErrorCodeRow{
+		{Name: "InternalError", Code: string(syntax.ErrInternalError), Used: false},
+		{Name: "InvalidCharClass", Code: string(syntax.ErrInvalidCharClass), Used: false},
+		{Name: "InvalidCharRange", Code: string(syntax.ErrInvalidCharRange), Used: true},
+		{Name: "InvalidEscape", Code: string(syntax.ErrInvalidEscape), Used: true},
+		{Name: "InvalidNamedCapture", Code: string(syntax.ErrInvalidNamedCapture), Used: true},
+		{Name: "InvalidPerlOp", Code: string(syntax.ErrInvalidPerlOp), Used: true},
+		{Name: "InvalidRepeatOp", Code: string(syntax.ErrInvalidRepeatOp), Used: true},
+		{Name: "InvalidRepeatSize", Code: string(syntax.ErrInvalidRepeatSize), Used: true},
+		{Name: "InvalidUTF8", Code: string(syntax.ErrInvalidUTF8), Used: true},
+		{Name: "MissingBracket", Code: string(syntax.ErrMissingBracket), Used: true},
+		{Name: "MissingParen", Code: string(syntax.ErrMissingParen), Used: true},
+		{Name: "MissingRepeatArgument", Code: string(syntax.ErrMissingRepeatArgument), Used: true},
+		{Name: "TrailingBackslash", Code: string(syntax.ErrTrailingBackslash), Used: true},
+		{Name: "UnexpectedParen", Code: string(syntax.ErrUnexpectedParen), Used: true},
+		{Name: "NestingDepth", Code: string(syntax.ErrNestingDepth), Used: true},
+		{Name: "Large", Code: string(syntax.ErrLarge), Used: true},
+	}
+}
+
+func utf8Valid(s string) bool {
+	return utf8.ValidString(s)
+}
+
+func parsePattern(c Case) (string, error) {
+	if c.PatternHex != "" {
+		raw, err := hex.DecodeString(c.PatternHex)
+		if err != nil {
+			return "", fmt.Errorf("%s: patternHex: %w", c.ID, err)
+		}
+		return string(raw), nil
+	}
+	return c.Pattern, nil
+}
+
+func errorTests() []Case {
+	perl := uint16(syntax.Perl)
+	return []Case{
+		{ID: "invalid-char-range", Pattern: `[a-Z]`, Flags: perl, NativeParse: true},
+		{ID: "invalid-escape", Pattern: `\c`, Flags: perl, NativeParse: true},
+		{ID: "invalid-named-capture", Pattern: `(?P<x y>a)`, Flags: perl, NativeParse: true},
+		{ID: "invalid-perl-op", Pattern: `(?z)`, Flags: perl, NativeParse: true},
+		{ID: "invalid-repeat-op", Pattern: `a++`, Flags: perl, NativeParse: true},
+		{ID: "invalid-repeat-size", Pattern: `a{2,1}`, Flags: perl, NativeParse: true},
+		{ID: "invalid-utf8", PatternHex: "ff", Flags: perl, NativeParse: false},
+		{ID: "missing-bracket", Pattern: `[a-z`, Flags: perl, NativeParse: true},
+		{ID: "missing-paren", Pattern: `(`, Flags: perl, NativeParse: true},
+		{ID: "missing-repeat-argument", Pattern: `*`, Flags: perl, NativeParse: true},
+		{ID: "trailing-backslash", Pattern: `\`, Flags: perl, NativeParse: true},
+		{ID: "unexpected-paren", Pattern: `)`, Flags: perl, NativeParse: true},
+		{ID: "posix-named-class-colon", Pattern: `[[:foo:]]`, Flags: perl, NativeParse: true},
+		{ID: "nest-1000", Pattern: strings.Repeat("(", 1000) + strings.Repeat(")", 1000), Flags: perl, NativeParse: true},
+		{ID: "large", Pattern: "(" + strings.Repeat("(xx?)", 1000) + "){1000}", Flags: perl, NativeParse: true},
+	}
+}
+
+type ErrorPacket struct {
+	Schema  int            `json:"schema"`
+	Package string         `json:"package"`
+	Codes   []ErrorCodeRow `json:"codes"`
+	Cases   []Case         `json:"cases"`
+}
+
+func generateErrors() ErrorPacket {
+	cases := errorTests()
+	out := make([]Case, 0, len(cases))
+	for _, c := range cases {
+		pat, err := parsePattern(c)
+		if err != nil {
+			fail(err)
+		}
+		_, perr := syntax.Parse(pat, syntax.Flags(c.Flags))
+		if perr == nil {
+			fail(fmt.Errorf("%s: expected parse error", c.ID))
+		}
+		se, ok := perr.(*syntax.Error)
+		if !ok {
+			fail(fmt.Errorf("%s: %v", c.ID, perr))
+		}
+		c.Error = string(se.Code)
+		if utf8Valid(se.Expr) {
+			c.Expr = se.Expr
+		} else {
+			c.ExprHex = hex.EncodeToString([]byte(se.Expr))
+		}
+		if c.PatternHex != "" {
+			c.Pattern = ""
+		}
+		out = append(out, c)
+	}
+	return ErrorPacket{Schema: 1, Package: "regexsyntax-errors", Codes: goErrorCodes(), Cases: out}
+}
+
+func verifyErrors(packet ErrorPacket) {
+	if packet.Schema != 1 || packet.Package != "regexsyntax-errors" {
+		fail(fmt.Errorf("invalid errors packet"))
+	}
+	want := goErrorCodes()
+	if len(packet.Codes) != len(want) {
+		fail(fmt.Errorf("codes len want %d got %d", len(want), len(packet.Codes)))
+	}
+	for i, row := range want {
+		if packet.Codes[i].Name != row.Name || packet.Codes[i].Code != row.Code {
+			fail(fmt.Errorf("codes[%d] want %s=%q got %s=%q", i, row.Name, row.Code, packet.Codes[i].Name, packet.Codes[i].Code))
+		}
+	}
+	seen := map[string]bool{}
+	for _, c := range packet.Cases {
+		pat, err := parsePattern(c)
+		if err != nil {
+			fail(err)
+		}
+		_, perr := syntax.Parse(pat, syntax.Flags(c.Flags))
+		if perr == nil {
+			fail(fmt.Errorf("%s: expected error", c.ID))
+		}
+		se, ok := perr.(*syntax.Error)
+		if !ok {
+			fail(fmt.Errorf("%s: %v", c.ID, perr))
+		}
+		if string(se.Code) != c.Error {
+			fail(fmt.Errorf("%s: code want %q got %q", c.ID, c.Error, se.Code))
+		}
+		gotExpr := se.Expr
+		if c.ExprHex != "" {
+			raw, err := hex.DecodeString(c.ExprHex)
+			if err != nil {
+				fail(fmt.Errorf("%s: exprHex: %w", c.ID, err))
+			}
+			if gotExpr != string(raw) {
+				fail(fmt.Errorf("%s: expr hex want %s got %s", c.ID, c.ExprHex, hex.EncodeToString([]byte(gotExpr))))
+			}
+		} else if gotExpr != c.Expr {
+			fail(fmt.Errorf("%s: expr want %q got %q", c.ID, c.Expr, se.Expr))
+		}
+		seen[c.Error] = true
+	}
+	for _, row := range want {
+		if row.Used && !seen[row.Code] {
+			fail(fmt.Errorf("missing trigger for %s (%q)", row.Name, row.Code))
+		}
+	}
+	fmt.Printf("Go verified %d regexsyntax error codes + %d cases\n", len(packet.Codes), len(packet.Cases))
+}
+
 func generateSimplify() Packet {
 	flags := syntax.MatchNL | syntax.Perl&^syntax.OneLine
 	var cases []Case
@@ -791,7 +948,7 @@ func main() {
 	out := flag.String("out", "", "output JSON file")
 	verifyFlag := flag.Bool("verify", false, "verify stdin packet")
 	flag.Parse()
-	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" && *pkg != "regexsyntax-emptyop" {
+	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" && *pkg != "regexsyntax-emptyop" && *pkg != "regexsyntax-errors" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
 	if *verifyFlag {
@@ -805,6 +962,14 @@ func main() {
 				fail(err)
 			}
 			verifyEmptyOp(packet)
+			return
+		}
+		if *pkg == "regexsyntax-errors" {
+			var packet ErrorPacket
+			if err := json.Unmarshal(raw, &packet); err != nil {
+				fail(err)
+			}
+			verifyErrors(packet)
 			return
 		}
 		var packet Packet
@@ -825,6 +990,12 @@ func main() {
 	}
 	if *pkg == "regexsyntax-emptyop" {
 		if err := enc.Encode(generateEmptyOp()); err != nil {
+			fail(err)
+		}
+		return
+	}
+	if *pkg == "regexsyntax-errors" {
+		if err := enc.Encode(generateErrors()); err != nil {
 			fail(err)
 		}
 		return

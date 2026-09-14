@@ -182,26 +182,37 @@ impl Parser {
         Ok(())
     }
 
-    fn calc_height(&mut self, id: u32, force: bool) -> i32 {
+    fn calc_height(&mut self, root: u32, force: bool) -> i32 {
         if !force {
-            if let Some(map) = self.height.as_ref() {
-                if let Some(&h) = map.get(&id) {
-                    return h;
+            if let Some(&h) = self.height.get_or_insert_with(HashMap::new).get(&root) {
+                return h;
+            }
+        }
+        // Post-order walk on an explicit stack so 1500-deep trees cannot abort.
+        let mut stack: Vec<(u32, usize)> = vec![(root, 0)];
+        while let Some((id, idx)) = stack.pop() {
+            if idx == 0 && !(force && id == root) {
+                if self.height.get_or_insert_with(HashMap::new).contains_key(&id) {
+                    continue;
                 }
             }
-        }
-        let sub = self.nodes[id as usize].sub.clone();
-        let mut h = 1;
-        for s in sub {
-            let hs = self.calc_height(s, false);
-            if h < 1 + hs {
-                h = 1 + hs;
+            let sub_len = self.nodes[id as usize].sub.len();
+            if idx < sub_len {
+                stack.push((id, idx + 1));
+                let child = self.nodes[id as usize].sub[idx];
+                stack.push((child, 0));
+                continue;
             }
+            let mut h = 1;
+            for &s in &self.nodes[id as usize].sub {
+                let hs = self.height.get_or_insert_with(HashMap::new).get(&s).copied().unwrap_or(1);
+                if h < 1 + hs {
+                    h = 1 + hs;
+                }
+            }
+            self.height.get_or_insert_with(HashMap::new).insert(id, h);
         }
-        if let Some(map) = self.height.as_mut() {
-            map.insert(id, h);
-        }
-        h
+        self.height.get_or_insert_with(HashMap::new).get(&root).copied().unwrap_or(1)
     }
 
     fn push(&mut self, id: u32) -> Result<Option<u32>, SyntaxError> {
