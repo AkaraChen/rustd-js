@@ -4,6 +4,8 @@ Go `mime`, `mime/quotedprintable`, and (later) `mime/multipart` for Node via nap
 
 This slice implements media types, the extension table, RFC 2047 encoded-words, and quoted-printable. Multipart waits on `rustd-net` `MIMEHeader` (issue #9 shape decision 1 / issue #10). Do not duplicate that type here.
 
+Checkpoint 2 expands Go fixtures to 200+ `ParseMediaType` cases (Go 1.24 `mediatype_test.go` plus generated parameter variants), TS→Go `formatMediaType` / quoted-printable verify, and 1-byte quoted-printable reads.
+
 ## Differences from Go
 
 - **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.

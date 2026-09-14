@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
   parseMediaType, formatMediaType, typeByExtension, extensionsByType,
-  quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableError,
+  quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableError, QuotedPrintableReader,
   encodeWord, MimeWordDecoder, InvalidMediaParameterError, MediaTypeError,
 } from '../index.mjs';
 
@@ -38,7 +38,7 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
   assert.equal(generated.status, 0, generated.stderr);
   const fixture = JSON.parse(generated.stdout);
   assert.equal(fixture.package, 'mime');
-  assert.ok(fixture.parse.length >= 20, `parse cases ${fixture.parse.length}`);
+  assert.ok(fixture.parse.length >= 200, `parse cases ${fixture.parse.length}`);
   for (const c of fixture.parse) {
     const got = parseNative(c.in);
     assert.equal(got.mediaType, c.mediaType, `mediaType ${c.in}`);
@@ -59,6 +59,14 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
       const decoded = quotedPrintableDecode(Buffer.from(c.inHex, 'hex'));
       assert.equal(c.error, '', `expected error for ${c.id}: ${c.error}`);
       assert.equal(Buffer.from(decoded).toString('hex'), c.outHex, c.id);
+      const reader = new QuotedPrintableReader(Buffer.from(c.inHex, 'hex'));
+      const chunks = [];
+      for (;;) {
+        const piece = reader.read(1);
+        if (piece.length === 0) break;
+        chunks.push(Buffer.from(piece));
+      }
+      assert.equal(Buffer.concat(chunks).toString('hex'), c.outHex, `1-byte ${c.id}`);
     } catch (err) {
       assert.ok(err instanceof QuotedPrintableError, c.id);
       assert.equal(err.message, c.error, c.id);
@@ -81,10 +89,10 @@ test('Go generates media-type, quoted-printable, RFC 2047 and extension fixtures
 });
 
 test('JS generates quoted-printable and media types → Go verifies', () => {
-  const parse = [
-    { in: 'text/plain; charset=utf-8', ...parseNative('text/plain; charset=utf-8') },
-    { in: 'attachment; filename="x y.txt"', ...parseNative('attachment; filename="x y.txt"') },
-  ];
+  const generated = go();
+  assert.equal(generated.status, 0, generated.stderr);
+  const fixture = JSON.parse(generated.stdout);
+  const parse = fixture.parse.map((c) => ({ in: c.in, ...parseNative(c.in) }));
   const qpEnc = [0, 1, 17, 75, 76, 200].map((length, i) => {
     const data = Uint8Array.from({ length }, (_, j) => (j * 31 + i) & 255);
     const encoded = quotedPrintableEncode(data, { binary: true });

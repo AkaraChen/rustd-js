@@ -20,9 +20,27 @@ importers:
 
   packages/_template: {}
 
+  packages/rustd-archive: {}
+
+  packages/rustd-checksum: {}
+
+  packages/rustd-compress: {}
+
+  packages/rustd-containers: {}
+
   packages/rustd-crypto: {}
 
+  packages/rustd-gotool: {}
+
+  packages/rustd-image: {}
+
   packages/rustd-log: {}
+
+  packages/rustd-mime: {}
+
+  packages/rustd-serial: {}
+
+  packages/rustd-unicode: {}
 
 packages:
 
