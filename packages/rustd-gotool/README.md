@@ -5,18 +5,19 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 12 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 13 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
 / `constBinaryOp` / `constUnaryOp` / `constShift` vs Go `MakeInt64` /
 `Int64Val` / `Compare` / `Sign` / `BitLen` / `BinaryOp` including AND_NOT /
 `UnaryOp` ADD/SUB/XOR / `Shift` SHL/SHR), Int/Float `constToString` /
-`constFloat64Val` vs Go `StringVal` / `Float64Val`, and Int/Float
+`constFloat64Val` vs Go `StringVal` / `Float64Val`, Int/Float
 `constCompare` vs Go `Compare` (`big.Rat.Cmp`, including mixed Int vs QUO
-Float).
-`go/format` / `gofmt`, Complex/`MakeFromLiteral`/Bool/String, and
-`go/build/constraint` are **not** in this release. API is `0.x` and unstable.
+Float), and Float (plus mixed Int/Float) `constBinaryOp` ADD/SUB/MUL/QUO vs
+Go `BinaryOp` (`match` to `big.Rat`, then `makeRat`).
+`go/format` / `gofmt`, Complex/`MakeFromLiteral`/Bool/String, Float UnaryOp,
+and `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
 ```js
 import {
@@ -34,6 +35,7 @@ constToInt(constMakeInt64(1n)); // [1n, true]
 constToString(constMakeInt64(1n)); // ["", false] — Int is not a Go string constant
 constFloat64Val(constMakeInt64(1n)); // [1, true]
 constBinaryOp(TOKEN.ADD, constMakeInt64(1n), constMakeInt64(2n)).toString(); // "3"
+constBinaryOp(TOKEN.ADD, constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)).toString(); // "3/2"
 constUnaryOp(TOKEN.XOR, constMakeInt64(0n), 8).toString(); // "255"
 constShift(TOKEN.SHL, constMakeInt64(1n), 63n).toString(); // "9223372036854775808"
 
@@ -89,10 +91,14 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 - `ast.Fprint` is the debug printer, not `gofmt`. `go/format` is not shipped.
 - `GoConstValue` is an opaque handle (Go's `constant.Value` is an interface).
   `constMakeInt64` still requires a JS `bigint` that fits in Go `int64`.
-  `constBinaryOp` is Int-only ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
-  ADD/SUB/MUL/REM/AND/OR/XOR/AND_NOT stay `Int` (arbitrary precision).
+  `constBinaryOp` is Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT, plus Float
+  (and mixed Int/Float) ADD/SUB/MUL/QUO.
+  ADD/SUB/MUL/REM/AND/OR/XOR/AND_NOT of two Ints stay `Int` (arbitrary precision).
+  Mixed Int+Float and Float+Float ADD/SUB/MUL/QUO stay `Float` even when the
+  rat is an integer (`1/2+1/2` is Float `"1"`, matching Go `makeRat`).
   `token.QUO` matches Go: the result is `Float` (`big.Rat`); integer division
   is Go's `QUO_ASSIGN` and is not exported here.
+  REM/AND/OR/XOR/AND_NOT on a Float throw (Go panics).
   `constUnaryOp` is Int ADD/SUB/XOR. XOR `prec` matches Go: `0` is unlimited
   two's complement; `prec > 0` keeps the low `prec` bits.
   `constShift` is Int SHL/SHR; `s` must be a non-negative bigint in
@@ -107,15 +113,16 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   QUO/REM by zero returns `Unknown` instead of panicking. `constCompare` is
   Go `Compare` for Int/Float (`match` to `big.Rat` then `Cmp`): mixed Int vs
   Float is allowed; `2/4` equals `1/2`. Unknown still throws. `constBitLen`
-  throws on non-Int. Float BinaryOp, Complex, `MakeFromLiteral`, and
-  Bool/String stay later.
+  throws on non-Int. Float UnaryOp, Complex, `MakeFromLiteral`, and
+  Bool/String stay later. Large-component rats that Go promotes to 512-bit
+  `floatVal` (`BitLen >= 4096`) are not in this checkpoint.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **746,400 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **752,192 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 746400 Sep 14 22:47 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 752192 Sep 14 22:57 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```

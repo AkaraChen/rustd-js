@@ -114,7 +114,26 @@ func main() {
 	verifyConstantValFlag := flag.Bool("verify-constant-val", false, "verify a constant-int-float-val packet read from stdin")
 	constantFCmpFlag := flag.Bool("constant-float-compare", false, "dump go/constant Float constCompare fixtures")
 	verifyConstantFCmpFlag := flag.Bool("verify-constant-float-compare", false, "verify a constant-float-compare packet read from stdin")
+	constantFBinFlag := flag.Bool("constant-float-binop", false, "dump go/constant Float BinaryOp fixtures")
+	verifyConstantFBinFlag := flag.Bool("verify-constant-float-binop", false, "verify a constant-float-binop packet read from stdin")
 	flag.Parse()
+	if *verifyConstantFBinFlag {
+		verifyConstantFloatBin(os.Stdin)
+		return
+	}
+	if *constantFBinFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantFloatBin(writer)
+		return
+	}
 	if *verifyConstantFCmpFlag {
 		verifyConstantFloatCompare(os.Stdin)
 		return
