@@ -38,6 +38,8 @@ importers:
 
   packages/rustd-log: {}
 
+  packages/rustd-mail: {}
+
   packages/rustd-mathx: {}
 
   packages/rustd-mime: {}
