@@ -248,16 +248,28 @@ type fixtureFile struct {
 }
 
 type randomUtf8 struct {
-	Len       int  `json:"len"`
-	Valid     bool `json:"valid"`
-	RuneCount int  `json:"runeCount"`
+	Len             int    `json:"len"`
+	Valid           bool   `json:"valid"`
+	RuneCount       int    `json:"runeCount"`
+	RecodeLen       int    `json:"recodeLen"`
+	RecodeChecksum  uint32 `json:"recodeChecksum"`
+	RecodeValid     bool   `json:"recodeValid"`
+	RecodeRuneCount int    `json:"recodeRuneCount"`
 }
 
 type utf8Fix struct {
-	SingleByte [][3]int     `json:"singleByte"`
-	TwoByte    twoByteFix   `json:"twoByte"`
-	Samples    []utf8Sample `json:"samples"`
-	RuneLen    [][2]int32   `json:"runeLen"`
+	SingleByte [][3]int      `json:"singleByte"`
+	TwoByte    twoByteFix    `json:"twoByte"`
+	Samples    []utf8Sample  `json:"samples"`
+	RuneLen    [][2]int32    `json:"runeLen"`
+	RoundTrip  utf8RoundTrip `json:"roundTrip"`
+}
+
+type utf8RoundTrip struct {
+	AllValidLen            int    `json:"allValidLen"`
+	AllValidChecksum       uint32 `json:"allValidChecksum"`
+	AllValidRecodeEqual    bool   `json:"allValidRecodeEqual"`
+	AllValidRecodeChecksum uint32 `json:"allValidRecodeChecksum"`
 }
 
 type twoByteFix struct {
@@ -271,10 +283,11 @@ type twoByteFix struct {
 }
 
 type utf8Sample struct {
-	Hex   string `json:"hex"`
-	R     int32  `json:"r"`
-	Size  int    `json:"size"`
-	Valid bool   `json:"valid"`
+	Hex       string `json:"hex"`
+	R         int32  `json:"r"`
+	Size      int    `json:"size"`
+	Valid     bool   `json:"valid"`
+	RecodeHex string `json:"recodeHex"`
 }
 
 type utf16Fix struct {
@@ -418,9 +431,62 @@ func hexBytes(p []byte) string {
 	return b.String()
 }
 
+func recode(p []byte) []byte {
+	out := make([]byte, 0, len(p))
+	for i := 0; i < len(p); {
+		r, size := utf8.DecodeRune(p[i:])
+		if size < 1 {
+			size = 1
+		}
+		out = utf8.AppendRune(out, r)
+		i += size
+	}
+	return out
+}
+
+func checksumBytes(p []byte) uint32 {
+	h := uint32(2166136261)
+	h = mix32(h, uint32(len(p)))
+	for _, b := range p {
+		h = mix32(h, uint32(b))
+	}
+	return h
+}
+
 func decodeSample(p []byte) utf8Sample {
 	r, size := utf8.DecodeRune(p)
-	return utf8Sample{Hex: hexBytes(p), R: r, Size: size, Valid: utf8.Valid(p)}
+	return utf8Sample{
+		Hex:       hexBytes(p),
+		R:         r,
+		Size:      size,
+		Valid:     utf8.Valid(p),
+		RecodeHex: hexBytes(recode(p)),
+	}
+}
+
+func utf8RoundTripFixtures() utf8RoundTrip {
+	all := make([]byte, 0, 1<<22)
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if utf8.ValidRune(r) {
+			all = utf8.AppendRune(all, r)
+		}
+	}
+	redone := recode(all)
+	equal := len(all) == len(redone)
+	if equal {
+		for i := range all {
+			if all[i] != redone[i] {
+				equal = false
+				break
+			}
+		}
+	}
+	return utf8RoundTrip{
+		AllValidLen:            len(all),
+		AllValidChecksum:       checksumBytes(all),
+		AllValidRecodeEqual:    equal,
+		AllValidRecodeChecksum: checksumBytes(redone),
+	}
 }
 
 func utf8TwoByteFixtures() twoByteFix {
@@ -565,6 +631,7 @@ func writeFixtures(dir string, named []namedTable) {
 	for _, r := range []int32{-1, 0, 0x7f, 0x80, 0x7ff, 0x800, 0xd800, 0xdfff, 0xffff, 0x10000, 0x10ffff, 0x110000, utf8.RuneError} {
 		fx.Utf8.RuneLen = append(fx.Utf8.RuneLen, [2]int32{r, int32(utf8.RuneLen(r))})
 	}
+	fx.Utf8.RoundTrip = utf8RoundTripFixtures()
 
 	for _, r := range []rune{0, 'A', 0xD800, 0xDFFF, 0xFFFF, 0x10000, 0x1F600, 0x10FFFF, 0x110000, -1} {
 		units := utf16.Encode([]rune{r})
@@ -578,7 +645,16 @@ func writeFixtures(dir string, named []namedTable) {
 	fx.Utf16.Full = utf16FullChecksums()
 
 	randBuf := lcgBytes(1 << 20)
-	fx.RandomUtf8 = randomUtf8{Len: len(randBuf), Valid: utf8.Valid(randBuf), RuneCount: utf8.RuneCount(randBuf)}
+	randRecode := recode(randBuf)
+	fx.RandomUtf8 = randomUtf8{
+		Len:             len(randBuf),
+		Valid:           utf8.Valid(randBuf),
+		RuneCount:       utf8.RuneCount(randBuf),
+		RecodeLen:       len(randRecode),
+		RecodeChecksum:  checksumBytes(randRecode),
+		RecodeValid:     utf8.Valid(randRecode),
+		RecodeRuneCount: utf8.RuneCount(randRecode),
+	}
 
 	fx.JsDiffs = jsDiffs{
 		ToUpper: [][2]string{{"ß", string(unicode.ToUpper('ß'))}, {"ﬁ", string(unicode.ToUpper('ﬁ'))}, {"ı", string(unicode.ToUpper('ı'))}},
