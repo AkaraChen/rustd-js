@@ -5,12 +5,14 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 5 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 6 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, plus §4.8 edges (empty, comments-only, illegal UTF-8,
-unclosed comment/string, nested parens, `_` type parameters). `go/format` /
-`gofmt`, `go/constant`, and `go/build/constraint` are **not** in this release.
-API is `0.x` and unstable.
+unclosed comment/string, nested parens, `_` type parameters, 2048-rune
+identifier / 16KiB string line, `//go:build` syntax errors, nested generic
+instantiation / `IndexListExpr`, interface-method type parameters).
+`go/format` / `gofmt`, `go/constant`, and `go/build/constraint` are **not**
+in this release. API is `0.x` and unstable.
 
 ```js
 import {
@@ -65,6 +67,10 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   thread cannot stack-overflow. Go's `go/parser` allows 1e5 because goroutine
   stacks grow. Inputs Go still accepts past 1024 levels are reported as parse
   errors here. `go/format` is still deferred.
+- `//go:build` constraint syntax errors are **not** parse errors. Matching Go's
+  `go/parser`, a malformed `//go:build` line stays a comment (`File.GoVersion`
+  stays `""`). `constraint.Parse` belongs to the deferred
+  `go/build/constraint` slice.
 - `ast.Fprint` is the debug printer, not `gofmt`. `go/format` is not shipped.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
