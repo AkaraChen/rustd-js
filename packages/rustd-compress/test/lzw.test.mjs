@@ -270,18 +270,41 @@ test('1MiB LZW matches Go compress and round-trips for all litWidth × order', (
   }
 });
 
-test('lzwCompressStream matches one-shot', async () => {
-  const opts = { order: 'msb', litWidth: 7 };
-  const input = Uint8Array.from({ length: 2048 }, (_, i) => (i * 3) & 127);
-  const expected = lzwCompress(input, opts);
-  async function* chunks() {
-    yield input.subarray(0, 1);
-    yield input.subarray(1, 64);
-    yield input.subarray(64);
+test('lzwCompressStream matches one-shot and LzwCompressor across splits', async () => {
+  const input = Uint8Array.from({ length: 2048 }, (_, i) => (i * 3) & 255);
+  for (const order of ['lsb', 'msb']) {
+    for (const litWidth of [2, 8]) {
+      const max = (1 << litWidth) - 1;
+      const plain = Uint8Array.from(input, (b) => b & max);
+      const opts = { order, litWidth };
+      const expected = lzwCompress(plain, opts);
+      for (const size of [1, 2, 3, 7, 64, 1024, plain.length]) {
+        const enc = new LzwCompressor(opts);
+        for (let i = 0; i < plain.length; i += size) enc.write(plain.subarray(i, i + size));
+        assert.equal(hex(enc.finish()), hex(expected), `${order}-${litWidth} class split ${size}`);
+
+        async function* chunks() {
+          for (let i = 0; i < plain.length; i += size) {
+            yield plain.subarray(i, i + size);
+          }
+        }
+        const out = [];
+        for await (const part of lzwCompressStream(chunks(), opts)) out.push(part);
+        assert.equal(hex(Buffer.concat(out)), hex(expected), `${order}-${litWidth} stream split ${size}`);
+      }
+    }
   }
-  const out = [];
-  for await (const part of lzwCompressStream(chunks(), opts)) out.push(part);
-  assert.equal(hex(Buffer.concat(out)), hex(expected));
+});
+
+test('lzwCompressStream empty iterable matches one-shot empty', async () => {
+  for (const order of ['lsb', 'msb']) {
+    const opts = { order, litWidth: 8 };
+    const expected = lzwCompress(new Uint8Array(), opts);
+    async function* chunks() {}
+    const out = [];
+    for await (const part of lzwCompressStream(chunks(), opts)) out.push(part);
+    assert.equal(hex(Buffer.concat(out)), hex(expected), order);
+  }
 });
 
 test('lzwDecompressStream matches one-shot and LzwDecompressor across splits', async () => {
