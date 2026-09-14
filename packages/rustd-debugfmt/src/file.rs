@@ -213,18 +213,6 @@ pub(crate) fn u64_big(v: u64) -> BigInt {
     BigInt::from(v)
 }
 
-fn native_arch() -> Architecture {
-    if cfg!(target_arch = "x86_64") {
-        Architecture::X86_64
-    } else if cfg!(target_arch = "aarch64") {
-        Architecture::Aarch64
-    } else if cfg!(target_arch = "x86") {
-        Architecture::I386
-    } else {
-        Architecture::Unknown
-    }
-}
-
 fn arch_name(arch: Architecture) -> String {
     match arch {
         Architecture::X86_64 | Architecture::X86_64_X32 => "amd64".into(),
@@ -244,44 +232,10 @@ fn arch_name(arch: Architecture) -> String {
 fn select_slice(data: &[u8]) -> Result<(usize, usize, bool, Kind)> {
     let kind = sniff::sniff(data).ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
     if kind == Kind::Macho && sniff::is_macho_fat(data) {
-        if let Ok((off, len)) = fat_slice(data) {
-            return Ok((off, len, true, Kind::Macho));
-        }
-        return Err(fail(
-            "UnsupportedFeatureError",
-            "fat Mach-O has no slice for this process architecture",
-        ));
+        let (off, len) = crate::macho::select_fat_slice(data)?;
+        return Ok((off, len, true, Kind::Macho));
     }
     Ok((0, data.len(), false, kind))
-}
-
-fn fat_slice(data: &[u8]) -> std::result::Result<(usize, usize), ()> {
-    use object::read::macho::{FatArch, MachOFatFile32, MachOFatFile64};
-    let native = native_arch();
-    let pick = |offset: u64, size: u64, architecture: Architecture| -> Option<(usize, usize)> {
-        if architecture != native {
-            return None;
-        }
-        let off = usize::try_from(offset).ok()?;
-        let len = usize::try_from(size).ok()?;
-        off.checked_add(len).filter(|end| *end <= data.len())?;
-        Some((off, len))
-    };
-    if let Ok(fat) = MachOFatFile32::parse(data) {
-        for arch in fat.arches() {
-            if let Some(s) = pick(u64::from(arch.offset()), u64::from(arch.size()), arch.architecture()) {
-                return Ok(s);
-            }
-        }
-    }
-    if let Ok(fat) = MachOFatFile64::parse(data) {
-        for arch in fat.arches() {
-            if let Some(s) = pick(arch.offset(), arch.size(), arch.architecture()) {
-                return Ok(s);
-            }
-        }
-    }
-    Err(())
 }
 
 fn open_shared(source: Source, size: u64, max_section_bytes: u64, base: u64) -> Result<NativeBinaryFile> {

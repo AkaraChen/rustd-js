@@ -288,6 +288,130 @@ test('Java CAFEBABE is not sniffed as Mach-O fat', () => {
   assert.equal(sniff(java), null);
 });
 
+const CPU_TYPE_X86_64 = 0x01000007;
+const CPU_TYPE_ARM64 = 0x0100000c;
+
+function nativeFatCpu() {
+  if (process.arch === 'arm64') return CPU_TYPE_ARM64;
+  if (process.arch === 'x64' || process.arch === 'x86_64') return CPU_TYPE_X86_64;
+  throw new Error(`unsupported test arch ${process.arch}`);
+}
+
+function foreignFatCpu() {
+  return nativeFatCpu() === CPU_TYPE_X86_64 ? CPU_TYPE_ARM64 : CPU_TYPE_X86_64;
+}
+
+function fat32({ nfatArch = 1, arches, extra = 0 }) {
+  const entries = arches ?? [];
+  const buf = Buffer.alloc(8 + nfatArch * 20 + extra);
+  buf.writeUInt32BE(0xcafebabe, 0);
+  buf.writeUInt32BE(nfatArch, 4);
+  for (let i = 0; i < entries.length; i += 1) {
+    const at = 8 + i * 20;
+    buf.writeUInt32BE(entries[i].cputype, at);
+    buf.writeUInt32BE(entries[i].cpusubtype ?? 0, at + 4);
+    buf.writeUInt32BE(entries[i].offset, at + 8);
+    buf.writeUInt32BE(entries[i].size, at + 12);
+    buf.writeUInt32BE(entries[i].align ?? 0, at + 16);
+  }
+  return new Uint8Array(buf);
+}
+
+function fat64({ nfatArch = 1, arches, extra = 0 }) {
+  const entries = arches ?? [];
+  const buf = Buffer.alloc(8 + nfatArch * 32 + extra);
+  buf.writeUInt32BE(0xcafebabf, 0);
+  buf.writeUInt32BE(nfatArch, 4);
+  for (let i = 0; i < entries.length; i += 1) {
+    const at = 8 + i * 32;
+    buf.writeUInt32BE(entries[i].cputype, at);
+    buf.writeUInt32BE(entries[i].cpusubtype ?? 0, at + 4);
+    buf.writeBigUInt64BE(BigInt(entries[i].offset), at + 8);
+    buf.writeBigUInt64BE(BigInt(entries[i].size), at + 16);
+    buf.writeUInt32BE(entries[i].align ?? 0, at + 24);
+    buf.writeUInt32BE(0, at + 28);
+  }
+  return new Uint8Array(buf);
+}
+
+test('issue #18 §4.7: Mach-O fat missing native arch is UnsupportedFeatureError', () => {
+  const bytes = fat32({
+    nfatArch: 1,
+    extra: 16,
+    arches: [{ cputype: foreignFatCpu(), offset: 28, size: 16 }],
+  });
+  assert.equal(sniff(bytes.subarray(0, 8)), 'macho');
+  assert.throws(
+    () => openBytes(bytes),
+    (err) => {
+      assert.ok(err instanceof UnsupportedFeatureError, String(err));
+      assert.match(String(err.message), /no slice for this process architecture/);
+      return true;
+    },
+  );
+});
+
+test('issue #18 §4.7: Mach-O fat header offset OOB is BinaryFormatError', () => {
+  const oobOffset = 4096;
+  const fat = fat32({
+    nfatArch: 1,
+    arches: [{ cputype: nativeFatCpu(), offset: oobOffset, size: 16 }],
+  });
+  assert.equal(fat.length, 28);
+  assert.throws(
+    () => openBytes(fat),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'truncated');
+      assert.equal(err.offset, BigInt(oobOffset));
+      return true;
+    },
+  );
+
+  const pastEof = fat32({
+    nfatArch: 1,
+    extra: 8,
+    arches: [{ cputype: nativeFatCpu(), offset: 28, size: 32 }],
+  });
+  assert.equal(pastEof.length, 36);
+  assert.throws(
+    () => openBytes(pastEof),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'truncated');
+      assert.equal(err.offset, 28n);
+      return true;
+    },
+  );
+
+  const tableCut = fat32({ nfatArch: 2, arches: [{ cputype: nativeFatCpu(), offset: 48, size: 4 }] });
+  assert.equal(tableCut.length, 8 + 40);
+  const truncatedTable = tableCut.subarray(0, 8 + 20);
+  assert.throws(
+    () => openBytes(truncatedTable),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'truncated');
+      assert.equal(err.offset, 28n);
+      return true;
+    },
+  );
+
+  const fat64oob = fat64({
+    nfatArch: 1,
+    arches: [{ cputype: nativeFatCpu(), offset: 0x1_0000_0000, size: 16 }],
+  });
+  assert.throws(
+    () => openBytes(fat64oob),
+    (err) => {
+      assert.ok(err instanceof BinaryFormatError, String(err));
+      assert.equal(err.kind, 'truncated');
+      assert.equal(err.offset, 0x1_0000_0000n);
+      return true;
+    },
+  );
+});
+
 test('Go linux/amd64 with DWARF: dwarf entries, line table, gosym vs debug/gosym', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-dwarf-'));
   const out = join(dir, 'hello');
