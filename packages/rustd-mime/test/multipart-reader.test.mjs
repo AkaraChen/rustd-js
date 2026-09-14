@@ -792,3 +792,96 @@ test('nextPart ignores GODEBUG multipartmaxparts (ReadForm-only in Go 1.24)', ()
   assertPartsMatch(parts, goParts);
   assert.deepEqual(readAll1Byte('b', body), parts);
 });
+
+function goReadForm(body, boundary, maxMemory = 1 << 20, extraEnv = {}) {
+  const generated = go(
+    ['-multipart-readform'],
+    JSON.stringify({ boundary, bodyHex: hex(body), maxMemory }),
+    extraEnv,
+  );
+  assert.equal(generated.status, 0, generated.stderr);
+  return JSON.parse(generated.stdout);
+}
+
+function nativeReadForm(boundary, body, maxMemory = 1 << 20, extra = {}) {
+  const reader = new MultipartReader({ boundary, ...extra });
+  reader.write(body);
+  return reader.readForm(maxMemory);
+}
+
+function assertFormValuesMatch(form, goForm) {
+  assert.equal(goForm.error ?? '', '');
+  const keys = Object.keys(form.value).sort();
+  assert.deepEqual(keys, Object.keys(goForm.value).sort());
+  for (const key of keys) {
+    assert.deepEqual(form.value[key], goForm.value[key], `value[${key}]`);
+  }
+}
+
+test('readForm 1000 parts succeeds vs Go; 1001 is MessageTooLargeError', () => {
+  const body1000 = bodyWithPartCount(1000);
+  const go1000 = goReadForm(body1000, 'b');
+  const form1000 = nativeReadForm('b', body1000);
+  assertFormValuesMatch(form1000, go1000);
+  assert.equal(Object.keys(form1000.value).length, 1000);
+  assert.equal(form1000.value.f0[0], '0');
+  assert.equal(form1000.value.f999[0], '999');
+  assert.deepEqual(form1000.file, Object.create(null));
+  assert.equal(Object.keys(go1000.file).length, 0);
+
+  const body1001 = bodyWithPartCount(1001);
+  const go1001 = goReadForm(body1001, 'b');
+  assert.equal(go1001.error, 'multipart: message too large');
+  assert.throws(() => nativeReadForm('b', body1001), (err) => {
+    assert.ok(err instanceof MessageTooLargeError);
+    assert.equal(err.message, 'multipart: message too large');
+    return true;
+  });
+});
+
+test('readForm maxParts=3 matches GODEBUG multipartmaxparts=3', () => {
+  const okBody = bodyWithPartCount(3);
+  const goOk = goReadForm(okBody, 'b', 1 << 20, { GODEBUG: 'multipartmaxparts=3' });
+  const ok = nativeReadForm('b', okBody, 1 << 20, { maxParts: 3 });
+  assertFormValuesMatch(ok, goOk);
+  assert.equal(Object.keys(ok.value).length, 3);
+
+  const overBody = bodyWithPartCount(4);
+  const goOver = goReadForm(overBody, 'b', 1 << 20, { GODEBUG: 'multipartmaxparts=3' });
+  assert.equal(goOver.error, 'multipart: message too large');
+  assert.throws(
+    () => nativeReadForm('b', overBody, 1 << 20, { maxParts: 3 }),
+    MessageTooLargeError,
+  );
+});
+
+test('readForm 1000 files succeeds vs Go; 1001 is MessageTooLargeError', () => {
+  const w1000 = new MultipartWriter({ boundary: 'b' });
+  for (let i = 0; i < 1000; i++) {
+    const p = w1000.createFormFile(`file${i}`, `file${i}`);
+    p.write(Buffer.from(`value ${i}`));
+    p.end();
+  }
+  const body1000 = w1000.bytes();
+  const go1000 = goReadForm(body1000, 'b');
+  const form1000 = nativeReadForm('b', body1000);
+  assert.equal(go1000.error ?? '', '');
+  assert.equal(Object.keys(form1000.file).length, 1000);
+  assert.equal(Object.keys(go1000.file).length, 1000);
+  assert.equal(form1000.file.file0[0].filename, go1000.file.file0[0].filename);
+  assert.equal(form1000.file.file0[0].size, go1000.file.file0[0].size);
+  assert.equal(hex(form1000.file.file0[0].content), go1000.file.file0[0].bodyHex);
+  assert.equal(form1000.file.file999[0].filename, 'file999');
+  assert.deepEqual(form1000.value, Object.create(null));
+
+  const w1001 = new MultipartWriter({ boundary: 'b' });
+  for (let i = 0; i < 1001; i++) {
+    const p = w1001.createFormFile(`file${i}`, `file${i}`);
+    p.write(Buffer.from(`value ${i}`));
+    p.end();
+  }
+  const body1001 = w1001.bytes();
+  const go1001 = goReadForm(body1001, 'b');
+  assert.equal(go1001.error, 'multipart: message too large');
+  assert.throws(() => nativeReadForm('b', body1001), MessageTooLargeError);
+});

@@ -66,11 +66,23 @@ export class MultipartWriter {
   bytes(): Uint8Array
 }
 export function fileContentDisposition(fieldname: string, filename: string): string
+export interface FileHeader {
+  filename: string
+  header: MIMEHeader
+  size: number
+  content?: Uint8Array
+}
+export interface MultipartForm {
+  value: Record<string, string[]>
+  file: Record<string, FileHeader[]>
+}
 export class MultipartReader {
-  constructor(opts: { boundary: string; maxHeadersPerPart?: number; maxTotalHeaders?: number })
+  constructor(opts: { boundary: string; maxHeadersPerPart?: number; maxTotalHeaders?: number; maxParts?: number })
   write(chunk: Uint8Array): void
   nextPart(): MultipartPart | null
   nextRawPart(): MultipartPart | null
+  /** Go `ReadForm`. Part-count default 1000 (`maxParts` / `multipartmaxparts`). File spill and maxMemory accounting stay later. */
+  readForm(maxMemory: number): MultipartForm
 }
 export class MultipartPart {
   readonly header: MIMEHeader

@@ -53,7 +53,6 @@ test('nextPart missing Content-Disposition vs Go (checkpoint 22)', () => {
 
 test('nextPart part-count 1000/1001 vs Go (checkpoint 23); ReadForm later', () => {
   assert.equal(typeof api.MultipartReader.prototype.nextPart, 'function');
-  assert.equal(api.readForm, undefined, 'readForm');
   let s = '';
   for (let i = 0; i < 1001; i++) s += `--b\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\n${i}\r\n`;
   s += '--b--\r\n';
@@ -62,6 +61,24 @@ test('nextPart part-count 1000/1001 vs Go (checkpoint 23); ReadForm later', () =
   let n = 0;
   while (reader.nextPart() != null) n++;
   assert.equal(n, 1001);
+});
+
+test('readForm part-count 1000/1001 vs Go (checkpoint 24); file spill / maxMemory later', () => {
+  assert.equal(typeof api.MultipartReader.prototype.readForm, 'function');
+  let s = '';
+  for (let i = 0; i < 3; i++) s += `--b\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\n${i}\r\n`;
+  s += '--b--\r\n';
+  const ok = new api.MultipartReader({ boundary: 'b', maxParts: 3 });
+  ok.write(Buffer.from(s));
+  const form = ok.readForm(1024);
+  assert.equal(form.value.f0[0], '0');
+  assert.equal(form.value.f2[0], '2');
+  let overBody = '';
+  for (let i = 0; i < 4; i++) overBody += `--b\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\n${i}\r\n`;
+  overBody += '--b--\r\n';
+  const over = new api.MultipartReader({ boundary: 'b', maxParts: 3 });
+  over.write(Buffer.from(overBody));
+  assert.throws(() => over.readForm(1024), api.MessageTooLargeError);
 });
 
 test('documented Windows registry difference: no extra lookup API', () => {

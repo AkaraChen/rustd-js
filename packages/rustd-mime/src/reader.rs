@@ -1,9 +1,10 @@
-//! Go `mime/multipart.Reader.NextPart` / `NextRawPart` (Go 1.24 `multipart.go`).
+//! Go `mime/multipart.Reader.NextPart` / `NextRawPart` / `ReadForm` (Go 1.24).
 //!
 //! `NextPart` transparently decodes `Content-Transfer-Encoding: quoted-printable`
 //! and hides that header. `NextRawPart` leaves the CTE and body alone. `write`
 //! may split a boundary across chunks; `next_part` returns `Ok(None)` until a
-//! complete part (or the closing delimiter) is buffered. ReadForm limits are later.
+//! complete part (or the closing delimiter) is buffered. `read_form` applies
+//! the Go `multipartmaxparts` cap (default 1000). File spill / maxMemory later.
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
 use crate::mediatype::parse_media_type;
@@ -29,6 +30,20 @@ pub struct MultipartPart {
     pub file_name: String,
 }
 
+#[derive(Debug)]
+pub struct FormFileHeader {
+    pub filename: String,
+    pub header: Vec<(String, Vec<String>)>,
+    pub size: i64,
+    pub content: Vec<u8>,
+}
+
+#[derive(Debug, Default)]
+pub struct MultipartForm {
+    pub value: Vec<(String, Vec<String>)>,
+    pub file: Vec<(String, Vec<FormFileHeader>)>,
+}
+
 pub struct MultipartReader {
     buf: Vec<u8>,
     pos: usize,
@@ -40,14 +55,21 @@ pub struct MultipartReader {
     dash_boundary_dash: Vec<u8>,
     dash_boundary: Vec<u8>,
     max_headers_per_part: i64,
+    max_parts: i64,
 }
 
 impl MultipartReader {
+    #[allow(dead_code)]
     pub fn new(boundary: String) -> Self {
-        Self::with_max_headers(boundary, 10000)
+        Self::with_limits(boundary, 10000, 1000)
     }
 
+    #[allow(dead_code)]
     pub fn with_max_headers(boundary: String, max_headers_per_part: i64) -> Self {
+        Self::with_limits(boundary, max_headers_per_part, 1000)
+    }
+
+    pub fn with_limits(boundary: String, max_headers_per_part: i64, max_parts: i64) -> Self {
         let mut dash_boundary = Vec::with_capacity(2 + boundary.len());
         dash_boundary.extend_from_slice(b"--");
         dash_boundary.extend_from_slice(boundary.as_bytes());
@@ -67,6 +89,7 @@ impl MultipartReader {
             dash_boundary_dash,
             dash_boundary,
             max_headers_per_part,
+            max_parts,
         }
     }
 
@@ -80,6 +103,43 @@ impl MultipartReader {
 
     pub fn next_raw_part(&mut self) -> Result<Option<MultipartPart>, String> {
         self.next_part_opt(true)
+    }
+
+    /// Go `Reader.ReadForm` part-count cap (`multipartmaxparts`, default 1000).
+    /// `max_memory` is accepted for the Go signature; file spill / memory accounting stay later.
+    pub fn read_form(&mut self, _max_memory: i64) -> Result<MultipartForm, String> {
+        let mut remaining = self.max_parts;
+        let mut form = MultipartForm::default();
+        loop {
+            match self.next_part()? {
+                None => return Ok(form),
+                Some(part) => {
+                    if remaining <= 0 {
+                        return Err("multipart: message too large".into());
+                    }
+                    remaining -= 1;
+                    if part.form_name.is_empty() {
+                        continue;
+                    }
+                    if part.file_name.is_empty() {
+                        let value = String::from_utf8_lossy(&part.body).into_owned();
+                        append_value(&mut form.value, part.form_name, value);
+                    } else {
+                        let size = part.body.len() as i64;
+                        append_file(
+                            &mut form.file,
+                            part.form_name,
+                            FormFileHeader {
+                                filename: part.file_name,
+                                header: part.header,
+                                size,
+                                content: part.body,
+                            },
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn snapshot(&self) -> (usize, u32, bool, bool, Vec<u8>, Vec<u8>) {
@@ -141,8 +201,8 @@ impl MultipartReader {
                 let mut body = self.read_part_body()?;
                 self.current_open = false;
                 if !raw {
-                    body = maybe_decode_quoted_printable(&mut header, body)
-                        .map_err(StreamErr::Msg)?;
+                    body =
+                        maybe_decode_quoted_printable(&mut header, body).map_err(StreamErr::Msg)?;
                 }
                 let (form_name, file_name) = disposition_names(&header);
                 return Ok(Some(MultipartPart {
@@ -218,9 +278,7 @@ impl MultipartReader {
             match err {
                 Some(ReadErr::Eof) => return Ok(body),
                 Some(ReadErr::UnexpectedEof) => {
-                    return Err(StreamErr::Msg(
-                        "multipart: NextPart: unexpected EOF".into(),
-                    ))
+                    return Err(StreamErr::Msg("multipart: NextPart: unexpected EOF".into()))
                 }
                 None => {
                     if n == 0 {
@@ -356,7 +414,11 @@ fn read_mime_header(
     if *pos < buf.len() && (buf[*pos] == b' ' || buf[*pos] == b'\t') {
         let line = read_full_line(buf, pos)?;
         let shown = strip_nl(&line);
-        let shown = if shown.len() > 80 { &shown[..80] } else { shown };
+        let shown = if shown.len() > 80 {
+            &shown[..80]
+        } else {
+            shown
+        };
         return Err(StreamErr::Msg(format!(
             "malformed MIME header initial line: {}",
             String::from_utf8_lossy(shown)
@@ -531,6 +593,26 @@ fn quoted_go(bytes: &[u8]) -> String {
     format!("{:?}", String::from_utf8_lossy(bytes).as_ref())
 }
 
+fn append_value(fields: &mut Vec<(String, Vec<String>)>, name: String, value: String) {
+    if let Some(existing) = fields.iter_mut().find(|(k, _)| *k == name) {
+        existing.1.push(value);
+    } else {
+        fields.push((name, vec![value]));
+    }
+}
+
+fn append_file(
+    fields: &mut Vec<(String, Vec<FormFileHeader>)>,
+    name: String,
+    file: FormFileHeader,
+) {
+    if let Some(existing) = fields.iter_mut().find(|(k, _)| *k == name) {
+        existing.1.push(file);
+    } else {
+        fields.push((name, vec![file]));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,7 +645,10 @@ mod tests {
         r.write(b"--\r\n\r\n--\r\n");
         assert_eq!(r.next_part().unwrap_err(), "multipart: boundary is empty");
         let mut empty = MultipartReader::new(String::new());
-        assert_eq!(empty.next_part().unwrap_err(), "multipart: boundary is empty");
+        assert_eq!(
+            empty.next_part().unwrap_err(),
+            "multipart: boundary is empty"
+        );
     }
 
     #[test]
@@ -758,7 +843,12 @@ mod tests {
         assert_eq!(parts[2].form_name, "empty");
         assert_eq!(parts[2].body, b"");
         assert_eq!(
-            parts[1].header.iter().find(|(k, _)| k == "Content-Disposition").unwrap().1,
+            parts[1]
+                .header
+                .iter()
+                .find(|(k, _)| k == "Content-Disposition")
+                .unwrap()
+                .1,
             ["form-data; name=\"a\\\"b\""]
         );
     }
@@ -986,5 +1076,50 @@ Content-Transfer-Encoding: quoted-printable\r\n\
     fn next_part_1000_and_1001_parts_succeed_like_go() {
         assert_eq!(drain_parts(1000), 1000);
         assert_eq!(drain_parts(1001), 1001);
+    }
+
+    fn form_value_count(n: usize) -> Result<usize, String> {
+        let mut r = MultipartReader::new("b".into());
+        r.write(&body_with_part_count(n));
+        r.read_form(1 << 20)
+            .map(|form| form.value.iter().map(|(_, v)| v.len()).sum())
+    }
+
+    #[test]
+    fn read_form_1000_ok_1001_too_large() {
+        assert_eq!(form_value_count(1000).unwrap(), 1000);
+        assert_eq!(
+            form_value_count(1001).unwrap_err(),
+            "multipart: message too large"
+        );
+    }
+
+    #[test]
+    fn read_form_max_parts_custom_limit() {
+        let mut ok = MultipartReader::with_limits("b".into(), 10000, 3);
+        ok.write(&body_with_part_count(3));
+        assert_eq!(ok.read_form(1024).unwrap().value.len(), 3);
+
+        let mut over = MultipartReader::with_limits("b".into(), 10000, 3);
+        over.write(&body_with_part_count(4));
+        assert_eq!(
+            over.read_form(1024).unwrap_err(),
+            "multipart: message too large"
+        );
+    }
+
+    #[test]
+    fn read_form_empty_form_name_still_counts() {
+        let mut body = Vec::new();
+        for _ in 0..2 {
+            body.extend(b"--b\r\nContent-Type: text/plain\r\n\r\nx\r\n");
+        }
+        body.extend(b"--b--\r\n");
+        let mut r = MultipartReader::with_limits("b".into(), 10000, 1);
+        r.write(&body);
+        assert_eq!(
+            r.read_form(1024).unwrap_err(),
+            "multipart: message too large"
+        );
     }
 }

@@ -302,15 +302,46 @@ pub struct NativeMultipartReader {
     inner: reader::MultipartReader,
 }
 
+#[napi(object)]
+pub struct NativeFormValueField {
+    pub key: String,
+    pub values: Vec<String>,
+}
+
+#[napi(object)]
+pub struct NativeFileHeader {
+    pub filename: String,
+    pub header: Vec<NativeHeaderField>,
+    pub size: i64,
+    pub content: Uint8Array,
+}
+
+#[napi(object)]
+pub struct NativeFormFileField {
+    pub key: String,
+    pub files: Vec<NativeFileHeader>,
+}
+
+#[napi(object)]
+pub struct NativeMultipartForm {
+    pub value: Vec<NativeFormValueField>,
+    pub file: Vec<NativeFormFileField>,
+}
+
 #[napi]
 impl NativeMultipartReader {
     #[napi(constructor)]
-    pub fn new(boundary: String, max_headers_per_part: Option<i64>) -> Self {
+    pub fn new(
+        boundary: String,
+        max_headers_per_part: Option<i64>,
+        max_parts: Option<i64>,
+    ) -> Self {
         Self {
-            inner: match max_headers_per_part {
-                Some(n) => reader::MultipartReader::with_max_headers(boundary, n),
-                None => reader::MultipartReader::new(boundary),
-            },
+            inner: reader::MultipartReader::with_limits(
+                boundary,
+                max_headers_per_part.unwrap_or(10000),
+                max_parts.unwrap_or(1000),
+            ),
         }
     }
 
@@ -327,6 +358,54 @@ impl NativeMultipartReader {
     #[napi]
     pub fn next_raw_part(&mut self) -> Result<Option<NativeMultipartPartData>> {
         map_next_part(self.inner.next_raw_part())
+    }
+
+    #[napi]
+    pub fn read_form(&mut self, max_memory: i64) -> Result<NativeMultipartForm> {
+        match self.inner.read_form(max_memory) {
+            Ok(form) => Ok(map_form(form)),
+            Err(e) => map_reader_err(e),
+        }
+    }
+}
+
+fn map_reader_err<T>(e: String) -> Result<T> {
+    if e.starts_with("quotedprintable:") {
+        Err(error("QuotedPrintableError", &e))
+    } else if e == "multipart: message too large" {
+        Err(error("MessageTooLargeError", &e))
+    } else {
+        Err(error("MultipartError", &e))
+    }
+}
+
+fn map_form(form: reader::MultipartForm) -> NativeMultipartForm {
+    NativeMultipartForm {
+        value: form
+            .value
+            .into_iter()
+            .map(|(key, values)| NativeFormValueField { key, values })
+            .collect(),
+        file: form
+            .file
+            .into_iter()
+            .map(|(key, files)| NativeFormFileField {
+                key,
+                files: files
+                    .into_iter()
+                    .map(|fh| NativeFileHeader {
+                        filename: fh.filename,
+                        header: fh
+                            .header
+                            .into_iter()
+                            .map(|(key, values)| NativeHeaderField { key, values })
+                            .collect(),
+                        size: fh.size,
+                        content: fh.content.into(),
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
@@ -345,8 +424,6 @@ fn map_next_part(
             body: part.body.into(),
         })),
         Ok(None) => Ok(None),
-        Err(e) if e.starts_with("quotedprintable:") => Err(error("QuotedPrintableError", &e)),
-        Err(e) if e == "multipart: message too large" => Err(error("MessageTooLargeError", &e)),
-        Err(e) => Err(error("MultipartError", &e)),
+        Err(e) => map_reader_err(e),
     }
 }

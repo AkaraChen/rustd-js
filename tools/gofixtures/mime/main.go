@@ -811,6 +811,25 @@ type mpReadOut struct {
 	Error string      `json:"error"`
 }
 
+type mpFormIn struct {
+	Boundary  string `json:"boundary"`
+	BodyHex   string `json:"bodyHex"`
+	MaxMemory int64  `json:"maxMemory"`
+}
+
+type mpFileOut struct {
+	Filename string              `json:"filename"`
+	Header   map[string][]string `json:"header"`
+	Size     int64               `json:"size"`
+	BodyHex  string              `json:"bodyHex"`
+}
+
+type mpFormOut struct {
+	Value map[string][]string    `json:"value"`
+	File  map[string][]mpFileOut `json:"file"`
+	Error string                 `json:"error"`
+}
+
 func decodeStdinJSON(v any) {
 	dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
 	if err := dec.Decode(v); err != nil {
@@ -981,11 +1000,68 @@ func handleMultipartRead() {
 	emitJSON(out)
 }
 
+func handleMultipartReadForm() {
+	var in mpFormIn
+	decodeStdinJSON(&in)
+	body := unhex(in.BodyHex)
+	r := multipart.NewReader(bytes.NewReader(body), in.Boundary)
+	maxMemory := in.MaxMemory
+	if maxMemory == 0 {
+		maxMemory = 1 << 20
+	}
+	out := mpFormOut{Value: map[string][]string{}, File: map[string][]mpFileOut{}}
+	form, err := r.ReadForm(maxMemory)
+	if err != nil {
+		out.Error = err.Error()
+		emitJSON(out)
+		return
+	}
+	defer form.RemoveAll()
+	for k, vs := range form.Value {
+		out.Value[k] = vs
+	}
+	for k, fhs := range form.File {
+		files := make([]mpFileOut, 0, len(fhs))
+		for _, fh := range fhs {
+			f, openErr := fh.Open()
+			part := mpFileOut{
+				Filename: fh.Filename,
+				Header:   map[string][]string{},
+				Size:     fh.Size,
+			}
+			for hk, hv := range fh.Header {
+				part.Header[hk] = hv
+			}
+			if openErr != nil {
+				out.Error = openErr.Error()
+				files = append(files, part)
+				out.File[k] = files
+				emitJSON(out)
+				return
+			}
+			slurp, readErr := io.ReadAll(f)
+			_ = f.Close()
+			part.BodyHex = hexOf(slurp)
+			if readErr != nil {
+				out.Error = readErr.Error()
+				files = append(files, part)
+				out.File[k] = files
+				emitJSON(out)
+				return
+			}
+			files = append(files, part)
+		}
+		out.File[k] = files
+	}
+	emitJSON(out)
+}
+
 func main() {
 	out := flag.String("out", "", "output JSON file")
 	verify := flag.Bool("verify", false, "verify packet from stdin")
 	mpWrite := flag.Bool("multipart-write", false, "Go multipart.Writer from stdin JSON fields")
 	mpRead := flag.Bool("multipart-read", false, "Go multipart.NewReader from stdin JSON bodyHex")
+	mpReadForm := flag.Bool("multipart-readform", false, "Go multipart.Reader.ReadForm from stdin JSON bodyHex")
 	fcd := flag.Bool("file-content-disposition", false, "Go CreateFormFile Content-Disposition from stdin JSON")
 	flag.Parse()
 	if *mpWrite {
@@ -994,6 +1070,10 @@ func main() {
 	}
 	if *mpRead {
 		handleMultipartRead()
+		return
+	}
+	if *mpReadForm {
+		handleMultipartReadForm()
 		return
 	}
 	if *fcd {

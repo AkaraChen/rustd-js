@@ -329,7 +329,10 @@ class MultipartReader {
     if (opts.maxTotalHeaders !== undefined && (typeof opts.maxTotalHeaders !== 'number' || opts.maxTotalHeaders < 0 || !Number.isInteger(opts.maxTotalHeaders))) {
       throw new TypeError('mime: maxTotalHeaders must be a non-negative integer');
     }
-    this._handle = native(() => new binding.NativeMultipartReader(opts.boundary, opts.maxHeadersPerPart));
+    if (opts.maxParts !== undefined && (typeof opts.maxParts !== 'number' || opts.maxParts < 0 || !Number.isInteger(opts.maxParts))) {
+      throw new TypeError('mime: maxParts must be a non-negative integer');
+    }
+    this._handle = native(() => new binding.NativeMultipartReader(opts.boundary, opts.maxHeadersPerPart, opts.maxParts));
   }
   write(chunk) { native(() => this._handle.write(bytes(chunk))); }
   nextPart() {
@@ -341,6 +344,23 @@ class MultipartReader {
     const data = native(() => this._handle.nextRawPart());
     if (data == null) return null;
     return new MultipartPart(data);
+  }
+  readForm(maxMemory) {
+    if (typeof maxMemory !== 'number' || !Number.isInteger(maxMemory)) {
+      throw new TypeError('mime: maxMemory must be an integer');
+    }
+    const data = native(() => this._handle.readForm(maxMemory));
+    const value = Object.create(null);
+    for (const field of data.value) value[field.key] = field.values;
+    const file = Object.create(null);
+    for (const field of data.file) {
+      file[field.key] = field.files.map((fh) => {
+        const header = Object.create(null);
+        for (const h of fh.header) header[h.key] = h.values;
+        return { filename: fh.filename, header, size: Number(fh.size), content: fh.content };
+      });
+    }
+    return { value, file };
   }
 }
 
