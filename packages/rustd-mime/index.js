@@ -40,6 +40,7 @@ class QuotedPrintableError extends MimeError {
   }
 }
 class MimeWordError extends MimeError { static code = 'ERR_MIME_WORD'; }
+class MultipartError extends MimeError { static code = 'ERR_MIME_MULTIPART'; }
 
 function native(fn) {
   try { return fn(); } catch (cause) {
@@ -47,7 +48,7 @@ function native(fn) {
     const colon = msg.indexOf(': ');
     const code = colon >= 0 ? msg.slice(0, colon) : '';
     const text = colon >= 0 ? msg.slice(colon + 2) : msg;
-    const ErrorClass = { MediaTypeError, QuotedPrintableError, MimeWordError }[code] ?? MimeError;
+    const ErrorClass = { MediaTypeError, QuotedPrintableError, MimeWordError, MultipartError }[code] ?? MimeError;
     throw new ErrorClass(text, { cause });
   }
 }
@@ -220,6 +221,42 @@ function applyPart(part, charsetReader) {
   return new TextDecoder('utf-8').decode(converted);
 }
 
+class MultipartPartWriter {
+  constructor(handle, partId) {
+    this._handle = handle;
+    this._partId = partId;
+  }
+  write(data) { native(() => this._handle.writePart(this._partId, bytes(data))); }
+  end() { native(() => this._handle.endPart(this._partId)); }
+}
+
+class MultipartWriter {
+  constructor(opts) {
+    if (opts != null && typeof opts !== 'object') throw new TypeError('mime: opts must be an object');
+    const boundary = opts?.boundary;
+    if (boundary !== undefined && typeof boundary !== 'string') {
+      throw new TypeError('mime: boundary must be a string');
+    }
+    this._handle = native(() => new binding.NativeMultipartWriter(boundary));
+  }
+  setBoundary(boundary) {
+    if (typeof boundary !== 'string') throw new TypeError('mime: expected string');
+    native(() => this._handle.setBoundary(boundary));
+  }
+  boundary() { return native(() => this._handle.boundary()); }
+  formDataContentType() { return native(() => this._handle.formDataContentType()); }
+  createFormField(fieldname) {
+    if (typeof fieldname !== 'string') throw new TypeError('mime: expected string');
+    const partId = native(() => this._handle.createFormField(fieldname));
+    return new MultipartPartWriter(this._handle, partId);
+  }
+  writeField(fieldname, value) {
+    if (typeof fieldname !== 'string' || typeof value !== 'string') throw new TypeError('mime: expected string');
+    native(() => this._handle.writeField(fieldname, value));
+  }
+  bytes() { return native(() => this._handle.finish()); }
+}
+
 class MimeWordDecoder {
   constructor(opts) {
     this.charsetReader = opts?.charsetReader ?? defaultCharsetReader;
@@ -240,9 +277,10 @@ class MimeWordDecoder {
 }
 
 module.exports = {
-  MimeError, MediaTypeError, InvalidMediaParameterError, QuotedPrintableError, MimeWordError,
+  MimeError, MediaTypeError, InvalidMediaParameterError, QuotedPrintableError, MimeWordError, MultipartError,
   parseMediaType, formatMediaType, typeByExtension, extensionsByType, addExtensionType, loadSystemMimeTypes,
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
+  MultipartWriter,
 };

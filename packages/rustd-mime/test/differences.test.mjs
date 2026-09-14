@@ -2,8 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as api from '../index.mjs';
 
-test('multipart is not exported until after MIMEHeader (checkpoint 10)', () => {
-  for (const name of ['MultipartReader', 'MultipartWriter', 'fileContentDisposition', 'MessageTooLargeError']) {
+test('multipart reader still later; writer WriteField/CreateFormField is in (checkpoint 11)', () => {
+  assert.equal(typeof api.MultipartWriter, 'function');
+  for (const name of ['MultipartReader', 'fileContentDisposition', 'MessageTooLargeError']) {
     assert.equal(api[name], undefined, name);
   }
   assert.equal(typeof api.canonicalMIMEHeaderKey, 'function');

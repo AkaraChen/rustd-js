@@ -3,6 +3,7 @@ mod ext;
 mod header;
 mod mediatype;
 mod qp;
+mod writer;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -190,4 +191,72 @@ pub fn decode_header_parts(header: String) -> Result<Vec<WordPart>> {
                 .collect()
         })
         .map_err(|e| error("MimeWordError", &e))
+}
+
+#[napi]
+pub struct NativeMultipartWriter {
+    inner: writer::MultipartWriter,
+}
+
+#[napi]
+impl NativeMultipartWriter {
+    #[napi(constructor)]
+    pub fn new(boundary: Option<String>) -> Result<Self> {
+        writer::MultipartWriter::new(boundary)
+            .map(|inner| Self { inner })
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
+    pub fn set_boundary(&mut self, boundary: String) -> Result<()> {
+        self.inner
+            .set_boundary(&boundary)
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
+    pub fn boundary(&self) -> String {
+        self.inner.boundary().to_string()
+    }
+
+    #[napi]
+    pub fn form_data_content_type(&self) -> String {
+        self.inner.form_data_content_type()
+    }
+
+    #[napi]
+    pub fn create_form_field(&mut self, fieldname: String) -> Result<u32> {
+        self.inner
+            .create_form_field(&fieldname)
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
+    pub fn write_part(&mut self, part_id: u32, data: Uint8Array) -> Result<()> {
+        self.inner
+            .write_part(part_id, data.as_ref())
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
+    pub fn end_part(&mut self, part_id: u32) -> Result<()> {
+        self.inner
+            .end_part(part_id)
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
+    pub fn write_field(&mut self, fieldname: String, value: String) -> Result<()> {
+        self.inner
+            .write_field(&fieldname, &value)
+            .map_err(|e| error("MultipartError", &e))
+    }
+
+    #[napi]
+    pub fn finish(&mut self) -> Result<Uint8Array> {
+        self.inner
+            .finish()
+            .map(Into::into)
+            .map_err(|e| error("MultipartError", &e))
+    }
 }

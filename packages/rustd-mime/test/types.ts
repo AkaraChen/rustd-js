@@ -3,7 +3,7 @@ import {
   loadSystemMimeTypes, encodeWord, MimeWordDecoder, quotedPrintableEncode, quotedPrintableDecode,
   QuotedPrintableReader, QuotedPrintableWriter, InvalidMediaParameterError, type MediaType,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
-  type MIMEHeader,
+  type MIMEHeader, MultipartWriter, MultipartError,
 } from '../index.js';
 const parsed: MediaType = parseMediaType('text/plain; charset=utf-8');
 const formatted: string = formatMediaType('text/plain', { charset: 'utf-8' });
@@ -29,10 +29,17 @@ const canon: string = canonicalMIMEHeaderKey('content-type');
 const first: string = mimeHeaderGet(mimeHeader, 'Content-Type');
 const all: string[] = mimeHeaderValues(mimeHeader, 'x-foo');
 mimeHeaderDel(mimeHeader, 'x-foo');
+const mp = new MultipartWriter({ boundary: 'boundary' });
+mp.writeField('foo', 'bar');
+const part = mp.createFormField('baz');
+part.write(new Uint8Array([1, 2]));
+part.end();
+const mpBytes: Uint8Array = mp.bytes();
+const mpErr: MultipartError = new MultipartError('x');
 // @ts-expect-error parseMediaType is not a number
 const wrong: number = parsed;
 // @ts-expect-error encoding must be b or q
 encodeWord('utf-8', 'x', 'x');
 // @ts-expect-error bytes required
 quotedPrintableEncode('ascii');
-void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all];
+void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all, mpBytes, mpErr];

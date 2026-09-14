@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net/textproto"
 	"os"
@@ -772,10 +773,146 @@ func mimeHeaderCases() []MimeHeaderCase {
 
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
+type mpField struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Mode  string `json:"mode"`
+}
+
+type mpWriteIn struct {
+	Boundary string    `json:"boundary"`
+	Fields   []mpField `json:"fields"`
+}
+
+type mpWriteOut struct {
+	BodyHex     string `json:"bodyHex"`
+	ContentType string `json:"contentType"`
+	Error       string `json:"error"`
+}
+
+type mpReadIn struct {
+	Boundary string `json:"boundary"`
+	BodyHex  string `json:"bodyHex"`
+}
+
+type mpPartOut struct {
+	FormName string              `json:"formName"`
+	FileName string              `json:"fileName"`
+	Header   map[string][]string `json:"header"`
+	BodyHex  string              `json:"bodyHex"`
+}
+
+type mpReadOut struct {
+	Parts []mpPartOut `json:"parts"`
+	Error string      `json:"error"`
+}
+
+func decodeStdinJSON(v any) {
+	dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
+	if err := dec.Decode(v); err != nil {
+		fail(err)
+	}
+}
+
+func emitJSON(v any) {
+	enc := json.NewEncoder(os.Stdout)
+	if err := enc.Encode(v); err != nil {
+		fail(err)
+	}
+}
+
+func handleMultipartWrite() {
+	var in mpWriteIn
+	decodeStdinJSON(&in)
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	if in.Boundary != "" {
+		if err := w.SetBoundary(in.Boundary); err != nil {
+			emitJSON(mpWriteOut{Error: err.Error()})
+			return
+		}
+	}
+	for _, f := range in.Fields {
+		mode := f.Mode
+		if mode == "" {
+			mode = "writeField"
+		}
+		switch mode {
+		case "writeField":
+			if err := w.WriteField(f.Name, f.Value); err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+		case "createFormField":
+			p, err := w.CreateFormField(f.Name)
+			if err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+			if _, err := p.Write([]byte(f.Value)); err != nil {
+				emitJSON(mpWriteOut{Error: err.Error()})
+				return
+			}
+		default:
+			fail(fmt.Errorf("unknown field mode %q", mode))
+		}
+	}
+	if err := w.Close(); err != nil {
+		emitJSON(mpWriteOut{Error: err.Error()})
+		return
+	}
+	emitJSON(mpWriteOut{BodyHex: hexOf(buf.Bytes()), ContentType: w.FormDataContentType()})
+}
+
+func handleMultipartRead() {
+	var in mpReadIn
+	decodeStdinJSON(&in)
+	body := unhex(in.BodyHex)
+	r := multipart.NewReader(bytes.NewReader(body), in.Boundary)
+	out := mpReadOut{Parts: []mpPartOut{}}
+	for {
+		p, err := r.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			out.Error = err.Error()
+			break
+		}
+		slurp, err := io.ReadAll(p)
+		part := mpPartOut{
+			FormName: p.FormName(),
+			FileName: p.FileName(),
+			Header:   map[string][]string{},
+			BodyHex:  hexOf(slurp),
+		}
+		for k, v := range p.Header {
+			part.Header[k] = v
+		}
+		if err != nil {
+			out.Error = err.Error()
+			out.Parts = append(out.Parts, part)
+			break
+		}
+		out.Parts = append(out.Parts, part)
+	}
+	emitJSON(out)
+}
+
 func main() {
 	out := flag.String("out", "", "output JSON file")
 	verify := flag.Bool("verify", false, "verify packet from stdin")
+	mpWrite := flag.Bool("multipart-write", false, "Go multipart.Writer from stdin JSON fields")
+	mpRead := flag.Bool("multipart-read", false, "Go multipart.NewReader from stdin JSON bodyHex")
 	flag.Parse()
+	if *mpWrite {
+		handleMultipartWrite()
+		return
+	}
+	if *mpRead {
+		handleMultipartRead()
+		return
+	}
 	if *verify {
 		var packet Packet
 		dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))

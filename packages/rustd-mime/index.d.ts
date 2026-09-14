@@ -47,3 +47,18 @@ export class QuotedPrintableError extends MimeError {
   readonly byteOffset?: number
   readonly decoded?: Uint8Array
 }
+
+export class MultipartError extends MimeError {}
+export interface MultipartPartWriter {
+  write(data: Uint8Array): void
+  end(): void
+}
+export class MultipartWriter {
+  constructor(opts?: { boundary?: string })
+  setBoundary(boundary: string): void
+  boundary(): string
+  formDataContentType(): string
+  createFormField(fieldname: string): MultipartPartWriter
+  writeField(fieldname: string, value: string): void
+  bytes(): Uint8Array
+}
