@@ -34,6 +34,14 @@ class CsvEncodingError extends Error {
   }
 }
 
+class PemEncodeError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = 'PemEncodeError';
+    this.code = 'PEM_ENCODE';
+  }
+}
+
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
 function bytes(value) {
@@ -87,8 +95,55 @@ function native(fn) {
       }
       throw new CsvParseError(message, startLine, line, column, { cause: new Error(inner, { cause }) });
     }
+    if (text.startsWith('PemEncodeError:')) {
+      throw new PemEncodeError(text.slice('PemEncodeError:'.length), { cause });
+    }
     throw cause;
   }
+}
+
+function headerMap(value) {
+  if (value === undefined) return {};
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('serial: PEM headers must be a string map');
+  }
+  const out = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (typeof val !== 'string') {
+      throw new TypeError('serial: PEM header values must be strings');
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+function pemDecode(data) {
+  const row = binding.pemDecode(bytes(data));
+  if (!row) return null;
+  const block = { type: row.type, bytes: row.bytes };
+  if (row.headers && Object.keys(row.headers).length > 0) block.headers = row.headers;
+  return { block, rest: row.rest };
+}
+
+function pemDecodeAll(data) {
+  const blocks = [];
+  let rest = bytes(data);
+  for (;;) {
+    const found = pemDecode(rest);
+    if (!found) return blocks;
+    blocks.push(found.block);
+    rest = found.rest;
+  }
+}
+
+function pemEncode(block) {
+  if (block === null || typeof block !== 'object' || Array.isArray(block)) {
+    throw new TypeError('serial: pemEncode expects a PemBlock');
+  }
+  if (typeof block.type !== 'string') {
+    throw new TypeError('serial: PEM type must be a string');
+  }
+  return native(() => binding.pemEncode(block.type, headerMap(block.headers), bytes(block.bytes)));
 }
 
 function fieldToBytes(field) {
@@ -213,4 +268,8 @@ module.exports = {
   CsvWriter,
   CsvParseError,
   CsvEncodingError,
+  pemDecode,
+  pemDecodeAll,
+  pemEncode,
+  PemEncodeError,
 };

@@ -1,6 +1,8 @@
 import {
   CsvReader, CsvWriter, CsvParseError, CsvEncodingError,
   type CsvReaderOptions, type CsvWriterOptions, type CsvFieldPos,
+  pemDecode, pemDecodeAll, pemEncode, PemEncodeError,
+  type PemBlock, type PemDecodeResult,
 } from '../index.js';
 
 const opts: CsvReaderOptions = { comma: ',', fieldsPerRecord: -1, lazyQuotes: true, trimLeadingSpace: true };
@@ -19,7 +21,11 @@ const out: Uint8Array = writer.bytes();
 const err: Error | null = writer.error();
 const parse: CsvParseError = new CsvParseError('x', 1, 1, 1);
 const enc: CsvEncodingError = new CsvEncodingError('x');
-void [row, raw, all, pos, off, out, err, parse, enc];
+const pem: PemDecodeResult | null = pemDecode(new Uint8Array());
+const blocks: PemBlock[] = pemDecodeAll(new Uint8Array([45]));
+const encoded: Uint8Array = pemEncode({ type: 'FOO', bytes: new Uint8Array([1]) });
+const pemErr: PemEncodeError = new PemEncodeError('x');
+void [row, raw, all, pos, off, out, err, parse, enc, pem, blocks, encoded, pemErr];
 
 // @ts-expect-error bytes required
 new CsvReader('a,b');
@@ -31,3 +37,9 @@ const wrong: Promise<string[] | null> = reader.read();
 parse.code = 'OTHER';
 // @ts-expect-error startLine is readonly
 parse.startLine = 2;
+// @ts-expect-error PEM input is bytes
+pemDecode('-----BEGIN');
+// @ts-expect-error type is a string
+pemEncode({ type: 1, bytes: new Uint8Array() });
+// @ts-expect-error code is readonly
+pemErr.code = 'OTHER';

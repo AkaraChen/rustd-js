@@ -310,22 +310,38 @@ func main() {
 	out := flag.String("out", "", "output JSON file; stdout by default")
 	verifyFlag := flag.Bool("verify", false, "verify a packet from stdin")
 	flag.Parse()
-	if *pkg != "serial-csv" {
+	switch *pkg {
+	case "serial-csv":
+		if *verifyFlag {
+			var packet Packet
+			dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
+			if err := dec.Decode(&packet); err != nil {
+				fail(err)
+			}
+			verify(*pkg, packet)
+			return
+		}
+		writeJSON(*out, Packet{Schema: 1, Package: *pkg, Reads: generateReads(), Writes: generateWrites()})
+	case "serial-pem":
+		if *verifyFlag {
+			var packet PemPacket
+			dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
+			if err := dec.Decode(&packet); err != nil {
+				fail(err)
+			}
+			verifyPem(packet)
+			return
+		}
+		writeJSON(*out, generatePem())
+	default:
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
-	if *verifyFlag {
-		var packet Packet
-		dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
-		if err := dec.Decode(&packet); err != nil {
-			fail(err)
-		}
-		verify(*pkg, packet)
-		return
-	}
-	packet := Packet{Schema: 1, Package: *pkg, Reads: generateReads(), Writes: generateWrites()}
+}
+
+func writeJSON(path string, value any) {
 	var writer io.Writer = os.Stdout
-	if *out != "" {
-		f, err := os.Create(*out)
+	if path != "" {
+		f, err := os.Create(path)
 		if err != nil {
 			fail(err)
 		}
@@ -333,7 +349,7 @@ func main() {
 		writer = f
 	}
 	enc := json.NewEncoder(writer)
-	if err := enc.Encode(packet); err != nil {
+	if err := enc.Encode(value); err != nil {
 		fail(err)
 	}
 }

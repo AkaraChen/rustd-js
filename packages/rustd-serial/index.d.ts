@@ -45,3 +45,23 @@ export class CsvWriter {
   bytes(): Uint8Array;
   error(): Error | null;
 }
+
+export interface PemBlock {
+  type: string;
+  headers?: Record<string, string>;
+  bytes: Uint8Array;
+}
+
+export interface PemDecodeResult {
+  block: PemBlock;
+  rest: Uint8Array;
+}
+
+export class PemEncodeError extends Error {
+  constructor(message: string, options?: ErrorOptions);
+  readonly code: 'PEM_ENCODE';
+}
+
+export function pemDecode(data: Uint8Array): PemDecodeResult | null;
+export function pemDecodeAll(data: Uint8Array): PemBlock[];
+export function pemEncode(block: PemBlock): Uint8Array;

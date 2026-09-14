@@ -1,9 +1,13 @@
 mod csv;
+mod pem;
+
+use std::collections::HashMap;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 use csv::{CsvReader, CsvWriter};
+use pem::{decode as pem_decode_bytes, encode as pem_encode_bytes, PemBlock};
 
 #[napi(object)]
 pub struct NativeCsvRow {
@@ -97,4 +101,44 @@ impl NativeCsvWriter {
     pub fn error_text(&self) -> Option<String> {
         self.inner.error_text()
     }
+}
+
+#[napi(object)]
+pub struct NativePemResult {
+    #[napi(js_name = "type")]
+    pub typ: String,
+    pub headers: HashMap<String, String>,
+    pub bytes: Uint8Array,
+    pub rest: Uint8Array,
+}
+
+#[napi]
+pub fn pem_decode(data: Uint8Array) -> Option<NativePemResult> {
+    let (block, rest) = pem_decode_bytes(data.as_ref())?;
+    let mut headers = HashMap::new();
+    for (k, v) in block.headers {
+        headers.insert(k, v);
+    }
+    Some(NativePemResult {
+        typ: block.type_name,
+        headers,
+        bytes: block.bytes.into(),
+        rest: rest.into(),
+    })
+}
+
+#[napi]
+pub fn pem_encode(
+    typ: String,
+    headers: HashMap<String, String>,
+    bytes: Uint8Array,
+) -> Result<Uint8Array> {
+    let block = PemBlock {
+        type_name: typ,
+        headers: headers.into_iter().collect(),
+        bytes: bytes.to_vec(),
+    };
+    pem_encode_bytes(&block)
+        .map(Uint8Array::from)
+        .map_err(|e| Error::from_reason(format!("PemEncodeError:{e}")))
 }
