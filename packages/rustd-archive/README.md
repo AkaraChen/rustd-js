@@ -56,7 +56,8 @@ do not need `close()`.
   `ctime` / `mtime` values still throw `TarFormatError`, matching Go `ErrHeader`.
 - Sub-second `mtime` is written as PAX `mtime` so Go `ModTime` matches JS
   `Date.getTime()` at millisecond precision (`UnixMilli`). Nanoseconds beyond
-  that are not a `Date` field.
+  that are not a `Date` field. Integer-second `mtime` that fits the ustar octal
+  field is stored only in the ustar header; PAX `mtime` is omitted.
 
 ## Errors
 
