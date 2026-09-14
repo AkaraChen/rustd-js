@@ -61,13 +61,16 @@ committed files:
 
 ```text
 $ cd packages/rustd-unicode
-$ GOWORK=off mise exec go@1.24.13 -- go run -C tools/gentables .
+$ pnpm generate
 generated 245 range table names, unicode 15.0.0, go go1.24.13
 $ git diff --exit-code -- src/generated.rs generated-names.d.ts test/fixtures
 ```
 
-Same assertion as `pnpm generate:check` (from this package directory). Do not
-regenerate with a different Go toolchain; `goVersion` is part of the fixture.
+Same assertion as `pnpm generate:check` (from this package directory). Local
+runs pin Go 1.24.13 through `mise exec go@1.24.13`; CI sets `RUSTD_GO=path` and
+uses the workflow's `setup-go` 1.24.13. Do not regenerate with a different
+toolchain; `goVersion` is part of the fixture. The linux-x64 CI job runs
+`pnpm --filter rustd-unicode generate:check`.
 
 ## Size
 

@@ -24,8 +24,8 @@
     "build": "napi build --platform --release --no-js --dts .generated.d.ts",
     "test": "node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "generate": "GOWORK=off mise exec go@1.24.13 -- go run -C tools/gentables .",
-    "generate:check": "GOWORK=off mise exec go@1.24.13 -- go run -C tools/gentables . && git diff --exit-code -- src/generated.rs generated-names.d.ts test/fixtures && grep -q 'go1.24.13' src/generated.rs"
+    "generate": "node tools/run-gentables.mjs",
+    "generate:check": "node tools/run-gentables.mjs --check"
   },
   "napi": {
     "binaryName": "rustd-unicode",
