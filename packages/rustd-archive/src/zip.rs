@@ -17,6 +17,129 @@ const EXT_TIME: u16 = 0x5455;
 const U32MAX: u32 = u32::MAX;
 const U16MAX: u16 = u16::MAX;
 
+// Go archive/zip creator OS (high byte of version-made-by).
+const CREATOR_FAT: u16 = 0;
+const CREATOR_UNIX: u16 = 3;
+const CREATOR_NTFS: u16 = 11;
+const CREATOR_VFAT: u16 = 14;
+const CREATOR_MACOSX: u16 = 19;
+
+// Go io/fs.FileMode type bits (see src/io/fs/fs.go).
+const MODE_DIR: u32 = 1 << 31;
+const MODE_SYMLINK: u32 = 1 << 27;
+const MODE_DEVICE: u32 = 1 << 26;
+const MODE_NAMED_PIPE: u32 = 1 << 25;
+const MODE_SOCKET: u32 = 1 << 24;
+const MODE_SETUID: u32 = 1 << 23;
+const MODE_SETGID: u32 = 1 << 22;
+const MODE_CHAR_DEVICE: u32 = 1 << 21;
+const MODE_STICKY: u32 = 1 << 20;
+const MODE_TYPE: u32 =
+    MODE_DIR | MODE_SYMLINK | MODE_NAMED_PIPE | MODE_SOCKET | MODE_DEVICE | MODE_CHAR_DEVICE;
+
+const S_IFMT: u32 = 0xf000;
+const S_IFSOCK: u32 = 0xc000;
+const S_IFLNK: u32 = 0xa000;
+const S_IFREG: u32 = 0x8000;
+const S_IFBLK: u32 = 0x6000;
+const S_IFDIR: u32 = 0x4000;
+const S_IFCHR: u32 = 0x2000;
+const S_IFIFO: u32 = 0x1000;
+const S_ISUID: u32 = 0x800;
+const S_ISGID: u32 = 0x400;
+const S_ISVTX: u32 = 0x200;
+const MSDOS_DIR: u32 = 0x10;
+const MSDOS_READONLY: u32 = 0x01;
+
+/// Go `FileHeader.Mode()`: unix/macOS from high 16 external attrs, FAT/NTFS/VFAT
+/// from MS-DOS bits; names ending in `/` always get `fs.ModeDir`.
+fn zip_file_mode(creator_version: u16, external_attrs: u32, name: &str) -> u32 {
+    let mut mode = match creator_version >> 8 {
+        CREATOR_UNIX | CREATOR_MACOSX => unix_mode_to_file_mode(external_attrs >> 16),
+        CREATOR_FAT | CREATOR_NTFS | CREATOR_VFAT => msdos_mode_to_file_mode(external_attrs),
+        _ => 0,
+    };
+    if name.ends_with('/') {
+        mode |= MODE_DIR;
+    }
+    mode
+}
+
+fn unix_mode_to_file_mode(m: u32) -> u32 {
+    let mut mode = m & 0o777;
+    match m & S_IFMT {
+        S_IFBLK => mode |= MODE_DEVICE,
+        S_IFCHR => mode |= MODE_DEVICE | MODE_CHAR_DEVICE,
+        S_IFDIR => mode |= MODE_DIR,
+        S_IFIFO => mode |= MODE_NAMED_PIPE,
+        S_IFLNK => mode |= MODE_SYMLINK,
+        S_IFSOCK => mode |= MODE_SOCKET,
+        _ => {}
+    }
+    if m & S_ISGID != 0 {
+        mode |= MODE_SETGID;
+    }
+    if m & S_ISUID != 0 {
+        mode |= MODE_SETUID;
+    }
+    if m & S_ISVTX != 0 {
+        mode |= MODE_STICKY;
+    }
+    mode
+}
+
+fn msdos_mode_to_file_mode(m: u32) -> u32 {
+    let mut mode = if m & MSDOS_DIR != 0 {
+        MODE_DIR | 0o777
+    } else {
+        0o666
+    };
+    if m & MSDOS_READONLY != 0 {
+        mode &= !0o222;
+    }
+    mode
+}
+
+/// Go `FileHeader.SetMode` unix half (`fileModeToUnixMode`).
+fn file_mode_to_unix_mode(mode: u32) -> u32 {
+    let mut m = match mode & MODE_TYPE {
+        MODE_DIR => S_IFDIR,
+        MODE_SYMLINK => S_IFLNK,
+        MODE_NAMED_PIPE => S_IFIFO,
+        MODE_SOCKET => S_IFSOCK,
+        t if t == MODE_DEVICE || t == (MODE_DEVICE | MODE_CHAR_DEVICE) => {
+            if mode & MODE_CHAR_DEVICE != 0 {
+                S_IFCHR
+            } else {
+                S_IFBLK
+            }
+        }
+        _ => S_IFREG,
+    };
+    if mode & MODE_SETUID != 0 {
+        m |= S_ISUID;
+    }
+    if mode & MODE_SETGID != 0 {
+        m |= S_ISGID;
+    }
+    if mode & MODE_STICKY != 0 {
+        m |= S_ISVTX;
+    }
+    m | (mode & 0o777)
+}
+
+fn zip_external_attrs(mode: Option<u32>) -> u32 {
+    let Some(mode) = mode else { return 0 };
+    let mut ext = file_mode_to_unix_mode(mode) << 16;
+    if mode & MODE_DIR != 0 {
+        ext |= MSDOS_DIR;
+    }
+    if mode & 0o200 == 0 {
+        ext |= MSDOS_READONLY;
+    }
+    ext
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Entry {
     pub name: String,
@@ -332,9 +455,9 @@ fn write_central(out: &mut Vec<u8>, files: &[FileRec], comment: &str) -> Result<
             extra.extend(extra_zip64(f.entry.size, f.entry.compressed_size, Some(f.offset)));
         }
         let comment = f.entry.comment.as_bytes();
-        let ext_attr = f.entry.mode.map(|m| u32::from(m) << 16).unwrap_or(0);
+        let ext_attr = zip_external_attrs(f.entry.mode);
         put_u32(out, SIG_CENTRAL);
-        put_u16(out, (3u16 << 8) | f.version); // unix creator
+        put_u16(out, (CREATOR_UNIX << 8) | f.version);
         put_u16(out, f.version);
         put_u16(out, f.flags);
         put_u16(out, f.method);
@@ -465,6 +588,7 @@ pub fn extract(data: &[u8]) -> Result<Vec<Entry>> {
         if u32le(data, pos)? != SIG_CENTRAL {
             return Err(FormatError::zip(pos as u64, "archive/zip: not a valid zip file"));
         }
+        let creator_version = u16le(data, pos + 4)?;
         let flags = u16le(data, pos + 8)?;
         let method = u16le(data, pos + 10)?;
         let dos_time = u16le(data, pos + 12)?;
@@ -486,6 +610,7 @@ pub fn extract(data: &[u8]) -> Result<Vec<Entry>> {
         let comment = &data[pos + 46 + name_len + extra_len..rec_end];
         let utf8 = flags & (1 << 11) != 0;
         let (name, non_utf8, raw_name) = read_name(name_b, utf8);
+        let mode = Some(zip_file_mode(creator_version, ext_attr, &name));
         let mut e = Entry {
             name,
             method,
@@ -494,7 +619,7 @@ pub fn extract(data: &[u8]) -> Result<Vec<Entry>> {
             crc32,
             mtime_ms: unix_from_dos(dos_time, dos_date),
             comment: String::from_utf8_lossy(comment).into_owned(),
-            mode: if ext_attr >> 16 != 0 { Some(ext_attr >> 16) } else { None },
+            mode,
             non_utf8,
             raw_name,
             data: Vec::new(),

@@ -131,7 +131,7 @@ function fromZip(native) {
   };
   if (m.mtime_ms != null) entry.modified = new Date(m.mtime_ms);
   if (m.comment) entry.comment = m.comment;
-  if (m.mode != null) entry.mode = m.mode;
+  entry.mode = (m.mode ?? 0) >>> 0;
   if (m.non_utf8) {
     entry.nonUtf8 = true;
     if (m.raw_name) entry.rawName = Uint8Array.from(m.raw_name);
