@@ -72,3 +72,39 @@ Adam7, tRNS, 1×1, gray, and fully-transparent. Every truncated prefix of the Go
 $ ls -l packages/rustd-image/*.node
 -rwxrwxr-x 1 akrc akrc 882856 Sep 14 17:46 packages/rustd-image/rustd-image.linux-x64-gnu.node
 ```
+
+## Performance (issue #19 §4.9)
+
+Run `nice -n 10 node packages/rustd-image/test/benchmark.mjs`. Recorded on
+2026-09-14, AMD EPYC 9645, Linux x64, Node 24.20.0, Go 1.25.0, `GOMAXPROCS=1`:
+one sequential pass of a 512×512 seeded-random NRGBA (PNG 787,545 bytes, JPEG
+158,294 bytes, quality 75), 8 iterations each. Shared host with concurrent
+workers; these numbers describe the observed run, not a speedup claim.
+Machine-readable output: `test/benchmark-results.json`.
+
+Issue #19 requires **decode** throughput ≥ 60% of same-host Go. Encode is
+reported for completeness and is not a floor.
+
+| Op | rustd-image MP/s | Go MP/s | % of Go |
+| --- | ---: | ---: | ---: |
+| pngDecode | 30.08 | 84.34 | 36 |
+| jpegDecode | 13.36 | 28.15 | 47 |
+| pngEncode | 2.49 | 3.60 | 69 |
+| jpegEncode | 14.45 | 12.53 | 115 |
+
+Decode is below the 60% floor on this host. Causes and follow-up (not silent):
+
+- **pngDecode (36%)**: the `png` crate uses `miniz_oxide` / `fdeflate` (pure
+  Rust, no C zlib). After inflate we unpack samples and copy into Go stride
+  models (NRGBA/Gray/… plus an IEND-presence scan so truncated prefixes match
+  Go). That second pass is extra work Go's `image/png` does not do as a
+  separate copy. Next: wire `rustd-compress` once it is on `main`; only then
+  consider `spng` (C) if inflate is still the bottleneck. Issue #19 §6 keeps
+  `spng` out of the first release.
+- **jpegDecode (47%)**: `jpeg-decoder` with `rayon` **off** (napi + size). Go's
+  `image/jpeg` IDCT is faster here. Next: switch to `zune-jpeg` (pure Rust) and
+  re-run the full JPEG interop matrix, as issue #19 §6 already names that
+  fallback. Do not turn `rayon` on.
+
+`jpegEncode` already meets Go on this run. `pngEncode` is 69% of Go with the
+same pure-Rust deflate backend.

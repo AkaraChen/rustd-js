@@ -1,0 +1,48 @@
+{
+  "date": "2026-09-14",
+  "node": "v24.20.0",
+  "go": "go1.25.0",
+  "platform": "linux-x64",
+  "cpu": "AMD EPYC 9645 96-Core Processor",
+  "width": 512,
+  "height": 512,
+  "iters": 8,
+  "pngBytes": 787545,
+  "jpegBytes": 158294,
+  "method": "One sequential pass, 512×512 seeded-random NRGBA, 8 iterations, GOMAXPROCS=1; shared host, not an isolated benchmark.",
+  "decodeFloorPct": 60,
+  "rows": [
+    {
+      "op": "pngDecode",
+      "nativeMs": 69.7,
+      "goMs": 24.9,
+      "nativeMpixS": 30.08,
+      "goMpixS": 84.34,
+      "pctOfGo": 36
+    },
+    {
+      "op": "jpegDecode",
+      "nativeMs": 156.9,
+      "goMs": 74.5,
+      "nativeMpixS": 13.36,
+      "goMpixS": 28.15,
+      "pctOfGo": 47
+    },
+    {
+      "op": "pngEncode",
+      "nativeMs": 842.1,
+      "goMs": 582.2,
+      "nativeMpixS": 2.49,
+      "goMpixS": 3.6,
+      "pctOfGo": 69
+    },
+    {
+      "op": "jpegEncode",
+      "nativeMs": 145.2,
+      "goMs": 167.4,
+      "nativeMpixS": 14.45,
+      "goMpixS": 12.53,
+      "pctOfGo": 115
+    }
+  ]
+}
