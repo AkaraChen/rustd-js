@@ -599,51 +599,69 @@ pub fn jpeg_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageEr
     let cfg = jpeg_config_from_bytes(buf)?;
     too_large(cfg.width, cfg.height, max_pixels)?;
     jpeg_require_dht(buf)?;
-    let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(buf));
+    // DecodeConfig still comes from the SOF scan above (Go field match). Pixel
+    // decode uses zune-jpeg (issue #19 §6 fallback when jpeg-decoder missed the
+    // 60% floor). Headers-only config paths do not construct this decoder.
+    let mut decoder = zune_jpeg::JpegDecoder::new(buf);
+    decoder
+        .decode_headers()
+        .map_err(|e| ImageError::new("JpegFormatError", e.to_string()))?;
+    let (w, h) = decoder
+        .dimensions()
+        .ok_or_else(|| ImageError::new("JpegFormatError", "jpeg: missing dimensions"))?;
+    let input = decoder.get_input_colorspace();
+    if matches!(input, Some(zune_core::colorspace::ColorSpace::Unknown)) {
+        return Err(ImageError::new(
+            "JpegUnsupportedError",
+            format!("jpeg: unsupported colorspace {input:?}"),
+        ));
+    }
     let pixels = decoder
         .decode()
         .map_err(|e| ImageError::new("JpegFormatError", e.to_string()))?;
-    let info = decoder.info().ok_or_else(|| ImageError::new("JpegFormatError", "jpeg: missing info"))?;
-    let w = info.width as usize;
-    let h = info.height as usize;
-    let rect = Rect::new(0, 0, info.width as i32, info.height as i32);
-    match info.pixel_format {
-        jpeg_decoder::PixelFormat::L8 => {
-            let img = Image::alloc(Model::Gray, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    img.set_rgba(x as i32, y as i32, Rgba16::from_gray8(pixels[y * w + x]))?;
-                }
+    let out_cs = decoder.get_output_colorspace().or(input).ok_or_else(|| {
+        ImageError::new("JpegFormatError", "jpeg: missing output colorspace")
+    })?;
+    let rect = Rect::new(0, 0, w as i32, h as i32);
+    // Tight pix fill: per-pixel set_rgba locks + 8↔16 round-trip and was the
+    // §4.9 bottleneck (jpeg-decoder vs zune-jpeg did not move the 60% floor).
+    match out_cs {
+        zune_core::colorspace::ColorSpace::Luma => {
+            if pixels.len() < w * h {
+                return Err(ImageError::new("JpegFormatError", "jpeg: short luma buffer"));
             }
-            Ok(img)
+            Ok(Image::from_parts(Model::Gray, rect, w, pixels[..w * h].to_vec(), None))
         }
-        jpeg_decoder::PixelFormat::RGB24 => {
-            // DecodeConfig still reports ycbcr (SOF). Pixels come from jpeg-decoder as RGB.
-            let img = Image::alloc(Model::Nrgba, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 3;
-                    img.set_rgba(
-                        x as i32,
-                        y as i32,
-                        Rgba16::from_nrgba8(pixels[i], pixels[i + 1], pixels[i + 2], 255),
-                    )?;
-                }
+        zune_core::colorspace::ColorSpace::RGB => {
+            let mut pix = vec![255u8; w * h * 4];
+            if pixels.len() < w * h * 3 {
+                return Err(ImageError::new("JpegFormatError", "jpeg: short rgb buffer"));
             }
-            Ok(img)
-        }
-        jpeg_decoder::PixelFormat::CMYK32 => {
-            let img = Image::alloc(Model::Cmyk, rect, None)?;
-            for y in 0..h {
-                for x in 0..w {
-                    let i = (y * w + x) * 4;
-                    let (r, g, b) = color::cmyk_to_rgb(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]);
-                    img.set_rgba(x as i32, y as i32, Rgba16::from_rgba8(r, g, b, 255))?;
-                }
+            for i in 0..(w * h) {
+                let s = i * 3;
+                let d = i * 4;
+                pix[d] = pixels[s];
+                pix[d + 1] = pixels[s + 1];
+                pix[d + 2] = pixels[s + 2];
             }
-            Ok(img)
+            Ok(Image::from_parts(Model::Nrgba, rect, w * 4, pix, None))
         }
-        other => Err(ImageError::new("JpegUnsupportedError", format!("jpeg: unsupported {other:?}"))),
+        zune_core::colorspace::ColorSpace::RGBA => {
+            if pixels.len() < w * h * 4 {
+                return Err(ImageError::new("JpegFormatError", "jpeg: short rgba buffer"));
+            }
+            Ok(Image::from_parts(Model::Nrgba, rect, w * 4, pixels[..w * h * 4].to_vec(), None))
+        }
+        zune_core::colorspace::ColorSpace::CMYK | zune_core::colorspace::ColorSpace::YCCK => {
+            if pixels.len() < w * h * 4 {
+                return Err(ImageError::new("JpegFormatError", "jpeg: short cmyk buffer"));
+            }
+            Ok(Image::from_parts(Model::Cmyk, rect, w * 4, pixels[..w * h * 4].to_vec(), None))
+        }
+        other => Err(ImageError::new(
+            "JpegUnsupportedError",
+            format!("jpeg: unsupported {other:?}"),
+        )),
     }
 }
 

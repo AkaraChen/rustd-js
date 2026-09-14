@@ -14,35 +14,35 @@
   "rows": [
     {
       "op": "pngDecode",
-      "nativeMs": 69.7,
-      "goMs": 24.9,
-      "nativeMpixS": 30.08,
-      "goMpixS": 84.34,
-      "pctOfGo": 36
+      "nativeMs": 71.8,
+      "goMs": 30.3,
+      "nativeMpixS": 29.23,
+      "goMpixS": 69.25,
+      "pctOfGo": 42
     },
     {
       "op": "jpegDecode",
-      "nativeMs": 156.9,
-      "goMs": 74.5,
-      "nativeMpixS": 13.36,
-      "goMpixS": 28.15,
-      "pctOfGo": 47
+      "nativeMs": 151.2,
+      "goMs": 83.5,
+      "nativeMpixS": 13.87,
+      "goMpixS": 25.11,
+      "pctOfGo": 55
     },
     {
       "op": "pngEncode",
-      "nativeMs": 842.1,
-      "goMs": 582.2,
-      "nativeMpixS": 2.49,
-      "goMpixS": 3.6,
+      "nativeMs": 925.5,
+      "goMs": 634.3,
+      "nativeMpixS": 2.27,
+      "goMpixS": 3.31,
       "pctOfGo": 69
     },
     {
       "op": "jpegEncode",
-      "nativeMs": 145.2,
-      "goMs": 167.4,
-      "nativeMpixS": 14.45,
-      "goMpixS": 12.53,
-      "pctOfGo": 115
+      "nativeMs": 159.3,
+      "goMs": 352,
+      "nativeMpixS": 13.16,
+      "goMpixS": 5.96,
+      "pctOfGo": 221
     }
   ]
 }
