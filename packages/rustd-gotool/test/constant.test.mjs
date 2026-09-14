@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import {
   GoConstValue,
   constMakeInt64,
+  constMakeFromLiteral,
   constToInt,
   constToString,
   constFloat64Val,
@@ -689,6 +690,99 @@ test('constToString Int/Float is not StringVal; Unknown is empty+ok; Float64Val 
   assert.equal(zeroExact, true);
   assert.throws(() => constToString(1), TypeError);
   assert.throws(() => constFloat64Val(null), TypeError);
+});
+
+function evaluateLit(c) {
+  const r = constMakeFromLiteral(c.lit, TOKEN[c.tok], 0);
+  const [toInt, toIntOk] = constToInt(r);
+  const [f, f64Exact] = constFloat64Val(r);
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    sign: constSign(r),
+    toInt: toInt.toString(),
+    toIntOk,
+    bitLen: r.kind === 'Int' ? constBitLen(r) : 0,
+    f64Bits: f64BitsHex(f),
+    f64Exact,
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant MakeFromLiteral Int/Float fixtures; native matches every case', () => {
+  const generated = go(['-constant-literal']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-literal-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go MakeFromLiteral fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-int-float-literal');
+  assert.ok(fixture.cases.length >= 40 + 40, `too few cases: ${fixture.cases.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateLit(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind lit=${c.lit}`);
+    assert.equal(got.exact, c.exact, `${c.id} exact lit=${c.lit}`);
+    assert.equal(got.sign, c.sign, `${c.id} sign lit=${c.lit}`);
+    assert.equal(got.toInt, c.toInt, `${c.id} toInt lit=${c.lit}`);
+    assert.equal(got.toIntOk, c.toIntOk, `${c.id} toIntOk lit=${c.lit}`);
+    assert.equal(got.bitLen, c.bitLen, `${c.id} bitLen lit=${c.lit}`);
+    assert.equal(got.f64Bits, c.f64Bits, `${c.id} f64Bits lit=${c.lit}`);
+    assert.equal(got.f64Exact, c.f64Exact, `${c.id} f64Exact lit=${c.lit}`);
+    assert.equal(got.tokNum, TOKEN[c.tok], `${c.id} tokNum`);
+  }
+});
+
+test('JS MakeFromLiteral extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { tok: 'INT', lit: '0' },
+    { tok: 'INT', lit: '-99' },
+    { tok: 'INT', lit: '0xFF' },
+    { tok: 'INT', lit: '0b_1111' },
+    { tok: 'INT', lit: '0o77' },
+    { tok: 'INT', lit: '1_000_000' },
+    { tok: 'INT', lit: '08' },
+    { tok: 'FLOAT', lit: '2.5' },
+    { tok: 'FLOAT', lit: '-0.25' },
+    { tok: 'FLOAT', lit: '1e-10' },
+    { tok: 'FLOAT', lit: '0x1.8p4' },
+    { tok: 'FLOAT', lit: '1e+1000000000' },
+  ];
+  const cases = extras.map((c, i) => evaluateLit({
+    id: `js-lit-${i}`, tok: c.tok, tokNum: TOKEN[c.tok], lit: c.lit,
+  }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-int-float-literal', cases };
+  const verified = go(['-verify-constant-literal'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 12 gotool constant-int-float-literal cases/);
+  const broken = structuredClone(packet);
+  broken.cases[1].exact = 'not-a-number';
+  const rejected = go(['-verify-constant-literal'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 1/);
+  assert.notEqual(go(['-verify-constant-literal'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-int-float-literal', cases: [],
+  })).status, 0);
+});
+
+test('constMakeFromLiteral: 0x10 is Int 16; 1.5 is Float 3/2; invalid is Unknown; prec/tok throw', () => {
+  const hex = constMakeFromLiteral('0x10', TOKEN.INT, 0);
+  assert.equal(hex.kind, 'Int');
+  assert.equal(hex.toString(), '16');
+  assert.equal(constCompare(hex, constMakeInt64(16n)), 0);
+  const half = constMakeFromLiteral('1.5', TOKEN.FLOAT, 0);
+  assert.equal(half.kind, 'Float');
+  assert.equal(half.toString(), '3/2');
+  assert.equal(constCompare(half, constBinaryOp(TOKEN.QUO, constMakeInt64(3n), constMakeInt64(2n))), 0);
+  const unk = constMakeFromLiteral('08', TOKEN.INT, 0);
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(unk.toString(), 'unknown');
+  assert.equal(constMakeFromLiteral('1e+1000000000', TOKEN.FLOAT, 0).kind, 'Unknown');
+  assert.equal(constMakeFromLiteral('1e-1000000000', TOKEN.FLOAT, 0).toString(), '0');
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.INT, 1), /prec must be 0/);
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.INT, 0.5), TypeError);
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.STRING, 0), /INT or FLOAT/);
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.ADD, 0), /INT or FLOAT/);
+  assert.throws(() => constMakeFromLiteral(1, TOKEN.INT, 0), TypeError);
 });
 
 test('constMakeInt64 rejects non-bigint and values outside int64', () => {
