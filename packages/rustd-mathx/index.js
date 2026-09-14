@@ -173,6 +173,15 @@ function cIsInf(x, sign) {
 }
 function cIsNaN(x) { const [re, im] = asComplex(x); return binding.cIsNaN(re, im); }
 
+function i64(name, x) {
+  const min = -(1n << 63n);
+  const max = (1n << 63n) - 1n;
+  if (typeof x !== 'bigint' || x < min || x > max) {
+    throw new RangeError(`math/rand: ${name} out of range`);
+  }
+  return x;
+}
+
 class Rand {
   constructor(native) {
     this._native = native;
@@ -180,13 +189,29 @@ class Rand {
   uint64() {
     return native(() => this._native.uint64());
   }
+  int63() {
+    return native(() => this._native.int63());
+  }
+  float64() {
+    return native(() => this._native.float64());
+  }
+  read(n) {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > 0xffffffff) {
+      throw new RangeError('math/rand: read length out of range');
+    }
+    return Uint8Array.from(native(() => this._native.read(n)));
+  }
   state() {
-    return Uint8Array.from(this._native.state());
+    return Uint8Array.from(native(() => this._native.state()));
   }
 }
 
 function newPCG(seed1, seed2) {
   return new Rand(native(() => binding.newPcg(u64('seed1', seed1), u64('seed2', seed2))));
+}
+
+function newSource(seed) {
+  return new Rand(native(() => binding.newSource(i64('seed', seed))));
 }
 
 function newChaCha8(seed) {
@@ -215,5 +240,5 @@ module.exports = {
   cAbs, cArg, cNorm, cConj, cRect, cPolar, cExp, cLog, cPow, cSqrt,
   cSin, cCos, cTan, cSinh, cCosh, cTanh, cAsin, cAcos, cAtan, cAsinh, cAcosh, cAtanh, cCot,
   cInf, cNaN, cIsInf, cIsNaN,
-  Rand, newPCG, newChaCha8, randFromState,
+  Rand, newPCG, newChaCha8, newSource, randFromState,
 };

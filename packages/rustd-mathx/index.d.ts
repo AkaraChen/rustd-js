@@ -68,15 +68,23 @@ export function cIsInf(x: Complex, sign?: number): boolean;
 export function cIsNaN(x: Complex): boolean;
 
 /**
- * math/rand v2 PCG / ChaCha8 (checkpoint 1).
+ * math/rand v2 PCG / ChaCha8 (checkpoint 1) and v1 lagged-Fibonacci `newSource` (checkpoint 2).
  * This is a PRNG, not a CSPRNG: do not use for tokens, keys, nonces, or session IDs.
- * Remaining Rand methods (intN, shuffle, Zipf, v1 Read, defaultRand) land in later checkpoints.
+ * Remaining Rand methods (intN, shuffle, Zipf, defaultRand) land in later checkpoints.
  */
 export class Rand {
   uint64(): bigint;
-  /** Go `MarshalBinary` bytes: PCG is 20 bytes (`pcg:` + BE hi/lo); ChaCha8 is 48 bytes (`chacha8:` + BE used + LE seed), optionally prefixed with `readbuf:`. */
+  /** v1 `Int63`. Throws `RangeError` on PCG/ChaCha8. */
+  int63(): bigint;
+  /** v1 `Float64` in `[0, 1)`. Throws `RangeError` on PCG/ChaCha8. */
+  float64(): number;
+  /** v1 deterministic `Read`. Throws `RangeError` on PCG/ChaCha8 (v2 has no Read). */
+  read(n: number): Uint8Array;
+  /** Go `MarshalBinary` bytes: PCG is 20 bytes (`pcg:` + BE hi/lo); ChaCha8 is 48 bytes (`chacha8:` + BE used + LE seed), optionally prefixed with `readbuf:`. v1 `newSource` has no marshal format and throws. */
   state(): Uint8Array;
 }
 export function newPCG(seed1: bigint, seed2: bigint): Rand;
 export function newChaCha8(seed: Uint8Array): Rand;
+/** Go `math/rand.NewSource(seed)` lagged-Fibonacci generator. */
+export function newSource(seed: bigint): Rand;
 export function randFromState(state: Uint8Array): Rand;

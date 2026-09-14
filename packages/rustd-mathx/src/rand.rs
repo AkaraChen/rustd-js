@@ -1,5 +1,9 @@
+#[path = "rng_cooked.rs"]
+mod rng_cooked;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use rng_cooked::RNG_COOKED;
 
 fn range(message: &str) -> Error {
     Error::new(Status::GenericFailure, format!("RangeError: {message}"))
@@ -11,6 +15,14 @@ fn u64_arg(value: BigInt) -> Result<u64> {
         return Err(range("math/rand: value out of range"));
     }
     Ok(magnitude)
+}
+
+fn i64_arg(value: BigInt) -> Result<i64> {
+    let (signed, lossless) = value.get_i64();
+    if !lossless {
+        return Err(range("math/rand: value out of range"));
+    }
+    Ok(signed)
 }
 
 fn u64_out(value: u64) -> BigInt {
@@ -326,41 +338,180 @@ fn block(seed: &[u64; 4], buf: &mut [u64; 32], counter: u32) {
     }
 }
 
+const RNG_LEN: usize = 607;
+const RNG_TAP: usize = 273;
+const RNG_MASK: u64 = (1 << 63) - 1;
+const INT32_MAX: i32 = 2_147_483_647;
+
+fn seedrand(x: i32) -> i32 {
+    const A: i32 = 48_271;
+    const Q: i32 = 44_488;
+    const R: i32 = 3_399;
+    let hi = x / Q;
+    let lo = x % Q;
+    let mut x = A.wrapping_mul(lo).wrapping_sub(R.wrapping_mul(hi));
+    if x < 0 {
+        x = x.wrapping_add(INT32_MAX);
+    }
+    x
+}
+
+struct RngSource {
+    tap: i32,
+    feed: i32,
+    vec: [i64; RNG_LEN],
+}
+
+impl RngSource {
+    fn seed(seed: i64) -> Self {
+        let mut rng = Self {
+            tap: 0,
+            feed: (RNG_LEN - RNG_TAP) as i32,
+            vec: [0; RNG_LEN],
+        };
+        let mut seed = seed % i64::from(INT32_MAX);
+        if seed < 0 {
+            seed += i64::from(INT32_MAX);
+        }
+        if seed == 0 {
+            seed = 89_482_311;
+        }
+        let mut x = seed as i32;
+        for i in -20..RNG_LEN as i32 {
+            x = seedrand(x);
+            if i >= 0 {
+                let mut u = (i64::from(x)) << 40;
+                x = seedrand(x);
+                u ^= (i64::from(x)) << 20;
+                x = seedrand(x);
+                u ^= i64::from(x);
+                u ^= RNG_COOKED[i as usize];
+                rng.vec[i as usize] = u;
+            }
+        }
+        rng
+    }
+
+    fn uint64(&mut self) -> u64 {
+        self.tap -= 1;
+        if self.tap < 0 {
+            self.tap += RNG_LEN as i32;
+        }
+        self.feed -= 1;
+        if self.feed < 0 {
+            self.feed += RNG_LEN as i32;
+        }
+        let x = self.vec[self.feed as usize].wrapping_add(self.vec[self.tap as usize]);
+        self.vec[self.feed as usize] = x;
+        x as u64
+    }
+
+    fn int63(&mut self) -> i64 {
+        (self.uint64() & RNG_MASK) as i64
+    }
+
+    fn float64(&mut self) -> f64 {
+        loop {
+            let f = (self.int63() as f64) / ((1u64 << 63) as f64);
+            if f != 1.0 {
+                return f;
+            }
+        }
+    }
+
+    fn read(&mut self, p: &mut [u8], read_val: &mut i64, read_pos: &mut i8) {
+        let mut pos = *read_pos;
+        let mut val = *read_val;
+        for slot in p.iter_mut() {
+            if pos == 0 {
+                val = self.int63();
+                pos = 7;
+            }
+            *slot = val as u8;
+            val >>= 8;
+            pos -= 1;
+        }
+        *read_pos = pos;
+        *read_val = val;
+    }
+}
+
 enum Inner {
     Pcg(Pcg),
     ChaCha8(ChaCha8),
+    Rng(RngSource),
 }
 
 #[napi]
 pub struct NativeRand {
     inner: Inner,
+    read_val: i64,
+    read_pos: i8,
+}
+
+fn wrap(inner: Inner) -> NativeRand {
+    NativeRand {
+        inner,
+        read_val: 0,
+        read_pos: 0,
+    }
 }
 
 #[napi]
 impl NativeRand {
     #[napi]
-    pub fn uint64(&mut self) -> BigInt {
+    pub fn uint64(&mut self) -> Result<BigInt> {
         match &mut self.inner {
-            Inner::Pcg(p) => u64_out(p.uint64()),
-            Inner::ChaCha8(c) => u64_out(c.uint64()),
+            Inner::Pcg(p) => Ok(u64_out(p.uint64())),
+            Inner::ChaCha8(c) => Ok(u64_out(c.uint64())),
+            Inner::Rng(r) => Ok(u64_out(r.uint64())),
         }
     }
 
     #[napi]
-    pub fn state(&self) -> Buffer {
+    pub fn int63(&mut self) -> Result<BigInt> {
+        match &mut self.inner {
+            Inner::Rng(r) => Ok(u64_out(r.int63() as u64)),
+            _ => Err(range("math/rand: Int63 is a v1 API")),
+        }
+    }
+
+    #[napi]
+    pub fn float64(&mut self) -> Result<f64> {
+        match &mut self.inner {
+            Inner::Rng(r) => Ok(r.float64()),
+            _ => Err(range("math/rand: v1 Float64 is not implemented for this source")),
+        }
+    }
+
+    #[napi]
+    pub fn read(&mut self, n: u32) -> Result<Buffer> {
+        match &mut self.inner {
+            Inner::Rng(r) => {
+                let mut buf = vec![0u8; n as usize];
+                r.read(&mut buf, &mut self.read_val, &mut self.read_pos);
+                Ok(Buffer::from(buf))
+            }
+            _ => Err(range("math/rand: Read is a v1 API")),
+        }
+    }
+
+    #[napi]
+    pub fn state(&self) -> Result<Buffer> {
         let bytes = match &self.inner {
             Inner::Pcg(p) => p.marshal(),
             Inner::ChaCha8(c) => c.marshal(),
+            Inner::Rng(_) => {
+                return Err(range("math/rand: v1 rngSource has no MarshalBinary"));
+            }
         };
-        Buffer::from(bytes)
+        Ok(Buffer::from(bytes))
     }
 }
 
 #[napi]
 pub fn new_pcg(seed1: BigInt, seed2: BigInt) -> Result<NativeRand> {
-    Ok(NativeRand {
-        inner: Inner::Pcg(Pcg::new(u64_arg(seed1)?, u64_arg(seed2)?)),
-    })
+    Ok(wrap(Inner::Pcg(Pcg::new(u64_arg(seed1)?, u64_arg(seed2)?))))
 }
 
 #[napi(js_name = "newChaCha8")]
@@ -371,23 +522,22 @@ pub fn new_chacha8(seed: Uint8Array) -> Result<NativeRand> {
     }
     let mut arr = [0u8; 32];
     arr.copy_from_slice(seed);
-    Ok(NativeRand {
-        inner: Inner::ChaCha8(ChaCha8::new(&arr)),
-    })
+    Ok(wrap(Inner::ChaCha8(ChaCha8::new(&arr))))
+}
+
+#[napi(js_name = "newSource")]
+pub fn new_source(seed: BigInt) -> Result<NativeRand> {
+    Ok(wrap(Inner::Rng(RngSource::seed(i64_arg(seed)?))))
 }
 
 #[napi]
 pub fn rand_from_state(state: Uint8Array) -> Result<NativeRand> {
     let data = state.as_ref();
     if data.starts_with(b"pcg:") {
-        return Ok(NativeRand {
-            inner: Inner::Pcg(Pcg::unmarshal(data)?),
-        });
+        return Ok(wrap(Inner::Pcg(Pcg::unmarshal(data)?)));
     }
     if data.starts_with(b"readbuf:") || data.starts_with(b"chacha8:") {
-        return Ok(NativeRand {
-            inner: Inner::ChaCha8(ChaCha8::unmarshal(data)?),
-        });
+        return Ok(wrap(Inner::ChaCha8(ChaCha8::unmarshal(data)?)));
     }
     Err(range("invalid PCG encoding"))
 }

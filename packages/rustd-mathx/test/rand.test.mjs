@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { newPCG, newChaCha8, randFromState } from '../index.mjs';
+import { newPCG, newChaCha8, newSource, randFromState } from '../index.mjs';
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const pkg = join(dir, '..');
@@ -89,6 +89,69 @@ test('newChaCha8 rejects non-32-byte seeds', () => {
   assert.throws(() => newChaCha8(new Uint8Array(31)), RangeError);
   assert.throws(() => newChaCha8(new Uint8Array(0)), RangeError);
   assert.throws(() => randFromState(new Uint8Array([1, 2, 3])), RangeError);
+});
+
+function f64bits(x) {
+  const buf = Buffer.alloc(8);
+  buf.writeDoubleLE(x, 0);
+  return buf.readBigUInt64LE(0).toString(16);
+}
+
+test('newSource(1) first Int63 values match the issue fixture and Go', () => {
+  const r = newSource(1n);
+  const got = [r.int63(), r.int63()];
+  assert.equal(got[0], 5577006791947779410n);
+  assert.equal(got[1], 8674665223082153551n);
+  assert.equal(got[0], BigInt(packet.v1Seed1Int63[0]));
+  assert.equal(got[1], BigInt(packet.v1Seed1Int63[1]));
+});
+
+test('v1 Int63 stream matches Go for 10k samples (NewSource(1))', () => {
+  const r = newSource(1n);
+  for (let i = 0; i < packet.v1Seed1Int63.length; i++) {
+    assert.equal(r.int63(), BigInt(packet.v1Seed1Int63[i]), `int63[${i}]`);
+  }
+});
+
+test('v1 Float64 bit patterns match Go for 10k samples (NewSource(1))', () => {
+  const r = newSource(1n);
+  for (let i = 0; i < packet.v1Seed1Float64.length; i++) {
+    assert.equal(f64bits(r.float64()), packet.v1Seed1Float64[i], `float64[${i}]`);
+  }
+});
+
+test('v1 Read is deterministic and matches Go including leftover bytes', () => {
+  const a = newSource(1n);
+  assert.equal(hex(a.read(8)), packet.v1Seed1Read8);
+  assert.equal(packet.v1Seed1Read8, '52fdfc072182654f');
+  const b = newSource(1n);
+  assert.equal(hex(b.read(64)), packet.v1Seed1Read64);
+  const c = newSource(1n);
+  const first = c.read(3);
+  const second = c.read(8);
+  assert.equal(hex(Buffer.concat([Buffer.from(first), Buffer.from(second)])), packet.v1Seed1Read3Then8);
+  assert.equal(newSource(1n).read(0).byteLength, 0);
+});
+
+test('v1 Seed(0) and Seed(-1) Int63 heads match Go', () => {
+  const z = newSource(0n);
+  for (let i = 0; i < packet.v1Seed0Int63Head.length; i++) {
+    assert.equal(z.int63(), BigInt(packet.v1Seed0Int63Head[i]), `seed0[${i}]`);
+  }
+  const n = newSource(-1n);
+  for (let i = 0; i < packet.v1SeedNeg1Int63Head.length; i++) {
+    assert.equal(n.int63(), BigInt(packet.v1SeedNeg1Int63Head[i]), `seed-1[${i}]`);
+  }
+});
+
+test('v1 APIs throw on PCG/ChaCha8; v1 has no MarshalBinary', () => {
+  const pcg = newPCG(1n, 2n);
+  assert.throws(() => pcg.int63(), RangeError);
+  assert.throws(() => pcg.float64(), RangeError);
+  assert.throws(() => pcg.read(8), RangeError);
+  const v1 = newSource(1n);
+  assert.throws(() => v1.state(), RangeError);
+  assert.throws(() => newSource(1n << 64n), RangeError);
 });
 
 test('release .node stays under 2MB (expected << 500KB)', () => {
