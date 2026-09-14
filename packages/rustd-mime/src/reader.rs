@@ -4,7 +4,8 @@
 //! and hides that header. `NextRawPart` leaves the CTE and body alone. `write`
 //! may split a boundary across chunks; `next_part` returns `Ok(None)` until a
 //! complete part (or the closing delimiter) is buffered. `read_form` applies
-//! the Go `multipartmaxparts` cap (default 1000). File spill / maxMemory later.
+//! the Go `multipartmaxparts` cap (default 1000) and Go `maxMemory + 10MB`
+//! accounting for non-file values (headers + name overhead + body). File spill later.
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
 use crate::mediatype::parse_media_type;
@@ -98,20 +99,22 @@ impl MultipartReader {
     }
 
     pub fn next_part(&mut self) -> Result<Option<MultipartPart>, String> {
-        self.next_part_opt(false)
+        self.next_part_opt(false, i64::MAX)
     }
 
     pub fn next_raw_part(&mut self) -> Result<Option<MultipartPart>, String> {
-        self.next_part_opt(true)
+        self.next_part_opt(true, i64::MAX)
     }
 
-    /// Go `Reader.ReadForm` part-count cap (`multipartmaxparts`, default 1000).
-    /// `max_memory` is accepted for the Go signature; file spill / memory accounting stay later.
-    pub fn read_form(&mut self, _max_memory: i64) -> Result<MultipartForm, String> {
+    /// Go `Reader.ReadForm`: `multipartmaxparts` (default 1000) and
+    /// `maxMemory + 10MB` for non-file values. File spill stays later.
+    pub fn read_form(&mut self, max_memory: i64) -> Result<MultipartForm, String> {
+        const MAP_ENTRY_OVERHEAD: i64 = 200;
+        let mut max_memory_bytes = read_form_max_memory_bytes(max_memory);
         let mut remaining = self.max_parts;
         let mut form = MultipartForm::default();
         loop {
-            match self.next_part()? {
+            match self.next_part_opt(false, max_memory_bytes)? {
                 None => return Ok(form),
                 Some(part) => {
                     if remaining <= 0 {
@@ -121,7 +124,16 @@ impl MultipartReader {
                     if part.form_name.is_empty() {
                         continue;
                     }
+                    max_memory_bytes -= part.form_name.len() as i64;
+                    max_memory_bytes -= MAP_ENTRY_OVERHEAD;
+                    if max_memory_bytes < 0 {
+                        return Err("multipart: message too large".into());
+                    }
                     if part.file_name.is_empty() {
+                        max_memory_bytes -= part.body.len() as i64;
+                        if max_memory_bytes < 0 {
+                            return Err("multipart: message too large".into());
+                        }
                         let value = String::from_utf8_lossy(&part.body).into_owned();
                         append_value(&mut form.value, part.form_name, value);
                     } else {
@@ -162,12 +174,16 @@ impl MultipartReader {
         self.nl_dash_boundary = snap.5;
     }
 
-    fn next_part_opt(&mut self, raw: bool) -> Result<Option<MultipartPart>, String> {
+    fn next_part_opt(
+        &mut self,
+        raw: bool,
+        max_header_bytes: i64,
+    ) -> Result<Option<MultipartPart>, String> {
         if self.finished {
             return Ok(None);
         }
         let snap = self.snapshot();
-        match self.try_next_part(raw) {
+        match self.try_next_part(raw, max_header_bytes) {
             Ok(part) => Ok(part),
             Err(StreamErr::NeedMore) => {
                 self.restore(snap);
@@ -177,7 +193,11 @@ impl MultipartReader {
         }
     }
 
-    fn try_next_part(&mut self, raw: bool) -> Result<Option<MultipartPart>, StreamErr> {
+    fn try_next_part(
+        &mut self,
+        raw: bool,
+        max_header_bytes: i64,
+    ) -> Result<Option<MultipartPart>, StreamErr> {
         if self.current_open {
             self.read_part_body()?;
             self.current_open = false;
@@ -196,8 +216,12 @@ impl MultipartReader {
                 self.parts_read,
             ) {
                 self.parts_read += 1;
-                let mut header =
-                    read_mime_header(&self.buf, &mut self.pos, self.max_headers_per_part)?;
+                let mut header = read_mime_header(
+                    &self.buf,
+                    &mut self.pos,
+                    self.max_headers_per_part,
+                    max_header_bytes,
+                )?;
                 let mut body = self.read_part_body()?;
                 self.current_open = false;
                 if !raw {
@@ -406,10 +430,20 @@ fn read_full_line(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, StreamErr> {
     }
 }
 
+fn read_form_max_memory_bytes(max_memory: i64) -> i64 {
+    const RESERVE: i64 = 10 << 20;
+    match max_memory.checked_add(RESERVE) {
+        Some(n) if n > 0 => n,
+        Some(_) if max_memory < 0 => 0,
+        _ => i64::MAX,
+    }
+}
+
 fn read_mime_header(
     buf: &[u8],
     pos: &mut usize,
     mut max_headers: i64,
+    mut max_memory: i64,
 ) -> Result<Vec<(String, Vec<String>)>, StreamErr> {
     if *pos < buf.len() && (buf[*pos] == b' ' || buf[*pos] == b'\t') {
         let line = read_full_line(buf, pos)?;
@@ -424,6 +458,8 @@ fn read_mime_header(
             String::from_utf8_lossy(shown)
         )));
     }
+    // Go `net/textproto.readMIMEHeader`: 400-byte map overhead, then 200 per new key.
+    max_memory -= 400;
     let mut headers: Vec<(String, Vec<String>)> = Vec::new();
     loop {
         let kv = match read_continued_line(buf, pos)? {
@@ -453,6 +489,15 @@ fn read_mime_header(
         let value = String::from_utf8_lossy(trim_left_space_tab(v)).into_owned();
         max_headers -= 1;
         if max_headers < 0 {
+            return Err(StreamErr::Msg("multipart: message too large".into()));
+        }
+        let is_new = headers.iter().all(|(k, _)| *k != key);
+        if is_new {
+            max_memory -= key.len() as i64;
+            max_memory -= 200;
+        }
+        max_memory -= value.len() as i64;
+        if max_memory < 0 {
             return Err(StreamErr::Msg("multipart: message too large".into()));
         }
         if let Some(existing) = headers.iter_mut().find(|(k, _)| *k == key) {
@@ -1119,6 +1164,79 @@ Content-Transfer-Encoding: quoted-printable\r\n\
         r.write(&body);
         assert_eq!(
             r.read_form(1024).unwrap_err(),
+            "multipart: message too large"
+        );
+    }
+
+    fn value_form_body(name: &str, value: &str) -> Vec<u8> {
+        format!(
+            "--b\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n--b--\r\n"
+        )
+        .into_bytes()
+    }
+
+    fn two_value_form_body(a: &str, va: &str, b: &str, vb: &str) -> Vec<u8> {
+        format!(
+            "--b\r\nContent-Disposition: form-data; name=\"{a}\"\r\n\r\n{va}\r\n--b\r\nContent-Disposition: form-data; name=\"{b}\"\r\n\r\n{vb}\r\n--b--\r\n"
+        )
+        .into_bytes()
+    }
+
+    fn read_form_err(body: &[u8], max_memory: i64) -> Result<usize, String> {
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        r.read_form(max_memory)
+            .map(|form| form.value.iter().map(|(_, v)| v.len()).sum())
+    }
+
+    #[test]
+    fn read_form_max_memory_header_cap_matches_go() {
+        let body = value_form_body("x", &"1".repeat(100));
+        // Content-Disposition: form-data; name="x" → 400 + 19 + 200 + 19 = 638
+        let fail_at = 638 - (10 << 20);
+        assert_eq!(
+            read_form_err(&body, fail_at - 1).unwrap_err(),
+            "multipart: message too large"
+        );
+        assert_eq!(read_form_err(&body, fail_at).unwrap(), 1);
+        assert_eq!(read_form_err(&body, 0).unwrap(), 1);
+    }
+
+    #[test]
+    fn read_form_max_memory_value_body_matches_go() {
+        let body = value_form_body("largetext", &"1".repeat(1024));
+        // name 9 + 200 + 1024 = 1233 (body dominates the 646-byte header snapshot)
+        let fail_at = 1233 - (10 << 20);
+        assert_eq!(
+            read_form_err(&body, fail_at - 1).unwrap_err(),
+            "multipart: message too large"
+        );
+        assert_eq!(read_form_err(&body, fail_at).unwrap(), 1);
+        let form = {
+            let mut r = MultipartReader::new("b".into());
+            r.write(&body);
+            r.read_form(fail_at).unwrap()
+        };
+        assert_eq!(form.value[0].1[0].len(), 1024);
+    }
+
+    #[test]
+    fn read_form_max_memory_two_values_matches_go() {
+        let body = two_value_form_body("a", "hello", "b", "world");
+        // first value persist 206, second header snapshot needs 638 → 844
+        let fail_at = 844 - (10 << 20);
+        assert_eq!(
+            read_form_err(&body, fail_at - 1).unwrap_err(),
+            "multipart: message too large"
+        );
+        assert_eq!(read_form_err(&body, fail_at).unwrap(), 2);
+    }
+
+    #[test]
+    fn read_form_negative_reserve_zero_is_too_large() {
+        let body = value_form_body("x", "hello");
+        assert_eq!(
+            read_form_err(&body, -(10 << 20)).unwrap_err(),
             "multipart: message too large"
         );
     }
