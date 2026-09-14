@@ -4,7 +4,7 @@ import {
   Image, rect, ZR, rectSize, rectIntersect, rectEmpty, nrgba, gray,
   plan9Palette, pngEncode, pngDecode, pngDecodeConfig,
   jpegEncode, jpegDecode, jpegDecodeConfig,
-  gifEncode, gifDecode, gifDecodeConfig,
+  gifEncode, gifDecode, gifDecodeAll, gifDecodeConfig,
   draw, ImageDisposedError, ImageTooLargeError, PngFormatError,
 } from '../index.mjs';
 
@@ -107,4 +107,80 @@ test('draw src copies pixels', () => {
   src.set(0, 0, nrgba({ r: 9, g: 8, b: 7, a: 255 }));
   draw(dst, rect(0, 0, 2, 2), src, { x: 0, y: 0 }, 'src');
   assert.equal(dst.atRgba(0, 0).r >> 8, 9);
+});
+
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (const b of bytes) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body));
+  return Buffer.concat([len, body, crc]);
+}
+
+function bombPng(width, height) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function gifWithFramesAndScreen(n, screenW, screenH) {
+  const img = Image.nrgba(rect(0, 0, 8, 8));
+  img.set(0, 0, nrgba({ r: 9, g: 8, b: 7, a: 255 }));
+  const encoded = Buffer.from(gifEncode(img, { numColors: 16 }));
+  img.dispose();
+  const trailer = encoded.lastIndexOf(0x3b);
+  const image = encoded.indexOf(0x2c, 13);
+  assert.ok(trailer > 13 && image > 13);
+  let start = image;
+  if (image >= 8 && encoded[image - 8] === 0x21 && encoded[image - 7] === 0xf9) start = image - 8;
+  const block = encoded.subarray(start, trailer);
+  const parts = [encoded.subarray(0, start)];
+  for (let i = 0; i < n; i++) parts.push(block);
+  parts.push(Buffer.from([0x3b]));
+  const out = Buffer.concat(parts);
+  out.writeUInt16LE(screenW, 6);
+  out.writeUInt16LE(screenH, 8);
+  return out;
+}
+
+test('malicious 100000×100000 PNG DecodeConfig RSS <10MB and Decode maxPixels (#19 §4.8)', () => {
+  const tinyImg = Image.nrgba(rect(0, 0, 1, 1));
+  const tiny = pngEncode(tinyImg, { compressionLevel: -1 });
+  tinyImg.dispose();
+  pngDecodeConfig(tiny);
+  const bomb = bombPng(100000, 100000);
+  const before = process.memoryUsage().rss;
+  const cfg = pngDecodeConfig(bomb);
+  const after = process.memoryUsage().rss;
+  const delta = Math.max(0, after - before);
+  assert.equal(cfg.width, 100000);
+  assert.equal(cfg.height, 100000);
+  assert.ok(delta < 10 * 1024 * 1024, `DecodeConfig RSS grew ${delta} bytes, want <10MB`);
+  assert.throws(() => pngDecode(bomb, { maxPixels: 1_000_000 }), ImageTooLargeError);
+});
+
+test('malicious GIF DecodeAll intercepts 1000 frames × large screen via maxPixels (#19 §4.8)', () => {
+  const buf = gifWithFramesAndScreen(1000, 10000, 10000);
+  const cfg = gifDecodeConfig(buf);
+  assert.equal(cfg.width, 10000);
+  assert.equal(cfg.height, 10000);
+  assert.throws(() => gifDecodeAll(buf, { maxPixels: 1_000_000 }), ImageTooLargeError);
+  assert.throws(() => gifDecode(buf, { maxPixels: 1_000_000 }), ImageTooLargeError);
 });

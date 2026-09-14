@@ -22,8 +22,10 @@ parent. Call `dispose()` (or `using`) when finished; `at`/`pix` after dispose
 throw `ImageDisposedError`.
 
 Untrusted input: call `pngDecodeConfig` / `jpegDecodeConfig` / `gifDecodeConfig`
-before allocating pixels, and pass `maxPixels` to `*Decode`. Config paths do not
-allocate a pixel buffer.
+before allocating pixels, and pass `maxPixels` to `*Decode` / `gifDecodeAll`.
+Config paths do not allocate a pixel buffer: a 100000×100000 PNG IHDR must not
+grow process RSS by 10MB. `maxPixels` is checked from the PNG IHDR / GIF
+logical screen **before** frame buffers are allocated (`ImageTooLargeError`).
 
 ## Format matrix
 

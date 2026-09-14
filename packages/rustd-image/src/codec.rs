@@ -82,9 +82,10 @@ fn png_decoder(buf: &[u8]) -> png::Decoder<Cursor<&[u8]>> {
 }
 
 pub fn png_decode_config(buf: &[u8]) -> Result<Config, ImageError> {
-    let decoder = png_decoder(buf);
-    let reader = decoder.read_info().map_err(map_png)?;
-    let info = reader.info();
+    // `read_info` allocates/limit-checks a full frame buffer. Issue #19 §4.8
+    // requires DecodeConfig of a 100000×100000 IHDR to stay under 10MB RSS.
+    let mut decoder = png_decoder(buf);
+    let info = decoder.read_header_info().map_err(map_png)?;
     png_reject_empty(info.width, info.height)?;
     Ok(Config {
         width: info.width,
@@ -193,11 +194,12 @@ fn put_nrgba64(pix: &mut [u8], i: usize, r: u16, g: u16, b: u16, a: u16) {
 
 pub fn png_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageError> {
     png_require_iend(buf)?;
+    let cfg = png_decode_config(buf)?;
+    too_large(cfg.width, cfg.height, max_pixels)?;
     let decoder = png_decoder(buf);
     let mut reader = decoder.read_info().map_err(map_png)?;
     let info = reader.info().clone();
     png_reject_empty(info.width, info.height)?;
-    too_large(info.width, info.height, max_pixels)?;
     let mut frame = vec![
         0;
         reader
@@ -678,13 +680,21 @@ pub struct GifData {
     pub config: Config,
 }
 
+fn gif_logical_screen(buf: &[u8]) -> Result<(u32, u32), ImageError> {
+    if buf.len() < 13 || !(buf.starts_with(b"GIF87a") || buf.starts_with(b"GIF89a")) {
+        return Err(ImageError::new("GifFormatError", "gif: not a GIF file"));
+    }
+    let width = u16::from_le_bytes([buf[6], buf[7]]) as u32;
+    let height = u16::from_le_bytes([buf[8], buf[9]]) as u32;
+    Ok((width, height))
+}
+
 pub fn gif_decode_config(buf: &[u8]) -> Result<Config, ImageError> {
-    let mut opts = gif::DecodeOptions::new();
-    opts.set_color_output(gif::ColorOutput::Indexed);
-    let decoder = opts.read_info(Cursor::new(buf)).map_err(|e| ImageError::new("GifFormatError", e.to_string()))?;
+    // Header-only: Go DecodeConfig reads the logical screen, not frames.
+    let (width, height) = gif_logical_screen(buf)?;
     Ok(Config {
-        width: decoder.width() as u32,
-        height: decoder.height() as u32,
+        width,
+        height,
         color_model: Model::Paletted,
     })
 }
@@ -695,6 +705,8 @@ pub fn gif_decode(buf: &[u8], max_pixels: Option<u64>) -> Result<Image, ImageErr
 }
 
 pub fn gif_decode_all(buf: &[u8], max_pixels: Option<u64>) -> Result<GifData, ImageError> {
+    let (lw, lh) = gif_logical_screen(buf)?;
+    too_large(lw, lh, max_pixels)?;
     let mut opts = gif::DecodeOptions::new();
     opts.set_color_output(gif::ColorOutput::Indexed);
     let mut decoder = opts
