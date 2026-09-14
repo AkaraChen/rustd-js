@@ -70,7 +70,7 @@ export function cIsNaN(x: Complex): boolean;
 /**
  * math/rand v2 PCG / ChaCha8 and v1 lagged-Fibonacci `newSource` (checkpoint 4).
  * This is a PRNG, not a CSPRNG: do not use for tokens, keys, nonces, or session IDs.
- * `defaultRand()` is auto-seeded (ChaCha8 via `crypto.getRandomValues`). `seedDefault` is not exported.
+ * `defaultRand()` is auto-seeded (ChaCha8 via `crypto.getRandomValues`). `seedDefault` is not exported: Go `math/rand/v2` has no `Seed`, and v1 `rand.Seed` is a lagged-Fibonacci global, not this ChaCha8 singleton.
  *
  * 64-bit integers are `bigint` (issue #21 shape 1), including `int()` / `uint()` on this 64-bit port.
  */

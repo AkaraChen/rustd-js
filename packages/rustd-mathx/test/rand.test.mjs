@@ -354,6 +354,16 @@ test('Zipf uint64 stream matches Go for s=1.1 v=1 imax=100 (PCG and v1)', () => 
   assert.throws(() => new Zipf({}, 1.1, 1, 100), RangeError);
 });
 
+test('seedDefault is not exported (Go math/rand/v2 has no Seed)', async () => {
+  const esm = await import('../index.mjs');
+  assert.equal(Object.hasOwn(esm, 'seedDefault'), false);
+  assert.equal(esm.seedDefault, undefined);
+  const { createRequire } = await import('node:module');
+  const cjs = createRequire(import.meta.url)('../index.js');
+  assert.equal(Object.hasOwn(cjs, 'seedDefault'), false);
+  assert.equal(cjs.seedDefault, undefined);
+});
+
 test('defaultRand is a singleton auto-seeded ChaCha8, not Seed(1) / PCG(1,2)', () => {
   const a = defaultRand();
   const b = defaultRand();

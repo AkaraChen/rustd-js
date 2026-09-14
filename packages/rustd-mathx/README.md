@@ -1,7 +1,7 @@
 # rustd-mathx
 
 Go `math/bits`, `math/cmplx`, and `math/rand` for Node via Rust + napi-rs.
-This is checkpoint 5 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**, recertified after Zipf/ziggurat tables (`npm pack` CJS/ESM smoke + linux-x64 size). `seedDefault` is not exported pending review.
+This is checkpoint 5 of [issue #21](https://github.com/AkaraChen/rustd-js/issues/21): **`math/bits` + `math/cmplx` + PCG/ChaCha8 + v1 `newSource` + N-family + `perm`/`shuffle` + Zipf + `normFloat64`/`expFloat64` + auto-seeded `defaultRand`**, recertified after Zipf/ziggurat tables (`npm pack` CJS/ESM smoke + linux-x64 size). `seedDefault` is **not** exported (decision: Go `math/rand/v2` has no `Seed`).
 
 Runtime Node >=20. No JavaScript runtime dependencies.
 
@@ -58,7 +58,7 @@ Required signed-zero cases: `cSqrt([-1, 0]) === [0, 1]`, `cPolar([-1, 0]) === { 
 - No platform-width `bits.Len`, `LeadingZeros`, `Add`, … Use `len32`/`len64` (and the matching width for every other op). A `uint` in Go is 32 or 64 bits depending on the platform; this package never hides that.
 - Panic becomes `RangeError`.
 - `math` and `math/big` are out of the 28-package split.
-- `math/rand` checkpoint 4 adds Zipf, `normFloat64`/`expFloat64` (Go ziggurat; v1 vs v2 consume `Uint32` vs `Uint64`), and `defaultRand()` (one auto-seeded ChaCha8 via `crypto.getRandomValues`). `seedDefault` is **not** exported pending review (issue #21 shape decision 8). Go's `NewZipf` returns nil on `s <= 1` or `v < 1`; we throw `RangeError` instead of returning null.
+- `math/rand` checkpoint 4 adds Zipf, `normFloat64`/`expFloat64` (Go ziggurat; v1 vs v2 consume `Uint32` vs `Uint64`), and `defaultRand()` (one auto-seeded ChaCha8 via `crypto.getRandomValues`). **`seedDefault(seed: bigint)` is not exported.** Issue #21 shape 8 asked to confirm a deprecated global reseed; Go `math/rand/v2` has no `Seed`, and Go v1 `rand.Seed` reseeds a lagged-Fibonacci global — a different generator than this ChaCha8 `defaultRand()`. Reseeding ChaCha8, or swapping `defaultRand()` to `newSource(seed)`, would invent a non-Go API. Deterministic streams use `newPCG` / `newChaCha8` / `newSource`. Go's `NewZipf` returns nil on `s <= 1` or `v < 1`; we throw `RangeError` instead of returning null.
 - v2 PCG/ChaCha8 throw `RangeError` on v1-only methods (`int63`, `int63n`, `intn`, `read`, …). v2 has no `Read`.
 - `int()` / `uint()` are `bigint` (64-bit Go `int`/`uint`; issue #21 shape 1). `intN(n: number)` stays `number` because `n` is a JS safe integer.
 - `Shuffle` is copy + in-place typed-array APIs rather than Go's `swap` callback (issue #21 recommended shape). `perm`/`shuffle` live in `index.js` so the Fisher-Yates / v1 `Intn` loops are visible; index draws come from native `uint64n` / v1 `int31n`-fast so consumption matches Go.
