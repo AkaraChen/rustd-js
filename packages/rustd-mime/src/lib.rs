@@ -305,9 +305,12 @@ pub struct NativeMultipartReader {
 #[napi]
 impl NativeMultipartReader {
     #[napi(constructor)]
-    pub fn new(boundary: String) -> Self {
+    pub fn new(boundary: String, max_headers_per_part: Option<i64>) -> Self {
         Self {
-            inner: reader::MultipartReader::new(boundary),
+            inner: match max_headers_per_part {
+                Some(n) => reader::MultipartReader::with_max_headers(boundary, n),
+                None => reader::MultipartReader::new(boundary),
+            },
         }
     }
 
@@ -343,6 +346,7 @@ fn map_next_part(
         })),
         Ok(None) => Ok(None),
         Err(e) if e.starts_with("quotedprintable:") => Err(error("QuotedPrintableError", &e)),
+        Err(e) if e == "multipart: message too large" => Err(error("MessageTooLargeError", &e)),
         Err(e) => Err(error("MultipartError", &e)),
     }
 }

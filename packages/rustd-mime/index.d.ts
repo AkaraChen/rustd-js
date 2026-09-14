@@ -49,6 +49,7 @@ export class QuotedPrintableError extends MimeError {
 }
 
 export class MultipartError extends MimeError {}
+export class MessageTooLargeError extends MultipartError {}
 export interface MultipartPartWriter {
   write(data: Uint8Array): void
   end(): void

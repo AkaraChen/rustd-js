@@ -41,6 +41,7 @@ class QuotedPrintableError extends MimeError {
 }
 class MimeWordError extends MimeError { static code = 'ERR_MIME_WORD'; }
 class MultipartError extends MimeError { static code = 'ERR_MIME_MULTIPART'; }
+class MessageTooLargeError extends MultipartError { static code = 'ERR_MIME_MESSAGE_TOO_LARGE'; }
 
 function native(fn) {
   try { return fn(); } catch (cause) {
@@ -48,7 +49,7 @@ function native(fn) {
     const colon = msg.indexOf(': ');
     const code = colon >= 0 ? msg.slice(0, colon) : '';
     const text = colon >= 0 ? msg.slice(colon + 2) : msg;
-    const ErrorClass = { MediaTypeError, QuotedPrintableError, MimeWordError, MultipartError }[code] ?? MimeError;
+    const ErrorClass = { MediaTypeError, QuotedPrintableError, MimeWordError, MultipartError, MessageTooLargeError }[code] ?? MimeError;
     throw new ErrorClass(text, { cause });
   }
 }
@@ -328,7 +329,7 @@ class MultipartReader {
     if (opts.maxTotalHeaders !== undefined && (typeof opts.maxTotalHeaders !== 'number' || opts.maxTotalHeaders < 0 || !Number.isInteger(opts.maxTotalHeaders))) {
       throw new TypeError('mime: maxTotalHeaders must be a non-negative integer');
     }
-    this._handle = native(() => new binding.NativeMultipartReader(opts.boundary));
+    this._handle = native(() => new binding.NativeMultipartReader(opts.boundary, opts.maxHeadersPerPart));
   }
   write(chunk) { native(() => this._handle.write(bytes(chunk))); }
   nextPart() {
@@ -363,7 +364,7 @@ class MimeWordDecoder {
 }
 
 module.exports = {
-  MimeError, MediaTypeError, InvalidMediaParameterError, QuotedPrintableError, MimeWordError, MultipartError,
+  MimeError, MediaTypeError, InvalidMediaParameterError, QuotedPrintableError, MimeWordError, MultipartError, MessageTooLargeError,
   parseMediaType, formatMediaType, typeByExtension, extensionsByType, addExtensionType, loadSystemMimeTypes,
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,

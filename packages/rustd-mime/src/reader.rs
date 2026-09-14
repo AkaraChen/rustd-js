@@ -39,10 +39,15 @@ pub struct MultipartReader {
     nl_dash_boundary: Vec<u8>,
     dash_boundary_dash: Vec<u8>,
     dash_boundary: Vec<u8>,
+    max_headers_per_part: i64,
 }
 
 impl MultipartReader {
     pub fn new(boundary: String) -> Self {
+        Self::with_max_headers(boundary, 10000)
+    }
+
+    pub fn with_max_headers(boundary: String, max_headers_per_part: i64) -> Self {
         let mut dash_boundary = Vec::with_capacity(2 + boundary.len());
         dash_boundary.extend_from_slice(b"--");
         dash_boundary.extend_from_slice(boundary.as_bytes());
@@ -61,6 +66,7 @@ impl MultipartReader {
             nl_dash_boundary,
             dash_boundary_dash,
             dash_boundary,
+            max_headers_per_part,
         }
     }
 
@@ -130,7 +136,8 @@ impl MultipartReader {
                 self.parts_read,
             ) {
                 self.parts_read += 1;
-                let mut header = read_mime_header(&self.buf, &mut self.pos)?;
+                let mut header =
+                    read_mime_header(&self.buf, &mut self.pos, self.max_headers_per_part)?;
                 let mut body = self.read_part_body()?;
                 self.current_open = false;
                 if !raw {
@@ -344,6 +351,7 @@ fn read_full_line(buf: &[u8], pos: &mut usize) -> Result<Vec<u8>, StreamErr> {
 fn read_mime_header(
     buf: &[u8],
     pos: &mut usize,
+    mut max_headers: i64,
 ) -> Result<Vec<(String, Vec<String>)>, StreamErr> {
     if *pos < buf.len() && (buf[*pos] == b' ' || buf[*pos] == b'\t') {
         let line = read_full_line(buf, pos)?;
@@ -381,6 +389,10 @@ fn read_mime_header(
             )));
         }
         let value = String::from_utf8_lossy(trim_left_space_tab(v)).into_owned();
+        max_headers -= 1;
+        if max_headers < 0 {
+            return Err(StreamErr::Msg("multipart: message too large".into()));
+        }
         if let Some(existing) = headers.iter_mut().find(|(k, _)| *k == key) {
             existing.1.push(value);
         } else {
@@ -766,5 +778,45 @@ Content-Transfer-Encoding: quoted-printable\r\n\
         assert_eq!(part.form_name, "only");
         assert_eq!(part.body, b"x");
         assert!(r.next_part().unwrap().is_none());
+    }
+
+    fn part_with_header_count(n: usize) -> Vec<u8> {
+        let mut body = b"--b\r\n".to_vec();
+        for i in 0..n {
+            body.extend(format!("X-{i}: v\r\n").into_bytes());
+        }
+        body.extend_from_slice(b"\r\nx\r\n--b--\r\n");
+        body
+    }
+
+    #[test]
+    fn next_part_header_count_limit_matches_go_default() {
+        let mut ok = MultipartReader::new("b".into());
+        ok.write(&part_with_header_count(10000));
+        let part = ok.next_part().unwrap().expect("10000 headers");
+        assert_eq!(part.header.len(), 10000);
+        assert_eq!(part.body, b"x");
+
+        let mut over = MultipartReader::new("b".into());
+        over.write(&part_with_header_count(10001));
+        assert_eq!(
+            over.next_part().unwrap_err(),
+            "multipart: message too large"
+        );
+    }
+
+    #[test]
+    fn next_part_header_count_custom_limit() {
+        let body_ok = part_with_header_count(3);
+        let mut ok = MultipartReader::with_max_headers("b".into(), 3);
+        ok.write(&body_ok);
+        assert_eq!(ok.next_part().unwrap().expect("3 headers").header.len(), 3);
+
+        let mut over = MultipartReader::with_max_headers("b".into(), 3);
+        over.write(&part_with_header_count(4));
+        assert_eq!(
+            over.next_part().unwrap_err(),
+            "multipart: message too large"
+        );
     }
 }
