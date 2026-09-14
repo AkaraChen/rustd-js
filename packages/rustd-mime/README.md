@@ -1,8 +1,8 @@
 # rustd-mime
 
-Go `mime`, `mime/quotedprintable`, and `mime/multipart` (Writer WriteField / CreateFormField, Reader NextPart on a complete body) for Node via napi-rs.
+Go `mime`, `mime/quotedprintable`, and `mime/multipart` (Writer WriteField / CreateFormField, Reader NextPart / NextRawPart on a complete body) for Node via napi-rs.
 
-This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values), `MultipartWriter.writeField` / `createFormField`, and `MultipartReader.nextPart` of a complete (non-chunked) one-part body vs Go `multipart.Writer`. `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). 1-byte feed and ReadForm limits are still later.
+This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values), `MultipartWriter.writeField` / `createFormField`, and `MultipartReader.nextPart` / `nextRawPart` of a complete (non-chunked) body vs Go `multipart.Writer` / `NewReader`. `nextPart` matches Go's quoted-printable CTE auto-decode. `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). 1-byte feed and ReadForm limits are still later.
 
 Checkpoint 2 expands Go fixtures to 200+ `ParseMediaType` cases (Go 1.24 `mediatype_test.go` plus generated parameter variants), Go 1.24 `FormatMediaType` / quoted-printable writer+reader / RFC 2047 `DecodeHeader` tables, TS→Go `formatMediaType` / quoted-printable verify, and 1-byte quoted-printable reads.
 
@@ -26,9 +26,14 @@ Checkpoint 11: `MultipartWriter` `writeField` / `createFormField` emit Go `multi
 
 Checkpoint 12: `MultipartReader.nextPart` of a complete one-part body matches Go `multipart.NewReader` (`FormName` / `FileName` / `Header` / body) for Go `Writer` and native `writeField` bytes. `write(chunk)` buffers; 1-byte interleaved feed, `nextRawPart`, `CreateFormFile`, and ReadForm limits are not in this slice.
 
+Checkpoint 13: `nextPart` of a complete multi-field body (`WriteField` / `CreateFormField` mix, empty field, quoted name) matches Go `NewReader`.
+
+Checkpoint 14: `nextPart` auto-decodes `Content-Transfer-Encoding: quoted-printable` (case-insensitive) and hides that header, matching Go `NextPart`. `nextRawPart` keeps the CTE and the encoded body, matching Go `NextRawPart`. 1-byte feed, `CreateFormFile`, `CreatePart`, and ReadForm limits stay later. Base64 CTE is out of scope (`rustd-encoding`).
+
 ## Differences from Go
 
-- **No 1-byte / chunked multipart feed yet.** `MultipartReader.write` + `nextPart` parse a complete body. `Part.header` is this package's `MIMEHeader` (`Record<string, string[]>` with canonical keys). `net/textproto` itself is not exported. `Part.close()` then `read()` throws (`multipart: part is closed`); Go `Part.Close` then `Read` returns EOF.
+- **No 1-byte / chunked multipart feed yet.** `MultipartReader.write` + `nextPart` / `nextRawPart` parse a complete body. `Part.header` is this package's `MIMEHeader` (`Record<string, string[]>` with canonical keys). `net/textproto` itself is not exported. `Part.close()` then `read()` throws (`multipart: part is closed`); Go `Part.Close` then `Read` returns EOF.
+- **QP CTE decode errors surface on `nextPart`**, because this slice slurps the part body. Go wraps `quotedprintable.Reader` and reports the error on `Part.Read`. Non-QP `Content-Transfer-Encoding` values (including `7bit` / `base64`) are left as-is.
 - **`MultipartWriter.bytes()` is idempotent** (second call returns the same buffer). Go `Writer.Close` writes a second trailer if called twice.
 - **`ReadForm` will not spill to temp files** once multipart lands. Over `maxMemory` it will throw `MessageTooLargeError`.
 - **Windows does not query the registry** for `TypeByExtension`. Unix still loads the same globs2 / mime.types paths as Go 1.24 (`/etc/httpd/conf/mime.types` included).
@@ -38,9 +43,4 @@ Checkpoint 12: `MultipartReader.nextPart` of a complete one-part body matches Go
 
 ## Size
 
-Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14, checkpoint 12): **493,712 bytes** / 2,000,000.
-
-```text
-$ ls -l packages/rustd-mime/*.node
--rwxrwxr-x 1 akrc akrc 493712 Sep 14 19:52 packages/rustd-mime/rustd-mime.linux-x64-gnu.node
-```
+Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14, checkpoint 14): **495,872 bytes** / 2,000,000.

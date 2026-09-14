@@ -793,6 +793,7 @@ type mpWriteOut struct {
 type mpReadIn struct {
 	Boundary string `json:"boundary"`
 	BodyHex  string `json:"bodyHex"`
+	Raw      bool   `json:"raw"`
 }
 
 type mpPartOut struct {
@@ -871,7 +872,15 @@ func handleMultipartRead() {
 	r := multipart.NewReader(bytes.NewReader(body), in.Boundary)
 	out := mpReadOut{Parts: []mpPartOut{}}
 	for {
-		p, err := r.NextPart()
+		var (
+			p   *multipart.Part
+			err error
+		)
+		if in.Raw {
+			p, err = r.NextRawPart()
+		} else {
+			p, err = r.NextPart()
+		}
 		if err == io.EOF {
 			break
 		}

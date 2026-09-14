@@ -297,19 +297,31 @@ impl NativeMultipartReader {
 
     #[napi]
     pub fn next_part(&mut self) -> Result<Option<NativeMultipartPartData>> {
-        match self.inner.next_part() {
-            Ok(Some(part)) => Ok(Some(NativeMultipartPartData {
-                header: part
-                    .header
-                    .into_iter()
-                    .map(|(key, values)| NativeHeaderField { key, values })
-                    .collect(),
-                form_name: part.form_name,
-                file_name: part.file_name,
-                body: part.body.into(),
-            })),
-            Ok(None) => Ok(None),
-            Err(e) => Err(error("MultipartError", &e)),
-        }
+        map_next_part(self.inner.next_part())
+    }
+
+    #[napi]
+    pub fn next_raw_part(&mut self) -> Result<Option<NativeMultipartPartData>> {
+        map_next_part(self.inner.next_raw_part())
+    }
+}
+
+fn map_next_part(
+    result: std::result::Result<Option<reader::MultipartPart>, String>,
+) -> Result<Option<NativeMultipartPartData>> {
+    match result {
+        Ok(Some(part)) => Ok(Some(NativeMultipartPartData {
+            header: part
+                .header
+                .into_iter()
+                .map(|(key, values)| NativeHeaderField { key, values })
+                .collect(),
+            form_name: part.form_name,
+            file_name: part.file_name,
+            body: part.body.into(),
+        })),
+        Ok(None) => Ok(None),
+        Err(e) if e.starts_with("quotedprintable:") => Err(error("QuotedPrintableError", &e)),
+        Err(e) => Err(error("MultipartError", &e)),
     }
 }

@@ -66,6 +66,7 @@ export class MultipartReader {
   constructor(opts: { boundary: string; maxHeadersPerPart?: number; maxTotalHeaders?: number })
   write(chunk: Uint8Array): void
   nextPart(): MultipartPart | null
+  nextRawPart(): MultipartPart | null
 }
 export class MultipartPart {
   readonly header: MIMEHeader
