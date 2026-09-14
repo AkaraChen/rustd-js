@@ -2,15 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { MultipartReader, MultipartWriter, QuotedPrintableError } from '../index.mjs';
+import { MultipartReader, MultipartWriter, QuotedPrintableError, MessageTooLargeError } from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
-function go(args = [], input) {
+function go(args = [], input, extraEnv = {}) {
   const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
   const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
   return spawnSync(command, [...prefix, 'run', './tools/gofixtures/mime', ...args], {
     cwd: root, encoding: 'utf8', input, maxBuffer: 16 << 20,
-    env: { ...process.env, GOTOOLCHAIN: 'local' }, timeout: 120000,
+    env: { ...process.env, GOTOOLCHAIN: 'local', ...extraEnv }, timeout: 120000,
   });
 }
 
@@ -435,6 +435,67 @@ test('nextRawPart random mid-boundary splits match whole-body and 1-byte', () =>
   );
   const boundary = '0016e68ee29c5d515f04cedf6733';
   assertThreeFeedModes(boundary, body, true);
+});
+
+function partWithHeaderCount(n, boundary = 'b') {
+  let s = `--${boundary}\r\n`;
+  for (let i = 0; i < n; i++) s += `X-${i}: v\r\n`;
+  s += `\r\nx\r\n--${boundary}--\r\n`;
+  return Buffer.from(s);
+}
+
+function goReadEnv(body, boundary, extraEnv) {
+  const generated = go(
+    ['-multipart-read'],
+    JSON.stringify({ boundary, bodyHex: hex(body), raw: false }),
+    extraEnv,
+  );
+  assert.equal(generated.status, 0, generated.stderr);
+  return JSON.parse(generated.stdout);
+}
+
+test('nextPart 10000 headers succeeds vs Go; 10001 is MessageTooLargeError', () => {
+  const okBody = partWithHeaderCount(10000);
+  const goOk = goRead(okBody, 'b');
+  assert.equal(goOk.error ?? '', '');
+  assert.equal(goOk.parts.length, 1);
+  assert.equal(Object.keys(goOk.parts[0].header).length, 10000);
+  const parts = readAll('b', okBody);
+  assert.equal(parts.length, 1);
+  assert.equal(Object.keys(parts[0].header).length, 10000);
+  assert.equal(parts[0].bodyHex, goOk.parts[0].bodyHex);
+  assert.equal(parts[0].header['X-0'][0], 'v');
+  assert.equal(parts[0].header['X-9999'][0], goOk.parts[0].header['X-9999'][0]);
+
+  const overBody = partWithHeaderCount(10001);
+  const goOver = goRead(overBody, 'b');
+  assert.equal(goOver.error, 'multipart: message too large');
+  assert.equal(goOver.parts.length, 0);
+  const reader = new MultipartReader({ boundary: 'b' });
+  reader.write(overBody);
+  assert.throws(() => reader.nextPart(), (err) => {
+    assert.ok(err instanceof MessageTooLargeError);
+    assert.equal(err.message, 'multipart: message too large');
+    return true;
+  });
+});
+
+test('nextPart maxHeadersPerPart=3 matches GODEBUG multipartmaxheaders=3', () => {
+  const okBody = partWithHeaderCount(3);
+  const goOk = goReadEnv(okBody, 'b', { GODEBUG: 'multipartmaxheaders=3' });
+  assert.equal(goOk.error ?? '', '');
+  const ok = new MultipartReader({ boundary: 'b', maxHeadersPerPart: 3 });
+  ok.write(okBody);
+  const part = ok.nextPart();
+  assert.equal(Object.keys(part.header).length, 3);
+  assert.equal(hex(part.read()), goOk.parts[0].bodyHex);
+
+  const overBody = partWithHeaderCount(4);
+  const goOver = goReadEnv(overBody, 'b', { GODEBUG: 'multipartmaxheaders=3' });
+  assert.equal(goOver.error, 'multipart: message too large');
+  const over = new MultipartReader({ boundary: 'b', maxHeadersPerPart: 3 });
+  over.write(overBody);
+  assert.throws(() => over.nextPart(), MessageTooLargeError);
 });
 
 test('nextPart returns null after a chunk that ends inside the opening boundary', () => {
