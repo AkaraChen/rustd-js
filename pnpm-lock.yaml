@@ -22,6 +22,8 @@ importers:
 
   packages/rustd-crypto: {}
 
+  packages/rustd-log: {}
+
 packages:
 
   '@emnapi/core@1.11.2':
