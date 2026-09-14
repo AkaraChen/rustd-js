@@ -13,6 +13,15 @@ export function extensionsByType(typ: string): string[]
 export function addExtensionType(ext: string, typ: string): void
 export function loadSystemMimeTypes(paths?: string[]): number
 
+/** Go `net/textproto.MIMEHeader` (`map[string][]string`) for `Part.header` / `FileHeader.header`. Keys are canonical. */
+export type MIMEHeader = Record<string, string[]>
+export function canonicalMIMEHeaderKey(s: string): string
+export function mimeHeaderGet(header: MIMEHeader | null | undefined, key: string): string
+export function mimeHeaderValues(header: MIMEHeader | null | undefined, key: string): string[]
+export function mimeHeaderSet(header: MIMEHeader, key: string, value: string): void
+export function mimeHeaderAdd(header: MIMEHeader, key: string, value: string): void
+export function mimeHeaderDel(header: MIMEHeader, key: string): void
+
 export function encodeWord(charset: string, s: string, enc: 'b' | 'q'): string
 export class MimeWordDecoder {
   constructor(opts?: { charsetReader?: (charset: string, input: Uint8Array) => Uint8Array })

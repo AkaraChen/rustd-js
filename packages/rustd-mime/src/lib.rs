@@ -1,5 +1,6 @@
 mod encodedword;
 mod ext;
+mod header;
 mod mediatype;
 mod qp;
 
@@ -168,6 +169,11 @@ pub fn decode_word(word: String) -> Result<WordPart> {
         charset: part.charset,
         content: part.content.map(Into::into),
     })
+}
+
+#[napi]
+pub fn canonical_mime_header_key(s: String) -> String {
+    header::canonical_mime_header_key(&s)
 }
 
 #[napi]

@@ -4,4 +4,5 @@ export const {
   parseMediaType, formatMediaType, typeByExtension, extensionsByType, addExtensionType, loadSystemMimeTypes,
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,
+  canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
 } = api;

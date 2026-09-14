@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"mime/quotedprintable"
+	"net/textproto"
 	"os"
 	"slices"
 	"sort"
@@ -76,17 +77,38 @@ type HeaderCase struct {
 	Out string `json:"out"`
 }
 
+type CanonCase struct {
+	In  string `json:"in"`
+	Out string `json:"out"`
+}
+
+type MimeHeaderOp struct {
+	Op    string `json:"op"`
+	Key   string `json:"key"`
+	Value string `json:"value,omitempty"`
+}
+
+type MimeHeaderCase struct {
+	ID     string              `json:"id"`
+	Ops    []MimeHeaderOp      `json:"ops"`
+	Gets   map[string]string   `json:"gets"`
+	Values map[string][]string `json:"values"`
+	Record map[string][]string `json:"record"`
+}
+
 type Packet struct {
-	Schema  int          `json:"schema"`
-	Package string       `json:"package"`
-	Parse   []ParseCase  `json:"parse"`
-	QpEnc   []QpCase     `json:"qpEnc"`
-	QpDec   []QpCase     `json:"qpDec"`
-	Words   []WordCase   `json:"words"`
-	Headers []HeaderCase `json:"headers"`
-	Format  []FormatCase `json:"format"`
-	Ext     []ExtCase    `json:"ext"`
-	AddExt  []AddExtCase `json:"addExt"`
+	Schema     int              `json:"schema"`
+	Package    string           `json:"package"`
+	Parse      []ParseCase      `json:"parse"`
+	QpEnc      []QpCase         `json:"qpEnc"`
+	QpDec      []QpCase         `json:"qpDec"`
+	Words      []WordCase       `json:"words"`
+	Headers    []HeaderCase     `json:"headers"`
+	Format     []FormatCase     `json:"format"`
+	Ext        []ExtCase        `json:"ext"`
+	AddExt     []AddExtCase     `json:"addExt"`
+	Canon      []CanonCase      `json:"canon"`
+	MimeHeader []MimeHeaderCase `json:"mimeHeader"`
 }
 
 func hexOf(b []byte) string {
@@ -653,6 +675,101 @@ func addExtCases() []AddExtCase {
 	return out
 }
 
+func canonCases() []CanonCase {
+	inputs := []string{
+		"a-b-c", "a-1-c", "User-Agent", "uSER-aGENT", "user-agent", "USER-AGENT",
+		"foo-bar_baz", "foo-bar$baz", "foo-bar~baz", "foo-bar*baz",
+		"üser-agenT", "a B", "C Ontent-Transfer-Encoding", "foo bar",
+		"", "content-type", "Content-Type", "CONTENT-TYPE", "Content-type",
+		"Accept-Encoding", "accept-encoding", "X-Forwarded-For", "x-forwarded-for",
+		"Set-Cookie", "set-cookie", "Mime-Version", "MIME-Version",
+		"foo-bar!baz", "foo#bar", "If-Modified-Since", "if-modified-since",
+		"Host", "host", "ETag", "etag", "Etag",
+		"Content-Transfer-Encoding", "content-transfer-encoding",
+		"X-Powered-By", "x-powered-by",
+		"a", "A", "-", "-a", "a-", "a--b", "a-b-c-d-e",
+		"foo.bar", "foo+bar", "foo|bar", "foo`bar", "foo^bar",
+		"foo bar_baz", " foo", "foo ", "foo:bar", "foo/bar",
+		"Content Type", "X_Custom", "X_CUSTOM",
+	}
+	out := make([]CanonCase, 0, len(inputs))
+	for _, in := range inputs {
+		out = append(out, CanonCase{In: in, Out: textproto.CanonicalMIMEHeaderKey(in)})
+	}
+	return out
+}
+
+func recordMIMEHeader(id string, ops []MimeHeaderOp, getKeys []string) MimeHeaderCase {
+	if ops == nil {
+		ops = []MimeHeaderOp{}
+	}
+	h := make(textproto.MIMEHeader)
+	for _, op := range ops {
+		switch op.Op {
+		case "add":
+			h.Add(op.Key, op.Value)
+		case "set":
+			h.Set(op.Key, op.Value)
+		case "del":
+			h.Del(op.Key)
+		}
+	}
+	gets := map[string]string{}
+	values := map[string][]string{}
+	for _, k := range getKeys {
+		gets[k] = h.Get(k)
+		v := h.Values(k)
+		if v == nil {
+			v = []string{}
+		}
+		values[k] = v
+	}
+	rec := map[string][]string{}
+	for k, v := range h {
+		rec[k] = v
+	}
+	return MimeHeaderCase{ID: id, Ops: ops, Gets: gets, Values: values, Record: rec}
+}
+
+func mimeHeaderCases() []MimeHeaderCase {
+	return []MimeHeaderCase{
+		recordMIMEHeader("add-get-casefold", []MimeHeaderOp{
+			{Op: "add", Key: "content-type", Value: "text/plain"},
+		}, []string{"Content-Type", "content-type", "CONTENT-TYPE", "Accept"}),
+		recordMIMEHeader("add-multi-set-cookie", []MimeHeaderOp{
+			{Op: "add", Key: "Set-Cookie", Value: "cookie 1"},
+			{Op: "add", Key: "set-cookie", Value: "cookie 2"},
+		}, []string{"set-cookie", "Set-Cookie", "SET-COOKIE"}),
+		recordMIMEHeader("set-replaces", []MimeHeaderOp{
+			{Op: "add", Key: "X-Foo", Value: "a"},
+			{Op: "add", Key: "x-foo", Value: "b"},
+			{Op: "set", Key: "X-FOO", Value: "c"},
+		}, []string{"x-foo", "X-Foo"}),
+		recordMIMEHeader("del", []MimeHeaderOp{
+			{Op: "add", Key: "Host", Value: "example.com"},
+			{Op: "add", Key: "Accept", Value: "*/*"},
+			{Op: "del", Key: "host"},
+		}, []string{"Host", "Accept", "host"}),
+		recordMIMEHeader("empty", nil, []string{"Content-Type", ""}),
+		recordMIMEHeader("tchar-underscore", []MimeHeaderOp{
+			{Op: "add", Key: "foo-bar_baz", Value: "1"},
+		}, []string{"Foo-Bar_baz", "foo-bar_baz"}),
+		recordMIMEHeader("space-not-folded", []MimeHeaderOp{
+			{Op: "add", Key: "C Ontent-Transfer-Encoding", Value: "8bit"},
+		}, []string{"C Ontent-Transfer-Encoding", "Content-Transfer-Encoding"}),
+		recordMIMEHeader("common-user-agent", []MimeHeaderOp{
+			{Op: "set", Key: "uSER-aGENT", Value: "rustd-mime/0.1"},
+		}, []string{"User-Agent", "user-agent"}),
+		recordMIMEHeader("mixed-headers", []MimeHeaderOp{
+			{Op: "add", Key: "Content-Type", Value: "multipart/form-data"},
+			{Op: "add", Key: "content-disposition", Value: `form-data; name="file"`},
+			{Op: "add", Key: "X-Custom", Value: "one"},
+			{Op: "add", Key: "x-custom", Value: "two"},
+			{Op: "set", Key: "Content-Length", Value: "4"},
+		}, []string{"content-type", "Content-Disposition", "x-custom", "content-length"}),
+	}
+}
+
 func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 
 func main() {
@@ -668,7 +785,7 @@ func main() {
 		if packet.Schema != 1 || packet.Package != "mime" {
 			fail(fmt.Errorf("invalid packet"))
 		}
-		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt) == 0 {
+		if len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt)+len(packet.Canon)+len(packet.MimeHeader) == 0 {
 			fail(fmt.Errorf("empty cases"))
 		}
 		for _, c := range packet.Parse {
@@ -810,10 +927,52 @@ func main() {
 				}
 			}
 		}
-		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt))
+		for _, c := range packet.Canon {
+			if textproto.CanonicalMIMEHeaderKey(c.In) != c.Out {
+				fail(fmt.Errorf("canon mismatch %q: got %q want %q", c.In, textproto.CanonicalMIMEHeaderKey(c.In), c.Out))
+			}
+		}
+		for _, c := range packet.MimeHeader {
+			h := make(textproto.MIMEHeader)
+			for _, op := range c.Ops {
+				switch op.Op {
+				case "add":
+					h.Add(op.Key, op.Value)
+				case "set":
+					h.Set(op.Key, op.Value)
+				case "del":
+					h.Del(op.Key)
+				default:
+					fail(fmt.Errorf("mimeHeader %s unknown op %q", c.ID, op.Op))
+				}
+			}
+			for k, want := range c.Gets {
+				if h.Get(k) != want {
+					fail(fmt.Errorf("mimeHeader %s get %q: got %q want %q", c.ID, k, h.Get(k), want))
+				}
+			}
+			for k, want := range c.Values {
+				got := h.Values(k)
+				if got == nil {
+					got = []string{}
+				}
+				if !slices.Equal(got, want) {
+					fail(fmt.Errorf("mimeHeader %s values %q: got %v want %v", c.ID, k, got, want))
+				}
+			}
+			if len(h) != len(c.Record) {
+				fail(fmt.Errorf("mimeHeader %s record count: got %d want %d", c.ID, len(h), len(c.Record)))
+			}
+			for k, want := range c.Record {
+				if !slices.Equal(h[k], want) {
+					fail(fmt.Errorf("mimeHeader %s record %q: got %v want %v", c.ID, k, h[k], want))
+				}
+			}
+		}
+		fmt.Printf("Go verified %d mime cases\n", len(packet.Parse)+len(packet.QpEnc)+len(packet.QpDec)+len(packet.Words)+len(packet.Format)+len(packet.Headers)+len(packet.Ext)+len(packet.AddExt)+len(packet.Canon)+len(packet.MimeHeader))
 		return
 	}
-	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Headers: headerCases(), Format: formatCases(), Ext: extCases(), AddExt: addExtCases()}
+	packet := Packet{Schema: 1, Package: "mime", Parse: parseCases(), QpEnc: qpEncCases(), QpDec: qpDecCases(), Words: wordCases(), Headers: headerCases(), Format: formatCases(), Ext: extCases(), AddExt: addExtCases(), Canon: canonCases(), MimeHeader: mimeHeaderCases()}
 	var writer io.Writer = os.Stdout
 	if *out != "" {
 		f, err := os.Create(*out)

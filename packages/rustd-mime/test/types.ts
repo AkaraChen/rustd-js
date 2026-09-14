@@ -2,6 +2,8 @@ import {
   parseMediaType, formatMediaType, typeByExtension, extensionsByType, addExtensionType,
   loadSystemMimeTypes, encodeWord, MimeWordDecoder, quotedPrintableEncode, quotedPrintableDecode,
   QuotedPrintableReader, QuotedPrintableWriter, InvalidMediaParameterError, type MediaType,
+  canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
+  type MIMEHeader,
 } from '../index.js';
 const parsed: MediaType = parseMediaType('text/plain; charset=utf-8');
 const formatted: string = formatMediaType('text/plain', { charset: 'utf-8' });
@@ -20,10 +22,17 @@ const writer = new QuotedPrintableWriter({ binary: false });
 writer.write(encoded);
 const finished: Uint8Array = writer.finish();
 const err: InvalidMediaParameterError = new InvalidMediaParameterError('x', { mediaType: 'text/plain', params: {} });
+const mimeHeader: MIMEHeader = {};
+mimeHeaderAdd(mimeHeader, 'content-type', 'text/plain');
+mimeHeaderSet(mimeHeader, 'X-Foo', 'bar');
+const canon: string = canonicalMIMEHeaderKey('content-type');
+const first: string = mimeHeaderGet(mimeHeader, 'Content-Type');
+const all: string[] = mimeHeaderValues(mimeHeader, 'x-foo');
+mimeHeaderDel(mimeHeader, 'x-foo');
 // @ts-expect-error parseMediaType is not a number
 const wrong: number = parsed;
 // @ts-expect-error encoding must be b or q
 encodeWord('utf-8', 'x', 'x');
 // @ts-expect-error bytes required
 quotedPrintableEncode('ascii');
-void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err];
+void [formatted, typ, exts, loaded, header, decoded, chunk, finished, err, canon, first, all];

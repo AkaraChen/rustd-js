@@ -150,6 +150,59 @@ class QuotedPrintableWriter {
   finish() { return native(() => this._handle.finish()); }
 }
 
+function canonicalMIMEHeaderKey(s) {
+  if (typeof s !== 'string') throw new TypeError('mime: expected string');
+  return native(() => binding.canonicalMimeHeaderKey(s));
+}
+
+function asMIMEHeader(header) {
+  if (header == null) return null;
+  if (typeof header !== 'object' || Array.isArray(header)) {
+    throw new TypeError('mime: MIMEHeader must be an object');
+  }
+  return header;
+}
+
+function mimeHeaderGet(header, key) {
+  if (typeof key !== 'string') throw new TypeError('mime: expected string');
+  const rec = asMIMEHeader(header);
+  if (rec == null) return '';
+  const values = rec[canonicalMIMEHeaderKey(key)];
+  return values && values.length ? String(values[0]) : '';
+}
+
+function mimeHeaderValues(header, key) {
+  if (typeof key !== 'string') throw new TypeError('mime: expected string');
+  const rec = asMIMEHeader(header);
+  if (rec == null) return [];
+  const values = rec[canonicalMIMEHeaderKey(key)];
+  return values ? values.map(String) : [];
+}
+
+function requireMIMEHeader(header) {
+  const rec = asMIMEHeader(header);
+  if (rec == null) throw new TypeError('mime: MIMEHeader must be an object');
+  return rec;
+}
+
+function mimeHeaderSet(header, key, value) {
+  if (typeof key !== 'string' || typeof value !== 'string') throw new TypeError('mime: expected string');
+  requireMIMEHeader(header)[canonicalMIMEHeaderKey(key)] = [value];
+}
+
+function mimeHeaderAdd(header, key, value) {
+  if (typeof key !== 'string' || typeof value !== 'string') throw new TypeError('mime: expected string');
+  const rec = requireMIMEHeader(header);
+  const canon = canonicalMIMEHeaderKey(key);
+  if (Object.prototype.hasOwnProperty.call(rec, canon)) rec[canon].push(value);
+  else rec[canon] = [value];
+}
+
+function mimeHeaderDel(header, key) {
+  if (typeof key !== 'string') throw new TypeError('mime: expected string');
+  delete requireMIMEHeader(header)[canonicalMIMEHeaderKey(key)];
+}
+
 function encodeWord(charset, s, enc) {
   if (typeof charset !== 'string' || typeof s !== 'string') throw new TypeError('mime: expected string');
   if (enc !== 'b' && enc !== 'q') throw new TypeError('mime: encoding must be b or q');
@@ -191,4 +244,5 @@ module.exports = {
   parseMediaType, formatMediaType, typeByExtension, extensionsByType, addExtensionType, loadSystemMimeTypes,
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,
+  canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
 };

@@ -2,7 +2,7 @@
 
 Go `mime`, `mime/quotedprintable`, and (later) `mime/multipart` for Node via napi-rs.
 
-This slice implements media types, the extension table, RFC 2047 encoded-words, and quoted-printable. Multipart waits on `rustd-net` `MIMEHeader` (issue #9 shape decision 1 / issue #10). Do not duplicate that type here.
+This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, and `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values). `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). Multipart parsing is still later.
 
 Checkpoint 2 expands Go fixtures to 200+ `ParseMediaType` cases (Go 1.24 `mediatype_test.go` plus generated parameter variants), Go 1.24 `FormatMediaType` / quoted-printable writer+reader / RFC 2047 `DecodeHeader` tables, TS→Go `formatMediaType` / quoted-printable verify, and 1-byte quoted-printable reads.
 
@@ -18,11 +18,13 @@ Checkpoint 7: `AddExtensionType` error strings vs Go 1.24 (`mime: extension %q m
 
 Checkpoint 8: `AddExtensionType` success mapping vs Go 1.24 — lowercase `text/` without charset stores `charset=utf-8`; `TEXT/PLAIN` is not rewritten; `text/plain; foo=bar` stores empty because `FormatMediaType` of the raw string fails; `TypeByExtension` after add (exact and lowercased) matches Go. Multipart still waits on `rustd-net`.
 
-Checkpoint 9: `ExtensionsByType` after `AddExtensionType` keys off `ParseMediaType` justType. `TEXT/PLAIN` and the empty `FormatMediaType` rewrite of `text/plain; foo=bar` still register the lowercase extension under `text/plain`; lookups via `TEXT/PLAIN` and `text/plain; charset=utf-8` match Go 1.24. Multipart still waits on `rustd-net`.
+Checkpoint 9: `ExtensionsByType` after `AddExtensionType` keys off `ParseMediaType` justType. `TEXT/PLAIN` and the empty `FormatMediaType` rewrite of `text/plain; foo=bar` still register the lowercase extension under `text/plain`; lookups via `TEXT/PLAIN` and `text/plain; charset=utf-8` match Go 1.24. Multipart still waits on `MIMEHeader` (now in this package).
+
+Checkpoint 10: `MIMEHeader` lives in this package (`rustd-net` cancelled). `canonicalMIMEHeaderKey` matches Go 1.24 `textproto.CanonicalMIMEHeaderKey`; `mimeHeaderGet` / `Values` / `Set` / `Add` / `Del` fold keys the same way. `Part.header` is that `Record<string, string[]>`. Multipart reader/writer still later.
 
 ## Differences from Go
 
-- **No multipart yet.** `Part.header` is `net/textproto.MIMEHeader`. That type belongs to `rustd-net`. This package does not ship a private copy.
+- **No multipart yet.** `Part.header` will be this package's `MIMEHeader` (`Record<string, string[]>` with canonical keys). `net/textproto` itself is not exported.
 - **`ReadForm` will not spill to temp files** once multipart lands. Over `maxMemory` it will throw `MessageTooLargeError`.
 - **Windows does not query the registry** for `TypeByExtension`. Unix still loads the same globs2 / mime.types paths as Go 1.24 (`/etc/httpd/conf/mime.types` included).
 - Invalid UTF-8 inside RFC 2047 `utf-8` words becomes U+FFFD in JS strings. Go strings can hold arbitrary bytes.
