@@ -333,6 +333,17 @@ func main() {
 			return
 		}
 		writeJSON(*out, generatePem())
+	case "serial-asn1":
+		if *verifyFlag {
+			var packet Asn1VerifyPacket
+			dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
+			if err := dec.Decode(&packet); err != nil {
+				fail(err)
+			}
+			verifyAsn1(packet)
+			return
+		}
+		writeJSON(*out, generateAsn1())
 	default:
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}

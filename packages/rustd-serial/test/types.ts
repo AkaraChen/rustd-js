@@ -3,6 +3,8 @@ import {
   type CsvReaderOptions, type CsvWriterOptions, type CsvFieldPos,
   pemDecode, pemDecodeAll, pemEncode, PemEncodeError,
   type PemBlock, type PemDecodeResult,
+  asn1Marshal, asn1Unmarshal, Asn1SyntaxError, Asn1StructuralError,
+  type Asn1Schema, type Asn1BitString, type Asn1RawValue,
 } from '../index.js';
 
 const opts: CsvReaderOptions = { comma: ',', fieldsPerRecord: -1, lazyQuotes: true, trimLeadingSpace: true };
@@ -25,7 +27,18 @@ const pem: PemDecodeResult | null = pemDecode(new Uint8Array());
 const blocks: PemBlock[] = pemDecodeAll(new Uint8Array([45]));
 const encoded: Uint8Array = pemEncode({ type: 'FOO', bytes: new Uint8Array([1]) });
 const pemErr: PemEncodeError = new PemEncodeError('x');
-void [row, raw, all, pos, off, out, err, parse, enc, pem, blocks, encoded, pemErr];
+const intSchema: Asn1Schema = { kind: 'int' };
+const seqSchema: Asn1Schema = {
+  kind: 'sequence',
+  fields: [{ name: 'n', schema: intSchema, optional: true }],
+};
+const der: Uint8Array = asn1Marshal({ n: 1n }, seqSchema);
+const decoded: { value: { n: bigint }; rest: Uint8Array } = asn1Unmarshal(der, seqSchema);
+const bits: Asn1BitString = { bytes: new Uint8Array([0x80]), bitLength: 1 };
+const rawVal: Asn1RawValue = { class: 0, tag: 2, isCompound: false, bytes: new Uint8Array([1]), fullBytes: new Uint8Array([2, 1, 1]) };
+const syn: Asn1SyntaxError = new Asn1SyntaxError('x');
+const st: Asn1StructuralError = new Asn1StructuralError('x');
+void [row, raw, all, pos, off, out, err, parse, enc, pem, blocks, encoded, pemErr, decoded, bits, rawVal, syn, st];
 
 // @ts-expect-error bytes required
 new CsvReader('a,b');
@@ -43,3 +56,9 @@ pemDecode('-----BEGIN');
 pemEncode({ type: 1, bytes: new Uint8Array() });
 // @ts-expect-error code is readonly
 pemErr.code = 'OTHER';
+// @ts-expect-error schema kind is required
+asn1Marshal(1, { tag: 1 });
+// @ts-expect-error params is a string
+asn1Unmarshal(new Uint8Array(), { kind: 'int' }, 1);
+// @ts-expect-error code is readonly
+syn.code = 'OTHER';

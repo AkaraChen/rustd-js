@@ -1,3 +1,4 @@
+mod asn1;
 mod csv;
 mod pem;
 
@@ -141,4 +142,29 @@ pub fn pem_encode(
     pem_encode_bytes(&block)
         .map(Uint8Array::from)
         .map_err(|e| Error::from_reason(format!("PemEncodeError:{e}")))
+}
+
+#[napi(object)]
+pub struct NativeAsn1Result {
+    pub value_json: String,
+    pub rest: Uint8Array,
+}
+
+#[napi]
+pub fn asn1_marshal(schema_json: String, value_json: String, params: Option<String>) -> Result<Uint8Array> {
+    asn1::marshal(&schema_json, &value_json, params.as_deref()).map(Uint8Array::from)
+}
+
+#[napi]
+pub fn asn1_unmarshal(
+    data: Uint8Array,
+    schema_json: String,
+    params: Option<String>,
+) -> Result<NativeAsn1Result> {
+    let (value, rest) = asn1::unmarshal(data.as_ref(), &schema_json, params.as_deref())?;
+    Ok(NativeAsn1Result {
+        value_json: serde_json::to_string(&value)
+            .map_err(|e| Error::from_reason(format!("Asn1StructuralError:{e}")))?,
+        rest: rest.into(),
+    })
 }

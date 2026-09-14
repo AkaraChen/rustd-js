@@ -42,6 +42,22 @@ class PemEncodeError extends Error {
   }
 }
 
+class Asn1SyntaxError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = 'Asn1SyntaxError';
+    this.code = 'ASN1_SYNTAX';
+  }
+}
+
+class Asn1StructuralError extends Error {
+  constructor(message, options) {
+    super(message, options);
+    this.name = 'Asn1StructuralError';
+    this.code = 'ASN1_STRUCTURAL';
+  }
+}
+
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
 function bytes(value) {
@@ -97,6 +113,12 @@ function native(fn) {
     }
     if (text.startsWith('PemEncodeError:')) {
       throw new PemEncodeError(text.slice('PemEncodeError:'.length), { cause });
+    }
+    if (text.startsWith('Asn1SyntaxError:')) {
+      throw new Asn1SyntaxError(`asn1: syntax error: ${text.slice('Asn1SyntaxError:'.length)}`, { cause });
+    }
+    if (text.startsWith('Asn1StructuralError:')) {
+      throw new Asn1StructuralError(`asn1: structure error: ${text.slice('Asn1StructuralError:'.length)}`, { cause });
     }
     throw cause;
   }
@@ -263,6 +285,154 @@ class CsvWriter {
   }
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && !ArrayBuffer.isView(value);
+}
+
+function hexOf(data) {
+  return Buffer.from(data).toString('hex');
+}
+
+function toIr(schema, value) {
+  if (schema == null || typeof schema !== 'object' || Array.isArray(schema) || typeof schema.kind !== 'string') {
+    throw new TypeError('serial: Asn1Schema must be an object with kind');
+  }
+  const kind = schema.kind;
+  if (kind === 'optional') {
+    if (value === undefined || value === null) return null;
+    return toIr(schema.inner, value);
+  }
+  if (kind === 'explicit' || kind === 'implicit') {
+    return toIr(schema.inner, value);
+  }
+  if (value === undefined) {
+    throw new TypeError(`serial: missing ASN.1 value for kind ${kind}`);
+  }
+  switch (kind) {
+    case 'bool':
+      if (typeof value !== 'boolean') throw new TypeError('serial: expected boolean');
+      return value;
+    case 'int':
+    case 'enumerated':
+      if (typeof value === 'bigint') return { $i: value.toString() };
+      if (typeof value === 'number' && Number.isInteger(value)) return value;
+      throw new TypeError('serial: expected integer');
+    case 'bigint':
+      if (typeof value === 'bigint') return { $i: value.toString() };
+      if (typeof value === 'number' && Number.isInteger(value)) return { $i: String(value) };
+      throw new TypeError('serial: expected bigint');
+    case 'bitstring':
+      if (!isPlainObject(value) || !ArrayBuffer.isView(value.bytes)) {
+        throw new TypeError('serial: expected Asn1BitString');
+      }
+      if (typeof value.bitLength !== 'number' || !Number.isInteger(value.bitLength)) {
+        throw new TypeError('serial: bitLength must be an integer');
+      }
+      return { $bits: hexOf(bytes(value.bytes)), bitLength: value.bitLength };
+    case 'octetstring':
+      return { $b: hexOf(bytes(value)) };
+    case 'oid':
+      if (!Array.isArray(value) || value.some((n) => typeof n !== 'number' || !Number.isInteger(n))) {
+        throw new TypeError('serial: oid must be an integer array');
+      }
+      return value;
+    case 'null':
+      return null;
+    case 'utf8':
+    case 'ia5':
+    case 'printable':
+    case 'numeric':
+    case 'bmp':
+      if (typeof value !== 'string') throw new TypeError('serial: expected string');
+      return value;
+    case 'utctime':
+    case 'generalizedtime':
+      if (value instanceof Date) return { $t: value.getTime() };
+      if (typeof value === 'number' && Number.isFinite(value)) return { $t: value };
+      throw new TypeError('serial: expected Date');
+    case 'raw':
+      if (!isPlainObject(value)) throw new TypeError('serial: expected Asn1RawValue');
+      return {
+        $raw: {
+          class: value.class ?? 0,
+          tag: value.tag,
+          isCompound: Boolean(value.isCompound),
+          bytes: hexOf(bytes(value.bytes ?? new Uint8Array())),
+          fullBytes: value.fullBytes ? hexOf(bytes(value.fullBytes)) : '',
+        },
+      };
+    case 'sequence':
+    case 'set': {
+      const fields = Array.isArray(schema.fields) ? schema.fields : [];
+      const named = fields.some((f) => f && typeof f.name === 'string');
+      if (named) {
+        if (!isPlainObject(value)) throw new TypeError('serial: expected sequence object');
+        const out = {};
+        for (const field of fields) {
+          const child = value[field.name];
+          out[field.name] = child === undefined || child === null ? null : toIr(field.schema, child);
+        }
+        return out;
+      }
+      if (!Array.isArray(value)) throw new TypeError('serial: expected sequence array');
+      return fields.map((field, i) => (value[i] === undefined || value[i] === null ? null : toIr(field.schema, value[i])));
+    }
+    case 'sequenceof':
+    case 'setof':
+      if (!Array.isArray(value)) throw new TypeError('serial: expected array');
+      return value.map((item) => toIr(schema.inner, item));
+    default:
+      throw new TypeError(`serial: unknown Asn1Schema kind ${kind}`);
+  }
+}
+
+function fromIr(value) {
+  if (Array.isArray(value)) return value.map(fromIr);
+  if (!value || typeof value !== 'object') return value;
+  if (Object.prototype.hasOwnProperty.call(value, '$b')) return Uint8Array.from(Buffer.from(value.$b, 'hex'));
+  if (Object.prototype.hasOwnProperty.call(value, '$i')) return BigInt(value.$i);
+  if (Object.prototype.hasOwnProperty.call(value, '$t')) return new Date(value.$t);
+  if (Object.prototype.hasOwnProperty.call(value, '$bits')) {
+    return { bytes: Uint8Array.from(Buffer.from(value.$bits, 'hex')), bitLength: value.bitLength };
+  }
+  if (Object.prototype.hasOwnProperty.call(value, '$raw')) {
+    const raw = value.$raw;
+    return {
+      class: raw.class,
+      tag: raw.tag,
+      isCompound: raw.isCompound,
+      bytes: Uint8Array.from(Buffer.from(raw.bytes ?? '', 'hex')),
+      fullBytes: Uint8Array.from(Buffer.from(raw.fullBytes ?? '', 'hex')),
+    };
+  }
+  const out = {};
+  for (const [key, val] of Object.entries(value)) out[key] = fromIr(val);
+  return out;
+}
+
+function schemaJson(schema) {
+  if (schema == null || typeof schema !== 'object' || Array.isArray(schema)) {
+    throw new TypeError('serial: Asn1Schema must be an object with kind');
+  }
+  return JSON.stringify(schema);
+}
+
+function asn1Marshal(value, schema, params) {
+  if (params !== undefined && typeof params !== 'string') {
+    throw new TypeError('serial: params must be a string');
+  }
+  const ir = toIr(schema, value);
+  return native(() => binding.asn1Marshal(schemaJson(schema), JSON.stringify(ir), params));
+}
+
+function asn1Unmarshal(input, schema, params) {
+  if (params !== undefined && typeof params !== 'string') {
+    throw new TypeError('serial: params must be a string');
+  }
+  const row = native(() => binding.asn1Unmarshal(bytes(input), schemaJson(schema), params));
+  return { value: fromIr(JSON.parse(row.valueJson)), rest: row.rest };
+}
+
 module.exports = {
   CsvReader,
   CsvWriter,
@@ -272,4 +442,8 @@ module.exports = {
   pemDecodeAll,
   pemEncode,
   PemEncodeError,
+  asn1Marshal,
+  asn1Unmarshal,
+  Asn1SyntaxError,
+  Asn1StructuralError,
 };

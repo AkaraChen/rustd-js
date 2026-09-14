@@ -65,3 +65,58 @@ export class PemEncodeError extends Error {
 export function pemDecode(data: Uint8Array): PemDecodeResult | null;
 export function pemDecodeAll(data: Uint8Array): PemBlock[];
 export function pemEncode(block: PemBlock): Uint8Array;
+
+export type Asn1Schema =
+  | { kind: 'bool' }
+  | { kind: 'int' }
+  | { kind: 'bigint' }
+  | { kind: 'bitstring' }
+  | { kind: 'octetstring' }
+  | { kind: 'oid' }
+  | { kind: 'null' }
+  | { kind: 'enumerated' }
+  | { kind: 'utf8' }
+  | { kind: 'ia5' }
+  | { kind: 'printable' }
+  | { kind: 'numeric' }
+  | { kind: 'bmp' }
+  | { kind: 'utctime' }
+  | { kind: 'generalizedtime' }
+  | { kind: 'raw' }
+  | { kind: 'optional'; inner: Asn1Schema }
+  | { kind: 'explicit'; tag: number; inner: Asn1Schema; class?: number }
+  | { kind: 'implicit'; tag: number; inner: Asn1Schema; class?: number }
+  | { kind: 'sequence'; fields: Array<{ name?: string; schema: Asn1Schema; optional?: boolean }> }
+  | { kind: 'set'; fields: Array<{ name?: string; schema: Asn1Schema; optional?: boolean }> }
+  | { kind: 'sequenceof'; inner: Asn1Schema }
+  | { kind: 'setof'; inner: Asn1Schema };
+
+export interface Asn1RawValue {
+  class: number;
+  tag: number;
+  isCompound: boolean;
+  bytes: Uint8Array;
+  fullBytes: Uint8Array;
+}
+
+export interface Asn1BitString {
+  bytes: Uint8Array;
+  bitLength: number;
+}
+
+export class Asn1SyntaxError extends Error {
+  constructor(message: string, options?: ErrorOptions);
+  readonly code: 'ASN1_SYNTAX';
+}
+
+export class Asn1StructuralError extends Error {
+  constructor(message: string, options?: ErrorOptions);
+  readonly code: 'ASN1_STRUCTURAL';
+}
+
+export function asn1Marshal(value: unknown, schema: Asn1Schema, params?: string): Uint8Array;
+export function asn1Unmarshal<T = unknown>(
+  input: Uint8Array,
+  schema: Asn1Schema,
+  params?: string,
+): { value: T; rest: Uint8Array };
