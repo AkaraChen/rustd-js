@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -55,12 +56,20 @@ type XmlMarshalCase struct {
 	Age       int    `json:"age"`
 }
 
+type XmlDecodeCase struct {
+	ID     string          `json:"id"`
+	Kind   string          `json:"kind"`
+	XMLHex string          `json:"xmlHex"`
+	Value  json.RawMessage `json:"value"`
+}
+
 type XmlPacket struct {
 	Schema  int              `json:"schema"`
 	Package string           `json:"package"`
 	Tokens  []XmlTokenCase   `json:"tokens"`
 	Escapes []XmlEscapeCase  `json:"escapes"`
 	Marshal []XmlMarshalCase `json:"marshal"`
+	Decodes []XmlDecodeCase  `json:"decodes"`
 }
 
 type Person struct {
@@ -247,14 +256,133 @@ func generateXml() XmlPacket {
 			ID: fmt.Sprintf("person-%d", i), XMLHex: hx(b), Name: p.Name, Id: p.Id, ItemName: p.Name, Age: p.Age,
 		})
 	}
-	return XmlPacket{Schema: 1, Package: "serial-xml", Tokens: cases, Escapes: escapes, Marshal: marshals}
+	return XmlPacket{
+		Schema:  1,
+		Package: "serial-xml",
+		Tokens:  cases,
+		Escapes: escapes,
+		Marshal: marshals,
+		Decodes: generateXmlDecodes(),
+	}
+}
+
+type xmlBook struct {
+	XMLName xml.Name `xml:"book"`
+	ISBN    string   `xml:"isbn,attr"`
+	Title   string   `xml:"title"`
+	Pages   int      `xml:"pages"`
+}
+
+type xmlNote struct {
+	XMLName xml.Name `xml:"note"`
+	Body    string   `xml:",chardata"`
+}
+
+type xmlCmt struct {
+	XMLName xml.Name `xml:"c"`
+	Msg     string   `xml:",comment"`
+}
+
+type xmlWrap struct {
+	XMLName xml.Name `xml:"wrap"`
+	Inner   string   `xml:",innerxml"`
+}
+
+type xmlPathDoc struct {
+	XMLName xml.Name `xml:"doc"`
+	City    string   `xml:"a>b>c"`
+}
+
+type xmlItems struct {
+	XMLName xml.Name `xml:"items"`
+	Item    []string `xml:"item"`
+}
+
+type xmlOmit struct {
+	XMLName xml.Name `xml:"omit"`
+	A       string   `xml:"a,omitempty"`
+	B       int      `xml:"b,omitempty"`
+	C       string   `xml:"c"`
+}
+
+type xmlFlags struct {
+	XMLName xml.Name `xml:"flags"`
+	On      bool     `xml:"on"`
+	N       uint     `xml:"n"`
+	F       float64  `xml:"f"`
+}
+
+func decodeCase(id, kind string, xmlBytes []byte, value any) XmlDecodeCase {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		fail(err)
+	}
+	return XmlDecodeCase{ID: id, Kind: kind, XMLHex: hx(xmlBytes), Value: raw}
+}
+
+func mustXML(v any) []byte {
+	b, err := xml.Marshal(v)
+	if err != nil {
+		fail(err)
+	}
+	return b
+}
+
+func generateXmlDecodes() []XmlDecodeCase {
+	bookXML := mustXML(xmlBook{ISBN: "978", Title: "Go", Pages: 12})
+	var book xmlBook
+	if err := xml.Unmarshal(bookXML, &book); err != nil {
+		fail(err)
+	}
+	noteXML := []byte(`<note>hello &amp; café</note>`)
+	var note xmlNote
+	if err := xml.Unmarshal(noteXML, &note); err != nil {
+		fail(err)
+	}
+	cmtXML := []byte(`<c><!--hi--></c>`)
+	var cmt xmlCmt
+	if err := xml.Unmarshal(cmtXML, &cmt); err != nil {
+		fail(err)
+	}
+	wrapXML := []byte(`<wrap><x>1</x><y>2</y></wrap>`)
+	var wrap xmlWrap
+	if err := xml.Unmarshal(wrapXML, &wrap); err != nil {
+		fail(err)
+	}
+	pathXML := []byte(`<doc><a><b><c>Paris</c></b></a></doc>`)
+	var path xmlPathDoc
+	if err := xml.Unmarshal(pathXML, &path); err != nil {
+		fail(err)
+	}
+	itemsXML := []byte(`<items><item>a</item><item>b</item><item>c</item></items>`)
+	var items xmlItems
+	if err := xml.Unmarshal(itemsXML, &items); err != nil {
+		fail(err)
+	}
+	omitXML := mustXML(xmlOmit{A: "", B: 0, C: "x"})
+	flagsXML := mustXML(xmlFlags{On: true, N: 7, F: 1.5})
+	var flags xmlFlags
+	if err := xml.Unmarshal(flagsXML, &flags); err != nil {
+		fail(err)
+	}
+	return []XmlDecodeCase{
+		decodeCase("book-attr", "book", bookXML, map[string]any{"isbn": book.ISBN, "title": book.Title, "pages": book.Pages}),
+		decodeCase("note-chardata", "note", noteXML, map[string]any{"body": note.Body}),
+		decodeCase("comment", "comment", cmtXML, map[string]any{"msg": cmt.Msg}),
+		decodeCase("innerxml", "inner", wrapXML, map[string]any{"inner": wrap.Inner}),
+		decodeCase("path-abc", "path", pathXML, map[string]any{"city": path.City}),
+		decodeCase("items-slice", "items", itemsXML, map[string]any{"item": items.Item}),
+		decodeCase("omitempty-marshal", "omit", omitXML, map[string]any{"xmlHex": hx(omitXML)}),
+		decodeCase("flags-scalars", "flags", flagsXML, map[string]any{"on": flags.On, "n": flags.N, "f": flags.F}),
+	}
 }
 
 type XmlVerifyPacket struct {
-	Schema  int            `json:"schema"`
-	Package string         `json:"package"`
-	People  []XmlPersonEnc `json:"people"`
-	XML     []string       `json:"xml,omitempty"`
+	Schema  int              `json:"schema"`
+	Package string           `json:"package"`
+	People  []XmlPersonEnc   `json:"people"`
+	XML     []string         `json:"xml,omitempty"`
+	Decodes []XmlDecodeCase  `json:"decodes,omitempty"`
 }
 
 type XmlPersonEnc struct {
@@ -266,6 +394,7 @@ func verifyXml(packet XmlVerifyPacket) {
 	if packet.Package != "serial-xml" {
 		fail(fmt.Errorf("bad package"))
 	}
+	n := 0
 	for _, p := range packet.People {
 		var person Person
 		if err := xml.Unmarshal(mustHex(p.XMLHex), &person); err != nil {
@@ -274,13 +403,74 @@ func verifyXml(packet XmlVerifyPacket) {
 		if person.Name == "" {
 			fail(fmt.Errorf("%s: empty name", p.ID))
 		}
+		n++
+	}
+	for _, c := range packet.Decodes {
+		raw := mustHex(c.XMLHex)
+		switch c.Kind {
+		case "book":
+			var v xmlBook
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if v.ISBN == "" || v.Title == "" {
+				fail(fmt.Errorf("%s: empty book", c.ID))
+			}
+		case "note":
+			var v xmlNote
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "comment":
+			var v xmlCmt
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "inner":
+			var v xmlWrap
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "path":
+			var v xmlPathDoc
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if v.City == "" {
+				fail(fmt.Errorf("%s: empty city", c.ID))
+			}
+		case "items":
+			var v xmlItems
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if len(v.Item) < 2 {
+				fail(fmt.Errorf("%s: want >=2 items", c.ID))
+			}
+		case "omit":
+			var v xmlOmit
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if v.A != "" || v.B != 0 || v.C == "" {
+				fail(fmt.Errorf("%s: omitempty fields leaked: %+v", c.ID, v))
+			}
+		case "flags":
+			var v xmlFlags
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		default:
+			fail(fmt.Errorf("%s: unknown kind %s", c.ID, c.Kind))
+		}
+		n++
 	}
 	for i, s := range packet.XML {
 		if err := xml.Unmarshal([]byte(s), new(Person)); err != nil && !strings.Contains(s, "not-person") {
 			fail(fmt.Errorf("xml %d: %v", i, err))
 		}
 	}
-	fmt.Printf("Go verified %d serial-xml encode cases\n", len(packet.People))
+	fmt.Printf("Go verified %d serial-xml encode cases\n", n)
 }
 
 func mustHex(s string) []byte {
