@@ -258,6 +258,13 @@ func nestParens(n int) []byte {
 	return src
 }
 
+func longIdentSrc(n int) []byte {
+	src := []byte("package p\nvar ")
+	src = append(src, bytes.Repeat([]byte("x"), n)...)
+	src = append(src, []byte(" int\n")...)
+	return src
+}
+
 func dumpParseEdgeCase(id, filename, kind string, src []byte, mode parser.Mode) ParseEdgeCase {
 	c := dumpParseCase(id, filename, kind, src, mode)
 	fset := token.NewFileSet()
@@ -293,6 +300,12 @@ func parseEdgeCorpus() []ParseEdgeCase {
 		dumpParseEdgeCase("unclosed-string", "unclosed-string.go", "file", []byte("package p\nvar s = \"hi\n"), mode),
 		dumpParseEdgeCase("underscore-tparam", "underscore-tparam.go", "file", []byte("package p\nfunc F[_ any]() {}\n"), mode),
 		dumpParseEdgeCase("deep-nest-32", "deep-nest-32.go", "file", nestParens(32), mode),
+		dumpParseEdgeCase("long-ident-2048", "long-ident.go", "file", longIdentSrc(2048), mode),
+		dumpParseEdgeCase("gobuild-unclosed-paren", "gobuild-unclosed-paren.go", "file", []byte("//go:build (\npackage p\nvar x int\n"), mode),
+		dumpParseEdgeCase("gobuild-leading-and", "gobuild-leading-and.go", "file", []byte("//go:build && linux\npackage p\nvar x int\n"), mode),
+		dumpParseEdgeCase("generic-nest", "generic-nest.go", "file", []byte("package p\ntype A[T any] struct{ X T }\nvar v A[A[A[A[int]]]]\n"), mode),
+		dumpParseEdgeCase("generic-index-list", "generic-index-list.go", "file", []byte("package p\ntype M[K comparable, V any] map[K]V\nvar v M[string, M[string, int]]\n"), mode),
+		dumpParseEdgeCase("generic-iface-method-tparam", "generic-iface-method-tparam.go", "file", []byte("package p\nfunc F[T interface{ M[U any]() }]() {}\n"), mode),
 	}
 }
 

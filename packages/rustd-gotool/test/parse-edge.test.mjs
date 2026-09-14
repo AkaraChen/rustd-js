@@ -46,7 +46,15 @@ function nativeParse(filename, src, mode) {
   }
 }
 
-const SUCCESS = new Set(['underscore-tparam', 'deep-nest-32']);
+const SUCCESS = new Set([
+  'underscore-tparam',
+  'deep-nest-32',
+  'long-ident-2048',
+  'gobuild-unclosed-paren',
+  'gobuild-leading-and',
+  'generic-nest',
+  'generic-index-list',
+]);
 
 test('Go parse-edge fixture dump is stable (issue #28 §4.8)', () => {
   const generated = go(['-parse-edges']);
@@ -56,10 +64,10 @@ test('Go parse-edge fixture dump is stable (issue #28 §4.8)', () => {
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool-parse-edges');
   assert.equal(fixture.go, 'go1.24.13');
-  assert.equal(fixture.cases.length, 8);
+  assert.equal(fixture.cases.length, 14);
 });
 
-test('native matches Go on empty/comments-only/illegal UTF-8/unclosed/deep nest/_ type-param', () => {
+test('native matches Go on remaining §4.8 long-line / //go:build syntax error / generic nesting', () => {
   const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
   for (const c of fixture.cases) {
     const src = Buffer.from(c.srcB64, 'base64');
@@ -93,6 +101,9 @@ test('JS extra §4.8 sources: Go verifies first pos, count, and declCount', () =
     ['js-empty', 'e.go', Buffer.from('')],
     ['js-comments-only', 'c.go', Buffer.from('/* x */\n')],
     ['js-unclosed-string', 's.go', Buffer.from('package p\nconst x = "\n')],
+    ['js-long-string', 'long-string.go', Buffer.from(`package p\nvar s = "${'a'.repeat(16384)}"\n`)],
+    ['js-gobuild-double-not', 'gobuild-not.go', Buffer.from('//go:build !!!\npackage p\nvar x int\n')],
+    ['js-generic-index-expr', 'generic-index.go', Buffer.from('package p\nvar x = F[A[B[C[int]]]]\n')],
   ];
   const mode = PARSE_MODE.ParseComments | PARSE_MODE.SkipObjectResolution;
   const cases = extras.map(([id, filename, src]) => {
@@ -112,7 +123,7 @@ test('JS extra §4.8 sources: Go verifies first pos, count, and declCount', () =
   const packet = { schema: 1, package: 'gotool-parse-edges', go: 'js', cases };
   const verified = go(['-verify-parse-edges'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 3 gotool-parse-edges cases/);
+  assert.match(verified.stdout, /Go verified 6 gotool-parse-edges cases/);
 });
 
 test('deep nest over the native cap reports an error and does not abort', () => {
