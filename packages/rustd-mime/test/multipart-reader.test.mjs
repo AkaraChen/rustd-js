@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { MultipartReader, MultipartWriter, QuotedPrintableError, MessageTooLargeError } from '../index.mjs';
+import { MultipartReader, MultipartWriter, QuotedPrintableError, MessageTooLargeError, MultipartError } from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 function go(args = [], input, extraEnv = {}) {
@@ -177,6 +177,10 @@ test('nextPart returns null after the last part', () => {
   assert.equal(reader.nextPart(), null);
 });
 
+function headerRecord(header) {
+  return { ...header };
+}
+
 function assertPartsMatch(parts, goParts) {
   assert.equal(goParts.error ?? '', '');
   assert.equal(parts.length, goParts.parts.length);
@@ -184,10 +188,10 @@ function assertPartsMatch(parts, goParts) {
     assert.equal(parts[i].formName, goParts.parts[i].formName, `formName[${i}]`);
     assert.equal(parts[i].fileName, goParts.parts[i].fileName, `fileName[${i}]`);
     assert.equal(parts[i].bodyHex, goParts.parts[i].bodyHex, `bodyHex[${i}]`);
-    assert.equal(
-      parts[i].header['Content-Disposition'][0],
-      goParts.parts[i].header['Content-Disposition'][0],
-      `Content-Disposition[${i}]`,
+    assert.deepEqual(
+      headerRecord(parts[i].header),
+      headerRecord(goParts.parts[i].header),
+      `header[${i}]`,
     );
   }
 }
@@ -512,4 +516,241 @@ test('nextPart returns null after a chunk that ends inside the opening boundary'
   assert.equal(part.formName(), 'only');
   assert.equal(hex(part.read()), hex(Buffer.from('x')));
   assert.equal(reader.nextPart(), null);
+});
+
+function assertThrowsMultipart(fn, message) {
+  assert.throws(fn, (err) => {
+    assert.ok(err instanceof MultipartError, err?.constructor?.name);
+    assert.equal(err.message, message);
+    return true;
+  });
+}
+
+test('nextPart empty boundary matches Go TestNoBoundary', () => {
+  const goEmpty = goRead(Buffer.from('--\r\n\r\n--\r\n'), '');
+  assert.equal(goEmpty.error, 'multipart: boundary is empty');
+  assert.equal(goEmpty.parts.length, 0);
+  assertThrowsMultipart(() => {
+    const reader = new MultipartReader({ boundary: '' });
+    reader.write(Buffer.from('--\r\n\r\n--\r\n'));
+    reader.nextPart();
+  }, goEmpty.error);
+  assertThrowsMultipart(() => new MultipartReader({ boundary: '' }).nextPart(), goEmpty.error);
+});
+
+test('nextPart missing-colon header matches Go textproto', () => {
+  const body = Buffer.from('--b\r\nNotAHeader\r\n\r\nx\r\n--b--\r\n');
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error, 'malformed MIME header: missing colon: "NotAHeader"');
+  assert.equal(goParts.parts.length, 0);
+  assertThrowsMultipart(() => {
+    const reader = new MultipartReader({ boundary: 'b' });
+    reader.write(body);
+    reader.nextPart();
+  }, goParts.error);
+
+  const one = new MultipartReader({ boundary: 'b' });
+  let threw;
+  for (let i = 0; i < body.length; i++) {
+    one.write(body.subarray(i, i + 1));
+    try {
+      assert.equal(one.nextPart(), null);
+    } catch (err) {
+      threw = err;
+      break;
+    }
+  }
+  assert.ok(threw instanceof MultipartError);
+  assert.equal(threw.message, goParts.error);
+});
+
+test('nextPart missing closer is null here; Go NextPart+Read is unexpected EOF', () => {
+  const truncated = [
+    Buffer.from(
+      '\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nfoo-bar: baz\r\n\r\nOh no, premature EOF!\r\n',
+    ),
+    Buffer.from(
+      '\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nfoo-bar: baz\r\n\r\nOh no, premature EOF!\r\n--MyBoundary-\r\n',
+    ),
+  ];
+  for (const body of truncated) {
+    const goParts = goRead(body, 'MyBoundary');
+    assert.equal(goParts.error, 'unexpected EOF');
+    assert.equal(goParts.parts.length, 1);
+    assert.equal(goParts.parts[0].header['Foo-Bar'][0], 'baz');
+    const reader = new MultipartReader({ boundary: 'MyBoundary' });
+    reader.write(body);
+    assert.equal(reader.nextPart(), null);
+    assert.deepEqual(readAll1Byte('MyBoundary', body), []);
+  }
+
+  const noFinal = Buffer.from('--b\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello');
+  const goNoFinal = goRead(noFinal, 'b');
+  assert.equal(goNoFinal.error, 'unexpected EOF');
+  assert.equal(goNoFinal.parts.length, 1);
+  assert.equal(goNoFinal.parts[0].formName, 'foo');
+  assert.equal(goNoFinal.parts[0].bodyHex, hex(Buffer.from('hello')));
+  const reader = new MultipartReader({ boundary: 'b' });
+  reader.write(noFinal);
+  assert.equal(reader.nextPart(), null);
+});
+
+function bodyWithBoundaryLen(n) {
+  const boundary = 'x'.repeat(n);
+  const body = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello\r\n--${boundary}--\r\n`,
+  );
+  return { boundary, body };
+}
+
+test('nextPart RFC 70-char boundary vs Go; 71-char Reader still parses (Writer rejects)', () => {
+  for (const n of [70, 71]) {
+    const { boundary, body } = bodyWithBoundaryLen(n);
+    const goParts = goRead(body, boundary);
+    assert.equal(goParts.error ?? '', '', `go n=${n}`);
+    const parts = readAll(boundary, body);
+    assertPartsMatch(parts, goParts);
+    assert.equal(parts.length, 1);
+    assert.equal(parts[0].formName, 'foo');
+    assert.equal(parts[0].bodyHex, hex(Buffer.from('hello')));
+    assert.deepEqual(readAll1Byte(boundary, body), parts);
+  }
+  assert.throws(() => new MultipartWriter({ boundary: 'x'.repeat(71) }), MultipartError);
+  const w70 = new MultipartWriter({ boundary: 'x'.repeat(70) });
+  assert.equal(w70.boundary(), 'x'.repeat(70));
+});
+
+test('nextPart LF-only part headers (no CRLF) match Go', () => {
+  const body = Buffer.from(
+    '--b\nContent-Disposition: form-data; name=foo\n\nhello\n--b--\n',
+  );
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error ?? '', '');
+  const parts = readAll('b', body);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].formName, 'foo');
+  assert.equal(parts[0].bodyHex, hex(Buffer.from('hello')));
+  assert.deepEqual(readAll1Byte('b', body), parts);
+
+  const mixed = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name=foo\n\nhello\r\n--b--\r\n',
+  );
+  const goMixed = goRead(mixed, 'b');
+  const mixedParts = readAll('b', mixed);
+  assertPartsMatch(mixedParts, goMixed);
+  assert.deepEqual(readAll1Byte('b', mixed), mixedParts);
+});
+
+test('nextPart header without blank CRLF matches Go missing-colon', () => {
+  const body = Buffer.from(
+    '--b\r\nContent-Disposition: form-data; name=foo\r\nhello\r\n--b--\r\n',
+  );
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error, 'malformed MIME header: missing colon: "hello"');
+  assert.equal(goParts.parts.length, 0);
+  assertThrowsMultipart(() => {
+    const reader = new MultipartReader({ boundary: 'b' });
+    reader.write(body);
+    reader.nextPart();
+  }, goParts.error);
+
+  const one = new MultipartReader({ boundary: 'b' });
+  let threw;
+  for (let i = 0; i < body.length; i++) {
+    one.write(body.subarray(i, i + 1));
+    try {
+      assert.equal(one.nextPart(), null);
+    } catch (err) {
+      threw = err;
+      break;
+    }
+  }
+  assert.ok(threw instanceof MultipartError);
+  assert.equal(threw.message, goParts.error);
+});
+
+test('nextPart truncated header without newline is null; Go NextPart is EOF', () => {
+  const body = Buffer.from('--b\r\nFoo: bar');
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error ?? '', '');
+  assert.equal(goParts.parts.length, 0);
+  const reader = new MultipartReader({ boundary: 'b' });
+  reader.write(body);
+  assert.equal(reader.nextPart(), null);
+  assert.deepEqual(readAll1Byte('b', body), []);
+});
+
+const missingCdOnlyType = Buffer.from(
+  '--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n',
+);
+const missingCdEmptyHeaders = Buffer.from('--b\r\n\r\nhello\r\n--b--\r\n');
+const missingCdLfOnly = Buffer.from('--b\nContent-Type: text/plain\n\nhello\n--b--\n');
+const missingCdThenPresent = Buffer.from(
+  '--b\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--b\r\nContent-Disposition: form-data; name=foo\r\n\r\nsecond\r\n--b--\r\n',
+);
+const missingCdTwoParts = Buffer.from(
+  '--b\r\nContent-Type: text/plain\r\n\r\na\r\n--b\r\nContent-Type: application/octet-stream\r\n\r\nb\r\n--b--\r\n',
+);
+const emptyCdValue = Buffer.from('--b\r\nContent-Disposition:\r\n\r\nhello\r\n--b--\r\n');
+const qpMissingCd = Buffer.from(
+  '--b\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nhel=6Co\r\n--b--\r\n',
+);
+
+test('nextPart missing Content-Disposition is not an error vs Go', () => {
+  for (const [name, body] of [
+    ['only-content-type', missingCdOnlyType],
+    ['empty-headers', missingCdEmptyHeaders],
+    ['lf-only', missingCdLfOnly],
+    ['two-parts', missingCdTwoParts],
+  ]) {
+    const goParts = goRead(body, 'b');
+    assert.equal(goParts.error ?? '', '', name);
+    const parts = readAll('b', body);
+    assertPartsMatch(parts, goParts);
+    for (let i = 0; i < parts.length; i++) {
+      assert.equal(parts[i].formName, '', `${name} formName[${i}]`);
+      assert.equal(parts[i].fileName, '', `${name} fileName[${i}]`);
+      assert.equal(parts[i].header['Content-Disposition'], undefined, `${name} CD[${i}]`);
+    }
+    assert.deepEqual(readAll1Byte('b', body), parts, name);
+  }
+});
+
+test('nextPart mixed missing then present Content-Disposition vs Go', () => {
+  const goParts = goRead(missingCdThenPresent, 'b');
+  const parts = readAll('b', missingCdThenPresent);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts.length, 2);
+  assert.equal(parts[0].formName, '');
+  assert.equal(parts[0].header['Content-Disposition'], undefined);
+  assert.equal(parts[1].formName, 'foo');
+  assert.equal(parts[1].header['Content-Disposition'][0], 'form-data; name=foo');
+  assert.deepEqual(readAll1Byte('b', missingCdThenPresent), parts);
+});
+
+test('nextPart empty Content-Disposition value vs Go', () => {
+  const goParts = goRead(emptyCdValue, 'b');
+  const parts = readAll('b', emptyCdValue);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].formName, '');
+  assert.equal(parts[0].fileName, '');
+  assert.deepEqual(parts[0].header['Content-Disposition'], ['']);
+  assert.deepEqual(readAll1Byte('b', emptyCdValue), parts);
+});
+
+test('nextPart quoted-printable without Content-Disposition vs Go', () => {
+  const goParts = goRead(qpMissingCd, 'b');
+  const parts = readAll('b', qpMissingCd);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].formName, '');
+  assert.equal(parts[0].header['Content-Transfer-Encoding'], undefined);
+  assert.equal(parts[0].bodyHex, hex(Buffer.from('hello')));
+  assert.deepEqual(readAll1Byte('b', qpMissingCd), parts);
+});
+
+test('nextPart missing Content-Disposition mid-boundary splits match whole-body', () => {
+  for (const body of [missingCdOnlyType, missingCdThenPresent, qpMissingCd]) {
+    const whole = assertThreeFeedModes('b', body);
+    assertPartsMatch(whole, goRead(body, 'b'));
+  }
 });

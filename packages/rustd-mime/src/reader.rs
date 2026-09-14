@@ -407,7 +407,7 @@ fn read_continued_line(buf: &[u8], pos: &mut usize) -> Result<Option<Vec<u8>>, S
     if !raw.is_empty() && !raw.contains(&b':') && !strip_nl(&raw).is_empty() {
         return Err(StreamErr::Msg(format!(
             "malformed MIME header: missing colon: {}",
-            quoted_go(&raw)
+            quoted_go(strip_nl(&raw))
         )));
     }
     let mut line = strip_nl(&raw).to_vec();
@@ -562,6 +562,143 @@ mod tests {
         let mut r = MultipartReader::new(String::new());
         r.write(b"--\r\n\r\n--\r\n");
         assert_eq!(r.next_part().unwrap_err(), "multipart: boundary is empty");
+        let mut empty = MultipartReader::new(String::new());
+        assert_eq!(empty.next_part().unwrap_err(), "multipart: boundary is empty");
+    }
+
+    #[test]
+    fn next_part_missing_colon_matches_go() {
+        let mut r = MultipartReader::new("b".into());
+        r.write(b"--b\r\nNotAHeader\r\n\r\nx\r\n--b--\r\n");
+        assert_eq!(
+            r.next_part().unwrap_err(),
+            r#"malformed MIME header: missing colon: "NotAHeader""#
+        );
+    }
+
+    #[test]
+    fn next_part_missing_closer_returns_none_until_more_bytes() {
+        let body = b"\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nfoo-bar: baz\r\n\r\nOh no, premature EOF!\r\n";
+        let mut r = MultipartReader::new("MyBoundary".into());
+        r.write(body);
+        assert!(r.next_part().unwrap().is_none());
+        let mut one = MultipartReader::new("MyBoundary".into());
+        for byte in body {
+            one.write(std::slice::from_ref(byte));
+            assert!(one.next_part().unwrap().is_none());
+        }
+        assert!(one.next_part().unwrap().is_none());
+    }
+
+    fn body_with_boundary_len(n: usize) -> (String, Vec<u8>) {
+        let boundary = "x".repeat(n);
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello\r\n--{boundary}--\r\n"
+        )
+        .into_bytes();
+        (boundary, body)
+    }
+
+    #[test]
+    fn next_part_rfc_boundary_length_70_and_71() {
+        for n in [70, 71] {
+            let (boundary, body) = body_with_boundary_len(n);
+            let parts = collect_parts(&boundary, &body);
+            assert_eq!(parts.len(), 1, "n={n}");
+            assert_eq!(parts[0].form_name, "foo");
+            assert_eq!(parts[0].body, b"hello");
+            parts_eq(&parts, &collect_parts_1byte(&boundary, &body));
+        }
+        match MultipartWriter::new(Some("x".repeat(71))) {
+            Ok(_) => panic!("71-char Writer boundary should fail"),
+            Err(e) => assert_eq!(e, "mime: invalid boundary length"),
+        }
+    }
+
+    #[test]
+    fn next_part_lf_only_headers_no_crlf() {
+        let body = b"--b\nContent-Disposition: form-data; name=foo\n\nhello\n--b--\n";
+        let parts = collect_parts("b", body);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].form_name, "foo");
+        assert_eq!(parts[0].body, b"hello");
+        parts_eq(&parts, &collect_parts_1byte("b", body));
+    }
+
+    #[test]
+    fn next_part_header_without_blank_crlf_is_missing_colon() {
+        let body = b"--b\r\nContent-Disposition: form-data; name=foo\r\nhello\r\n--b--\r\n";
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        assert_eq!(
+            r.next_part().unwrap_err(),
+            r#"malformed MIME header: missing colon: "hello""#
+        );
+        let mut one = MultipartReader::new("b".into());
+        let mut err = None;
+        for byte in body {
+            one.write(std::slice::from_ref(byte));
+            match one.next_part() {
+                Ok(None) => {}
+                Ok(Some(_)) => panic!("unexpected part"),
+                Err(e) => {
+                    err = Some(e);
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            err.as_deref(),
+            Some(r#"malformed MIME header: missing colon: "hello""#)
+        );
+    }
+
+    #[test]
+    fn next_part_truncated_header_without_newline_is_none() {
+        let body = b"--b\r\nFoo: bar";
+        let mut r = MultipartReader::new("b".into());
+        r.write(body);
+        assert!(r.next_part().unwrap().is_none());
+        parts_eq(&[], &collect_parts_1byte("b", body));
+    }
+
+    #[test]
+    fn next_part_missing_content_disposition_is_not_error() {
+        let only_ct = b"--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n";
+        let parts = collect_parts("b", only_ct);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].form_name, "");
+        assert_eq!(parts[0].file_name, "");
+        assert_eq!(parts[0].body, b"hello");
+        assert!(parts[0]
+            .header
+            .iter()
+            .all(|(k, _)| k != "Content-Disposition"));
+        assert_eq!(
+            parts[0]
+                .header
+                .iter()
+                .find(|(k, _)| k == "Content-Type")
+                .map(|(_, v)| v.clone()),
+            Some(vec!["text/plain".into()])
+        );
+        parts_eq(&parts, &collect_parts_1byte("b", only_ct));
+
+        let empty = b"--b\r\n\r\nhello\r\n--b--\r\n";
+        let empty_parts = collect_parts("b", empty);
+        assert_eq!(empty_parts.len(), 1);
+        assert!(empty_parts[0].header.is_empty());
+        assert_eq!(empty_parts[0].form_name, "");
+        parts_eq(&empty_parts, &collect_parts_1byte("b", empty));
+
+        let mixed = b"--b\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--b\r\nContent-Disposition: form-data; name=foo\r\n\r\nsecond\r\n--b--\r\n";
+        let mixed_parts = collect_parts("b", mixed);
+        assert_eq!(mixed_parts.len(), 2);
+        assert_eq!(mixed_parts[0].form_name, "");
+        assert_eq!(mixed_parts[1].form_name, "foo");
+        assert_eq!(mixed_parts[0].body, b"first");
+        assert_eq!(mixed_parts[1].body, b"second");
+        parts_eq(&mixed_parts, &collect_parts_1byte("b", mixed));
     }
 
     fn collect_parts(boundary: &str, body: &[u8]) -> Vec<MultipartPart> {
