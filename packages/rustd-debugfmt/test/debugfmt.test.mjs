@@ -1050,5 +1050,39 @@ test('buildInfo() vs go version -m line equality for goVersion/path/main/deps/se
   assert.deepEqual(fromFile, info);
 });
 
+test('symbols() JSON dump is read back by Go fixture vs go tool nm -size and debug/elf (issue #18 §4.6)', () => {
+  assert.equal(process.arch, 'x64');
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-debugfmt-reverse-syms-'));
+  const out = join(dir, 'hello');
+  const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+    cwd: join(pkg, 'gofixtures'),
+    env: { ...process.env, GOWORK: 'off', CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'amd64' },
+  });
+  assert.equal(built.status, 0, built.stderr + built.stdout);
+
+  const file = open(out);
+  const dump = file.symbols().map((s) => ({
+    name: s.name,
+    value: s.value.toString(),
+    size: s.size.toString(),
+    kind: s.kind,
+  }));
+  file.close();
+  assert.ok(dump.some((s) => s.name === 'main.main'));
+  const dumpPath = join(dir, 'symbols.json');
+  writeFileSync(dumpPath, JSON.stringify(dump));
+
+  const verified = go(['run', './cmd/readsymbols', out, dumpPath], {
+    cwd: join(pkg, 'gofixtures'),
+  });
+  assert.equal(verified.status, 0, verified.stderr + verified.stdout);
+  assert.match(verified.stdout, /^ok dump=\d+ nm=\d+ elfMatched=\d+ main\.main=1\n$/);
+  const counts = verified.stdout.match(/dump=(\d+) nm=(\d+) elfMatched=(\d+)/);
+  assert.ok(counts);
+  assert.equal(counts[1], counts[2]);
+  assert.ok(Number(counts[1]) === dump.length);
+  assert.ok(Number(counts[3]) > 0);
+});
+
 void UnsupportedFeatureError;
 void root;
