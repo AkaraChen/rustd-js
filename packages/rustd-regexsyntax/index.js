@@ -223,6 +223,21 @@ function syntaxCompile(pattern, flags) {
   };
 }
 
+function asRune(name, n) {
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < -0x80000000 || n > 0x7fffffff) {
+    throw new TypeError(`regexsyntax: ${name} must be an i32 integer`);
+  }
+  return n;
+}
+
+function emptyOpContext(before, after) {
+  return binding.emptyOpContext(asRune('before', before), asRune('after', after));
+}
+
+function isWordChar(r) {
+  return binding.isWordChar(asRune('r', r));
+}
+
 module.exports = {
   OP,
   INST_OP,
@@ -233,5 +248,7 @@ module.exports = {
   syntaxParse,
   syntaxSimplify,
   syntaxCompile,
+  emptyOpContext,
+  isWordChar,
   flagsToString,
 };

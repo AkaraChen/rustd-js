@@ -159,3 +159,13 @@ pub fn syntax_compile(pattern: String, flags: u32) -> Result<CompileRow> {
         )),
     }
 }
+
+#[napi]
+pub fn empty_op_context(r1: i32, r2: i32) -> u32 {
+    compile::empty_op_context(r1, r2)
+}
+
+#[napi]
+pub fn is_word_char(r: i32) -> bool {
+    compile::is_word_char(r)
+}
