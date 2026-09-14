@@ -407,7 +407,7 @@ fn read_continued_line(buf: &[u8], pos: &mut usize) -> Result<Option<Vec<u8>>, S
     if !raw.is_empty() && !raw.contains(&b':') && !strip_nl(&raw).is_empty() {
         return Err(StreamErr::Msg(format!(
             "malformed MIME header: missing colon: {}",
-            quoted_go(&raw)
+            quoted_go(strip_nl(&raw))
         )));
     }
     let mut line = strip_nl(&raw).to_vec();
@@ -562,6 +562,32 @@ mod tests {
         let mut r = MultipartReader::new(String::new());
         r.write(b"--\r\n\r\n--\r\n");
         assert_eq!(r.next_part().unwrap_err(), "multipart: boundary is empty");
+        let mut empty = MultipartReader::new(String::new());
+        assert_eq!(empty.next_part().unwrap_err(), "multipart: boundary is empty");
+    }
+
+    #[test]
+    fn next_part_missing_colon_matches_go() {
+        let mut r = MultipartReader::new("b".into());
+        r.write(b"--b\r\nNotAHeader\r\n\r\nx\r\n--b--\r\n");
+        assert_eq!(
+            r.next_part().unwrap_err(),
+            r#"malformed MIME header: missing colon: "NotAHeader""#
+        );
+    }
+
+    #[test]
+    fn next_part_missing_closer_returns_none_until_more_bytes() {
+        let body = b"\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nfoo-bar: baz\r\n\r\nOh no, premature EOF!\r\n";
+        let mut r = MultipartReader::new("MyBoundary".into());
+        r.write(body);
+        assert!(r.next_part().unwrap().is_none());
+        let mut one = MultipartReader::new("MyBoundary".into());
+        for byte in body {
+            one.write(std::slice::from_ref(byte));
+            assert!(one.next_part().unwrap().is_none());
+        }
+        assert!(one.next_part().unwrap().is_none());
     }
 
     fn collect_parts(boundary: &str, body: &[u8]) -> Vec<MultipartPart> {

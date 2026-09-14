@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { MultipartReader, MultipartWriter, QuotedPrintableError, MessageTooLargeError } from '../index.mjs';
+import { MultipartReader, MultipartWriter, QuotedPrintableError, MessageTooLargeError, MultipartError } from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 function go(args = [], input, extraEnv = {}) {
@@ -511,5 +511,82 @@ test('nextPart returns null after a chunk that ends inside the opening boundary'
   const part = reader.nextPart();
   assert.equal(part.formName(), 'only');
   assert.equal(hex(part.read()), hex(Buffer.from('x')));
+  assert.equal(reader.nextPart(), null);
+});
+
+function assertThrowsMultipart(fn, message) {
+  assert.throws(fn, (err) => {
+    assert.ok(err instanceof MultipartError, err?.constructor?.name);
+    assert.equal(err.message, message);
+    return true;
+  });
+}
+
+test('nextPart empty boundary matches Go TestNoBoundary', () => {
+  const goEmpty = goRead(Buffer.from('--\r\n\r\n--\r\n'), '');
+  assert.equal(goEmpty.error, 'multipart: boundary is empty');
+  assert.equal(goEmpty.parts.length, 0);
+  assertThrowsMultipart(() => {
+    const reader = new MultipartReader({ boundary: '' });
+    reader.write(Buffer.from('--\r\n\r\n--\r\n'));
+    reader.nextPart();
+  }, goEmpty.error);
+  assertThrowsMultipart(() => new MultipartReader({ boundary: '' }).nextPart(), goEmpty.error);
+});
+
+test('nextPart missing-colon header matches Go textproto', () => {
+  const body = Buffer.from('--b\r\nNotAHeader\r\n\r\nx\r\n--b--\r\n');
+  const goParts = goRead(body, 'b');
+  assert.equal(goParts.error, 'malformed MIME header: missing colon: "NotAHeader"');
+  assert.equal(goParts.parts.length, 0);
+  assertThrowsMultipart(() => {
+    const reader = new MultipartReader({ boundary: 'b' });
+    reader.write(body);
+    reader.nextPart();
+  }, goParts.error);
+
+  const one = new MultipartReader({ boundary: 'b' });
+  let threw;
+  for (let i = 0; i < body.length; i++) {
+    one.write(body.subarray(i, i + 1));
+    try {
+      assert.equal(one.nextPart(), null);
+    } catch (err) {
+      threw = err;
+      break;
+    }
+  }
+  assert.ok(threw instanceof MultipartError);
+  assert.equal(threw.message, goParts.error);
+});
+
+test('nextPart missing closer is null here; Go NextPart+Read is unexpected EOF', () => {
+  const truncated = [
+    Buffer.from(
+      '\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nfoo-bar: baz\r\n\r\nOh no, premature EOF!\r\n',
+    ),
+    Buffer.from(
+      '\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nfoo-bar: baz\r\n\r\nOh no, premature EOF!\r\n--MyBoundary-\r\n',
+    ),
+  ];
+  for (const body of truncated) {
+    const goParts = goRead(body, 'MyBoundary');
+    assert.equal(goParts.error, 'unexpected EOF');
+    assert.equal(goParts.parts.length, 1);
+    assert.equal(goParts.parts[0].header['Foo-Bar'][0], 'baz');
+    const reader = new MultipartReader({ boundary: 'MyBoundary' });
+    reader.write(body);
+    assert.equal(reader.nextPart(), null);
+    assert.deepEqual(readAll1Byte('MyBoundary', body), []);
+  }
+
+  const noFinal = Buffer.from('--b\r\nContent-Disposition: form-data; name=foo\r\n\r\nhello');
+  const goNoFinal = goRead(noFinal, 'b');
+  assert.equal(goNoFinal.error, 'unexpected EOF');
+  assert.equal(goNoFinal.parts.length, 1);
+  assert.equal(goNoFinal.parts[0].formName, 'foo');
+  assert.equal(goNoFinal.parts[0].bodyHex, hex(Buffer.from('hello')));
+  const reader = new MultipartReader({ boundary: 'b' });
+  reader.write(noFinal);
   assert.equal(reader.nextPart(), null);
 });

@@ -15,6 +15,14 @@ test('multipart header-count nextPart is in; ReadForm later (checkpoint 19)', ()
   assert.equal(typeof api.mimeHeaderGet, 'function');
 });
 
+test('nextPart malformed empty-boundary / missing-colon / missing-closer vs Go (checkpoint 20)', () => {
+  assert.equal(typeof api.MultipartError, 'function');
+  assert.equal(typeof api.MultipartReader.prototype.nextPart, 'function');
+  assert.equal(api.readForm, undefined, 'readForm');
+  const empty = new api.MultipartReader({ boundary: '' });
+  assert.throws(() => empty.nextPart(), api.MultipartError);
+});
+
 test('documented Windows registry difference: no extra lookup API', () => {
   assert.equal(typeof api.typeByExtension, 'function');
   assert.equal(api.typeByRegistry, undefined);

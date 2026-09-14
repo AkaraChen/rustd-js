@@ -2,7 +2,7 @@
 
 Go `mime`, `mime/quotedprintable`, and `mime/multipart` (Writer WriteField / CreateFormField / CreateFormFile / CreatePart, Reader NextPart / NextRawPart including 1-byte and mid-boundary `write`) for Node via napi-rs.
 
-This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values), `MultipartWriter.writeField` / `createFormField` / `createFormFile` / `createPart`, `fileContentDisposition`, and `MultipartReader.nextPart` / `nextRawPart`. The same complete body fed whole, one byte at a time, or split inside `--boundary` with seed `0x4d494d45` yields the same part sequence (issue #9 §4.3). `nextPart` returns `null` until a complete part is buffered. `nextPart` matches Go's quoted-printable CTE auto-decode. `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). ReadForm limits are still later.
+This slice implements media types, the extension table, RFC 2047 encoded-words, quoted-printable, `MIMEHeader` (`Record<string, string[]>` + `canonicalMIMEHeaderKey` / Get/Set/Add/Del/Values), `MultipartWriter.writeField` / `createFormField` / `createFormFile` / `createPart`, `fileContentDisposition`, and `MultipartReader.nextPart` / `nextRawPart`. The same complete body fed whole, one byte at a time, or split inside `--boundary` with seed `0x4d494d45` yields the same part sequence (issue #9 §4.3). `nextPart` returns `null` until a complete part is buffered. Empty boundary and a header line without a colon throw the same `MultipartError` strings as Go. A truncated body (missing closer) stays at `null` rather than Go's `unexpected EOF`. `nextPart` matches Go's quoted-printable CTE auto-decode. `rustd-net` is out of scope; this is the single `Part.header` type (issue #9). ReadForm limits are still later.
 
 Checkpoint 2 expands Go fixtures to 200+ `ParseMediaType` cases (Go 1.24 `mediatype_test.go` plus generated parameter variants), Go 1.24 `FormatMediaType` / quoted-printable writer+reader / RFC 2047 `DecodeHeader` tables, TS→Go `formatMediaType` / quoted-printable verify, and 1-byte quoted-printable reads.
 
@@ -38,6 +38,10 @@ Checkpoint 17: the same complete multipart body, written one byte at a time with
 
 Checkpoint 18: the same complete body, split inside each `--boundary` token with mulberry32 seed `0x4d494d45`, matches whole-body and 1-byte `nextPart` / `nextRawPart`. A write that ends inside the opening delimiter returns `null` until the rest arrives. ReadForm limits stay later.
 
+Checkpoint 19: `nextPart` of a part with 10000 headers succeeds vs Go; 10001 is `MessageTooLargeError` (`multipart: message too large`). `maxHeadersPerPart` matches `GODEBUG=multipartmaxheaders`. ReadForm and part-count stay later.
+
+Checkpoint 20: `nextPart` malformed bodies vs Go (issue #9 §4.4). Empty boundary is `multipart: boundary is empty`. A header line without a colon is `malformed MIME header: missing colon: "NotAHeader"` (Go `textproto`, CRLF stripped before `%q`). Missing closer / truncated part (Go `TestMultipartTruncated`) stays `null` here; Go `NextPart`+`Read` is `unexpected EOF`. 1-byte feed of the missing-colon body throws the same string. ReadForm and part-count stay later.
+
 ## Differences from Go
 
 - **Incremental `write` is non-blocking.** Go `NextPart` reads from an `io.Reader` until a part or EOF. Here `nextPart` / `nextRawPart` return `null` when the current buffer does not yet hold a complete part (or the closing delimiter). A truncated body that never gets the rest of the bytes stays at `null` rather than `multipart: NextPart: unexpected EOF`. Whole-body, 1-byte, and seeded mid-boundary splits of the same complete body produce the same part sequence. `Part.header` is this package's `MIMEHeader` (`Record<string, string[]>` with canonical keys). `net/textproto` itself is not exported. `Part.close()` then `read()` throws (`multipart: part is closed`); Go `Part.Close` then `Read` returns EOF. `createPart` writes header keys as provided (Go `CreatePart`); `mimeHeaderSet` / `Add` canonicalize first.
@@ -51,4 +55,4 @@ Checkpoint 18: the same complete body, split inside each `--boundary` token with
 
 ## Size
 
-Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14, checkpoint 18; no native rebuild): **506,304 bytes** / 2,000,000.
+Recorded after `napi build --platform --release` on linux-x64-gnu, Rust 1.97.1 (2026-09-14, checkpoint 20): **507,384 bytes** / 2,000,000.
