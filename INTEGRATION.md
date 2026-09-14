@@ -9,11 +9,15 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 |---|---|---|
 | rustd-checksum | `pkg/rustd-checksum-grok-bulk-3` | merged |
 | rustd-containers | `pkg/rustd-containers-grok-bulk-2` | merged |
-| rustd-compress | `pkg/rustd-compress-grok-bulk-9` | merged |
+| rustd-compress | `pkg/rustd-compress-grok-bulk-9` @ `59e3167` | merged; branch later added `4af21a6` (bzip2 truncation tests) — pending follow-up |
 | rustd-compress | `pkg/rustd-compress-grok-bulk-worker` | superseded by `pkg/rustd-compress-grok-bulk-9` (ancestor of the merge) |
-| rustd-archive | `pkg/rustd-archive-grok-bulk-3` / `pkg/rustd-archive-grok-bulk-6` | pending (duplicate; next round: newest `bulk-6`) |
-| rustd-serial | `pkg/rustd-serial-grok-bulk-worker` / `pkg/rustd-serial-grok-bulk-7` | pending (duplicate; next round: newest `bulk-7`) |
-| rustd-image | `pkg/rustd-image-grok-bulk-2` / `pkg/rustd-image-grok-bulk-8` | pending (duplicate; next round: newest `bulk-8`) |
+| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `a23cfc0` | merged |
+| rustd-archive | `pkg/rustd-archive-grok-bulk-3` | superseded by `pkg/rustd-archive-grok-bulk-6` |
+| rustd-archive | `pkg/rustd-archive-grok-bulk-6` @ `f2d0491` | **do not merge** — rewritten parallel history after merge (merge-base still `2040f3c`; not a descendant of `a23cfc0`) |
+| rustd-serial | `pkg/rustd-serial-grok-bulk-7` @ `39a26ca` | merged |
+| rustd-serial | `pkg/rustd-serial-grok-bulk-worker` | superseded by `pkg/rustd-serial-grok-bulk-7` (ancestor of the merge) |
+| rustd-image | `pkg/rustd-image-grok-bulk-8` @ `ac8f590` | merged |
+| rustd-image | `pkg/rustd-image-grok-bulk-2` | superseded by `pkg/rustd-image-grok-bulk-8` |
 | rustd-log | `pkg/rustd-log-grok-bulk-4` | pending |
 | rustd-testing | `pkg/rustd-testing-grok-bulk-6` | pending |
 | rustd-gotool | `pkg/rustd-gotool-grok-bulk-4` | pending |
@@ -71,3 +75,50 @@ Suggested next three: newest archive (`bulk-6`), newest serial (`bulk-7`), `rust
 - First worktree install: `pnpm install --prefer-offline --no-frozen-lockfile`. Sandbox has `CI=true` (pnpm frozen-lockfile); subsequent `--filter` builds used `CI=false`. Pre-existing lockfile drift: `packages/_template` optional platform packages vs `pnpm-lock.yaml`. Lockfile was **not** committed.
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
 - Go via `mise exec -- go` (go1.24.13). Rust 1.97.1. Node v24.20.0.
+
+## Round 2026-09-14T17:51:42+02:00
+
+Agent: `grok-integrator`  
+`origin/main` before: `345ff6c`  
+`origin/main` after: `0da14ff` (this file lands as a follow-up commit)
+
+### Merged (verified green, `--no-ff`, pushed)
+
+| 分支 | 包 | 验证 | merge sha |
+|---|---|---|---|
+| `pkg/rustd-archive-grok-bulk-6` @ `a23cfc0` | rustd-archive | build + 18 tests pass | `de3e643` |
+| `pkg/rustd-serial-grok-bulk-7` @ `39a26ca` | rustd-serial | build + 30 tests pass | `34c7cbc` |
+| `pkg/rustd-image-grok-bulk-8` @ `ac8f590` | rustd-image | build + 28 tests pass (3 `dead_code` warnings in `draw.rs`/`image.rs`, not a failure); includes #19 §4.8 bomb PNG/GIF tests | `0da14ff` |
+
+### Rejected
+
+None this round.
+
+### Superseded
+
+- `pkg/rustd-archive-grok-bulk-3` (`da2a6be`, 2026-09-14 16:05) → replaced by `pkg/rustd-archive-grok-bulk-6`. Not merged. Not an ancestor of `a23cfc0`.
+- `pkg/rustd-serial-grok-bulk-worker` (`b6aeb7f`, 2026-09-14 16:06) → replaced by `pkg/rustd-serial-grok-bulk-7`. Ancestor of the merge.
+- `pkg/rustd-image-grok-bulk-2` (`d9c447c`, 2026-09-14 16:09) → replaced by `pkg/rustd-image-grok-bulk-8`. Not an ancestor of `ac8f590`.
+
+### Not processed this round (oldest first; max 3 packages/round)
+
+1. `pkg/rustd-log-grok-bulk-4` (`1b0b9bb`)
+2. `pkg/rustd-testing-grok-bulk-6` (`9fc9508`)
+3. `pkg/rustd-gotool-grok-bulk-4` (`4591592`)
+4. `pkg/rustd-encoding-grok-bulk-2` (`6654979`)
+5. `pkg/rustd-unicode-grok-bulk-worker` (`0fa656b`)
+6. `pkg/rustd-mime-grok-bulk-3` (`97079ec`)
+7. `pkg/rustd-mathx-grok-bulk-10` (`583c6b7`)
+8. `pkg/rustd-debugfmt-grok-bulk-5` (`c0747e6`)
+9. `pkg/rustd-compress-grok-bulk-9` extra `4af21a6` — follow-up tests on already-merged compress (old tip `59e3167` **is** an ancestor; safe to verify+merge next)
+10. `pkg/rustd-archive-grok-bulk-6` rewrite `f2d0491` — **do not merge**; parallel rewrite vs merged `a23cfc0`
+
+Suggested next three: `rustd-log` (`bulk-4`), `rustd-testing` (`bulk-6`), `rustd-gotool` (`bulk-4`).
+
+### Notes
+
+- Duplicate policy: verified only the newest of archive/serial/image; older siblings marked superseded.
+- After merging archive @ `a23cfc0`, worker rewrote `pkg/rustd-archive-grok-bulk-6` to `f2d0491` (not a descendant). Next round must not merge that rewrite.
+- `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
+- Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
+- Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
