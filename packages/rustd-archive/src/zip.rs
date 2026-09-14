@@ -385,6 +385,77 @@ fn name_bytes(e: &Entry) -> Vec<u8> {
     e.raw_name.clone().unwrap_or_else(|| e.name.as_bytes().to_vec())
 }
 
+/// Go `archive/zip.detectUTF8`: valid UTF-8, and whether encoding must be UTF-8
+/// (not CP-437 / ASCII compatible). Control bytes, `\`, and runes > 0x7d require UTF-8.
+fn detect_utf8(bytes: &[u8]) -> (bool, bool) {
+    let mut i = 0;
+    let mut require = false;
+    while i < bytes.len() {
+        let rest = &bytes[i..];
+        match std::str::from_utf8(rest) {
+            Ok(s) => {
+                for ch in s.chars() {
+                    let r = ch as u32;
+                    if r < 0x20 || r > 0x7d || r == 0x5c {
+                        require = true;
+                    }
+                }
+                return (true, require);
+            }
+            Err(err) => {
+                let up = err.valid_up_to();
+                if up == 0 {
+                    // Invalid or incomplete sequence: Go DecodeRuneInString → RuneError, size 1.
+                    return (false, false);
+                }
+                let s = std::str::from_utf8(&rest[..up]).unwrap();
+                for ch in s.chars() {
+                    let r = ch as u32;
+                    if r < 0x20 || r > 0x7d || r == 0x5c {
+                        require = true;
+                    }
+                }
+                i += up;
+            }
+        }
+    }
+    (true, require)
+}
+
+/// Go `FileHeader.NonUTF8` after `readDirectoryHeader`.
+fn header_non_utf8(flags: u16, name: &[u8], comment: &[u8]) -> bool {
+    let (utf8_valid1, utf8_require1) = detect_utf8(name);
+    let (utf8_valid2, utf8_require2) = detect_utf8(comment);
+    if !utf8_valid1 || !utf8_valid2 {
+        true
+    } else if !utf8_require1 && !utf8_require2 {
+        false
+    } else {
+        flags & (1 << 11) == 0
+    }
+}
+
+/// Go `Writer.CreateHeader` UTF-8 general-purpose bit (0x800).
+fn zip_utf8_flags(non_utf8: bool, name: &[u8], comment: &[u8]) -> u16 {
+    if non_utf8 {
+        return 0;
+    }
+    let (utf8_valid1, utf8_require1) = detect_utf8(name);
+    let (utf8_valid2, utf8_require2) = detect_utf8(comment);
+    if (utf8_require1 || utf8_require2) && utf8_valid1 && utf8_valid2 {
+        1 << 11
+    } else {
+        0
+    }
+}
+
+fn decode_name(bytes: &[u8]) -> (String, Option<Vec<u8>>) {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => (s.to_string(), None),
+        Err(_) => (String::from_utf8_lossy(bytes).into_owned(), Some(bytes.to_vec())),
+    }
+}
+
 pub fn create(entries: &[Entry]) -> Result<Vec<u8>> {
     let mut files = Vec::new();
     let mut out = Vec::new();
@@ -396,13 +467,10 @@ pub fn create(entries: &[Entry]) -> Result<Vec<u8>> {
         let use_zip64 = uncompressed.len() as u64 >= U32MAX as u64
             || compressed.len() as u64 >= U32MAX as u64
             || out.len() as u64 >= U32MAX as u64;
-        let mut flags = 0u16;
-        if !e.non_utf8 {
-            flags |= 1 << 11;
-        }
         let (dos_time, dos_date) = dos_datetime(e.mtime_ms);
         let offset = out.len() as u64;
         let name = name_bytes(e);
+        let flags = zip_utf8_flags(e.non_utf8, &name, e.comment.as_bytes());
         if name.len() > U16MAX as usize {
             return Err(FormatError::zip(offset, "archive/zip: name too long"));
         }
@@ -564,16 +632,10 @@ fn read_eocd(data: &[u8]) -> Result<CdMeta> {
     Ok(CdMeta { count, size, offset })
 }
 
-fn read_name(bytes: &[u8], utf8: bool) -> (String, bool, Option<Vec<u8>>) {
-    if utf8 {
-        match std::str::from_utf8(bytes) {
-            Ok(s) => (s.to_string(), false, None),
-            Err(_) => (String::from_utf8_lossy(bytes).into_owned(), true, Some(bytes.to_vec())),
-        }
-    } else {
-        // Preserve raw bytes; lossy string is only a convenience view.
-        (String::from_utf8_lossy(bytes).into_owned(), true, Some(bytes.to_vec()))
-    }
+fn read_name(bytes: &[u8], comment: &[u8], flags: u16) -> (String, bool, Option<Vec<u8>>) {
+    let non_utf8 = header_non_utf8(flags, bytes, comment);
+    let (name, raw_name) = decode_name(bytes);
+    (name, non_utf8, raw_name)
 }
 
 pub fn extract(data: &[u8]) -> Result<Vec<Entry>> {
@@ -608,8 +670,7 @@ pub fn extract(data: &[u8]) -> Result<Vec<Entry>> {
         let name_b = &data[pos + 46..pos + 46 + name_len];
         let extra = &data[pos + 46 + name_len..pos + 46 + name_len + extra_len];
         let comment = &data[pos + 46 + name_len + extra_len..rec_end];
-        let utf8 = flags & (1 << 11) != 0;
-        let (name, non_utf8, raw_name) = read_name(name_b, utf8);
+        let (name, non_utf8, raw_name) = read_name(name_b, comment, flags);
         let mode = Some(zip_file_mode(creator_version, ext_attr, &name));
         let mut e = Entry {
             name,
