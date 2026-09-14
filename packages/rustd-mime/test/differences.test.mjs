@@ -37,6 +37,20 @@ test('nextPart overlong boundary / header without CRLF vs Go (checkpoint 21)', (
   assert.throws(() => new api.MultipartWriter({ boundary: long }), api.MultipartError);
 });
 
+test('nextPart missing Content-Disposition vs Go (checkpoint 22)', () => {
+  assert.equal(typeof api.MultipartReader.prototype.nextPart, 'function');
+  assert.equal(api.readForm, undefined, 'readForm');
+  const body = Buffer.from('--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n');
+  const reader = new api.MultipartReader({ boundary: 'b' });
+  reader.write(body);
+  const part = reader.nextPart();
+  assert.equal(part.formName(), '');
+  assert.equal(part.fileName(), '');
+  assert.equal(part.header['Content-Disposition'], undefined);
+  assert.equal(Buffer.from(part.read()).toString(), 'hello');
+  assert.equal(reader.nextPart(), null);
+});
+
 test('documented Windows registry difference: no extra lookup API', () => {
   assert.equal(typeof api.typeByExtension, 'function');
   assert.equal(api.typeByRegistry, undefined);

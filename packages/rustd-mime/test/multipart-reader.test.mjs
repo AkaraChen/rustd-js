@@ -177,6 +177,10 @@ test('nextPart returns null after the last part', () => {
   assert.equal(reader.nextPart(), null);
 });
 
+function headerRecord(header) {
+  return { ...header };
+}
+
 function assertPartsMatch(parts, goParts) {
   assert.equal(goParts.error ?? '', '');
   assert.equal(parts.length, goParts.parts.length);
@@ -184,10 +188,10 @@ function assertPartsMatch(parts, goParts) {
     assert.equal(parts[i].formName, goParts.parts[i].formName, `formName[${i}]`);
     assert.equal(parts[i].fileName, goParts.parts[i].fileName, `fileName[${i}]`);
     assert.equal(parts[i].bodyHex, goParts.parts[i].bodyHex, `bodyHex[${i}]`);
-    assert.equal(
-      parts[i].header['Content-Disposition'][0],
-      goParts.parts[i].header['Content-Disposition'][0],
-      `Content-Disposition[${i}]`,
+    assert.deepEqual(
+      headerRecord(parts[i].header),
+      headerRecord(goParts.parts[i].header),
+      `header[${i}]`,
     );
   }
 }
@@ -674,4 +678,79 @@ test('nextPart truncated header without newline is null; Go NextPart is EOF', ()
   reader.write(body);
   assert.equal(reader.nextPart(), null);
   assert.deepEqual(readAll1Byte('b', body), []);
+});
+
+const missingCdOnlyType = Buffer.from(
+  '--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n',
+);
+const missingCdEmptyHeaders = Buffer.from('--b\r\n\r\nhello\r\n--b--\r\n');
+const missingCdLfOnly = Buffer.from('--b\nContent-Type: text/plain\n\nhello\n--b--\n');
+const missingCdThenPresent = Buffer.from(
+  '--b\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--b\r\nContent-Disposition: form-data; name=foo\r\n\r\nsecond\r\n--b--\r\n',
+);
+const missingCdTwoParts = Buffer.from(
+  '--b\r\nContent-Type: text/plain\r\n\r\na\r\n--b\r\nContent-Type: application/octet-stream\r\n\r\nb\r\n--b--\r\n',
+);
+const emptyCdValue = Buffer.from('--b\r\nContent-Disposition:\r\n\r\nhello\r\n--b--\r\n');
+const qpMissingCd = Buffer.from(
+  '--b\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nhel=6Co\r\n--b--\r\n',
+);
+
+test('nextPart missing Content-Disposition is not an error vs Go', () => {
+  for (const [name, body] of [
+    ['only-content-type', missingCdOnlyType],
+    ['empty-headers', missingCdEmptyHeaders],
+    ['lf-only', missingCdLfOnly],
+    ['two-parts', missingCdTwoParts],
+  ]) {
+    const goParts = goRead(body, 'b');
+    assert.equal(goParts.error ?? '', '', name);
+    const parts = readAll('b', body);
+    assertPartsMatch(parts, goParts);
+    for (let i = 0; i < parts.length; i++) {
+      assert.equal(parts[i].formName, '', `${name} formName[${i}]`);
+      assert.equal(parts[i].fileName, '', `${name} fileName[${i}]`);
+      assert.equal(parts[i].header['Content-Disposition'], undefined, `${name} CD[${i}]`);
+    }
+    assert.deepEqual(readAll1Byte('b', body), parts, name);
+  }
+});
+
+test('nextPart mixed missing then present Content-Disposition vs Go', () => {
+  const goParts = goRead(missingCdThenPresent, 'b');
+  const parts = readAll('b', missingCdThenPresent);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts.length, 2);
+  assert.equal(parts[0].formName, '');
+  assert.equal(parts[0].header['Content-Disposition'], undefined);
+  assert.equal(parts[1].formName, 'foo');
+  assert.equal(parts[1].header['Content-Disposition'][0], 'form-data; name=foo');
+  assert.deepEqual(readAll1Byte('b', missingCdThenPresent), parts);
+});
+
+test('nextPart empty Content-Disposition value vs Go', () => {
+  const goParts = goRead(emptyCdValue, 'b');
+  const parts = readAll('b', emptyCdValue);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].formName, '');
+  assert.equal(parts[0].fileName, '');
+  assert.deepEqual(parts[0].header['Content-Disposition'], ['']);
+  assert.deepEqual(readAll1Byte('b', emptyCdValue), parts);
+});
+
+test('nextPart quoted-printable without Content-Disposition vs Go', () => {
+  const goParts = goRead(qpMissingCd, 'b');
+  const parts = readAll('b', qpMissingCd);
+  assertPartsMatch(parts, goParts);
+  assert.equal(parts[0].formName, '');
+  assert.equal(parts[0].header['Content-Transfer-Encoding'], undefined);
+  assert.equal(parts[0].bodyHex, hex(Buffer.from('hello')));
+  assert.deepEqual(readAll1Byte('b', qpMissingCd), parts);
+});
+
+test('nextPart missing Content-Disposition mid-boundary splits match whole-body', () => {
+  for (const body of [missingCdOnlyType, missingCdThenPresent, qpMissingCd]) {
+    const whole = assertThreeFeedModes('b', body);
+    assertPartsMatch(whole, goRead(body, 'b'));
+  }
 });

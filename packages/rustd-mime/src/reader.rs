@@ -662,6 +662,45 @@ mod tests {
         parts_eq(&[], &collect_parts_1byte("b", body));
     }
 
+    #[test]
+    fn next_part_missing_content_disposition_is_not_error() {
+        let only_ct = b"--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b--\r\n";
+        let parts = collect_parts("b", only_ct);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].form_name, "");
+        assert_eq!(parts[0].file_name, "");
+        assert_eq!(parts[0].body, b"hello");
+        assert!(parts[0]
+            .header
+            .iter()
+            .all(|(k, _)| k != "Content-Disposition"));
+        assert_eq!(
+            parts[0]
+                .header
+                .iter()
+                .find(|(k, _)| k == "Content-Type")
+                .map(|(_, v)| v.clone()),
+            Some(vec!["text/plain".into()])
+        );
+        parts_eq(&parts, &collect_parts_1byte("b", only_ct));
+
+        let empty = b"--b\r\n\r\nhello\r\n--b--\r\n";
+        let empty_parts = collect_parts("b", empty);
+        assert_eq!(empty_parts.len(), 1);
+        assert!(empty_parts[0].header.is_empty());
+        assert_eq!(empty_parts[0].form_name, "");
+        parts_eq(&empty_parts, &collect_parts_1byte("b", empty));
+
+        let mixed = b"--b\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--b\r\nContent-Disposition: form-data; name=foo\r\n\r\nsecond\r\n--b--\r\n";
+        let mixed_parts = collect_parts("b", mixed);
+        assert_eq!(mixed_parts.len(), 2);
+        assert_eq!(mixed_parts[0].form_name, "");
+        assert_eq!(mixed_parts[1].form_name, "foo");
+        assert_eq!(mixed_parts[0].body, b"first");
+        assert_eq!(mixed_parts[1].body, b"second");
+        parts_eq(&mixed_parts, &collect_parts_1byte("b", mixed));
+    }
+
     fn collect_parts(boundary: &str, body: &[u8]) -> Vec<MultipartPart> {
         let mut r = MultipartReader::new(boundary.into());
         r.write(body);
