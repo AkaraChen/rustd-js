@@ -5,8 +5,8 @@ use memmap2::Mmap;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use object::{
-    Architecture, Endianness, Object, ObjectSection, ObjectSegment, ObjectSymbol, SectionFlags,
-    SectionKind, SymbolKind, SymbolSection,
+    pe, Architecture, BinaryFormat, Endianness, Object, ObjectSection, ObjectSegment, ObjectSymbol,
+    SectionFlags, SectionKind, SymbolKind, SymbolSection,
 };
 
 use crate::buildinfo;
@@ -57,10 +57,7 @@ impl Shared {
     }
 
     pub(crate) fn closed(&self) -> bool {
-        self.source
-            .lock()
-            .map(|g| g.is_none())
-            .unwrap_or(true)
+        self.source.lock().map(|g| g.is_none()).unwrap_or(true)
     }
 }
 
@@ -199,7 +196,10 @@ pub struct JsCoffHeader {
 }
 
 pub(crate) fn fail(code: &str, message: impl ToString) -> Error {
-    Error::new(Status::GenericFailure, format!("{code}: {}", message.to_string()))
+    Error::new(
+        Status::GenericFailure,
+        format!("{code}: {}", message.to_string()),
+    )
 }
 
 pub(crate) fn format_err(kind: &str, offset: u64, message: impl ToString) -> Error {
@@ -230,7 +230,8 @@ fn arch_name(arch: Architecture) -> String {
 }
 
 fn select_slice(data: &[u8]) -> Result<(usize, usize, bool, Kind)> {
-    let kind = sniff::sniff(data).ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
+    let kind =
+        sniff::sniff(data).ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
     if kind == Kind::Macho && sniff::is_macho_fat(data) {
         let (off, len) = crate::macho::select_fat_slice(data)?;
         return Ok((off, len, true, Kind::Macho));
@@ -238,12 +239,18 @@ fn select_slice(data: &[u8]) -> Result<(usize, usize, bool, Kind)> {
     Ok((0, data.len(), false, kind))
 }
 
-fn open_shared(source: Source, size: u64, max_section_bytes: u64, base: u64) -> Result<NativeBinaryFile> {
+fn open_shared(
+    source: Source,
+    size: u64,
+    max_section_bytes: u64,
+    base: u64,
+) -> Result<NativeBinaryFile> {
     let preview = match &source {
         Source::Map(m) => m.get(..16).unwrap_or(&m[..]).to_vec(),
         Source::Bytes(b) => b.get(..16).unwrap_or(b).to_vec(),
     };
-    let _ = sniff::sniff(&preview).ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
+    let _ = sniff::sniff(&preview)
+        .ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
     let (selected_off, selected_len, is_fat, kind) = match &source {
         Source::Map(m) => select_slice(m)?,
         Source::Bytes(b) => select_slice(b)?,
@@ -303,10 +310,7 @@ pub fn native_open(
     base: Option<BigInt>,
 ) -> Result<NativeBinaryFile> {
     let file = File::open(&path).map_err(|e| format_err("io", 0, e))?;
-    let size = file
-        .metadata()
-        .map_err(|e| format_err("io", 0, e))?
-        .len();
+    let size = file.metadata().map_err(|e| format_err("io", 0, e))?.len();
     let mmap = unsafe { Mmap::map(&file) }.map_err(|e| format_err("mmap", 0, e))?;
     drop(file);
     open_shared(
@@ -521,6 +525,9 @@ impl NativeBinaryFile {
                 for sym in file.symbols() {
                     out.push(map_symbol(&file, &sym, base)?);
                 }
+                if matches!(file.format(), BinaryFormat::MachO | BinaryFormat::Pe) {
+                    apply_nm_inferred_sizes(&mut out)?;
+                }
                 Ok(out)
             }
         })
@@ -665,9 +672,9 @@ impl NativeBinaryFile {
                     format!("compressed section {name} (rustd-compress not wired in this slice)"),
                 ));
             }
-            let data = section
-                .data()
-                .map_err(|e| format_err("section", section.file_range().map(|r| r.0).unwrap_or(0), e))?;
+            let data = section.data().map_err(|e| {
+                format_err("section", section.file_range().map(|r| r.0).unwrap_or(0), e)
+            })?;
             Ok(data.to_vec().into())
         })
     }
@@ -676,7 +683,9 @@ impl NativeBinaryFile {
     pub fn build_info(&self) -> Result<Option<JsBuildInfo>> {
         self.inner.with_bytes(|bytes| {
             let blob = buildinfo_bytes(bytes, self.inner.kind);
-            Ok(blob.and_then(|b| buildinfo::parse_blob(&b)).map(to_js_buildinfo))
+            Ok(blob
+                .and_then(|b| buildinfo::parse_blob(&b))
+                .map(to_js_buildinfo))
         })
     }
 
@@ -766,7 +775,10 @@ impl NativeBinaryFile {
     pub fn coff_header(&self) -> Result<JsCoffHeader> {
         self.inner.with_bytes(|bytes| {
             let file = parse_object(bytes)?;
-            if !matches!(file.format(), object::BinaryFormat::Pe | object::BinaryFormat::Coff) {
+            if !matches!(
+                file.format(),
+                object::BinaryFormat::Pe | object::BinaryFormat::Coff
+            ) {
                 return Err(format_err("kind", 0, "not PE"));
             }
             Ok(JsCoffHeader {
@@ -801,7 +813,11 @@ fn section_info(section: &object::Section<'_, '_>, base: u64) -> JsSection {
 }
 
 pub(crate) fn is_compressed(section: &object::Section<'_, '_>) -> bool {
-    if section.name().map(|n| n.starts_with(".zdebug_")).unwrap_or(false) {
+    if section
+        .name()
+        .map(|n| n.starts_with(".zdebug_"))
+        .unwrap_or(false)
+    {
         return true;
     }
     match section.flags() {
@@ -882,11 +898,18 @@ fn prot_from_flags(seg: &object::Segment<'_, '_>) -> Vec<String> {
     prot
 }
 
-fn map_symbol(file: &object::File<'_>, sym: &object::Symbol<'_, '_>, base: u64) -> Result<JsSymbol> {
-    let name = match sym.name() {
+fn map_symbol(
+    file: &object::File<'_>,
+    sym: &object::Symbol<'_, '_>,
+    base: u64,
+) -> Result<JsSymbol> {
+    let mut name = match sym.name() {
         Ok(n) => n.to_string(),
         Err(_) => String::from_utf8_lossy(sym.name_bytes().unwrap_or(b"")).into_owned(),
     };
+    if file.format() == BinaryFormat::MachO {
+        name = macho_go_sym_name(name);
+    }
     let section = match sym.section() {
         SymbolSection::Section(index) => file
             .section_by_index(index)
@@ -909,6 +932,32 @@ fn map_symbol(file: &object::File<'_>, sym: &object::Symbol<'_, '_>, base: u64) 
     })
 }
 
+/// `debug/macho` strips the compiler-added `_` on Go symbols (issue 33808).
+fn macho_go_sym_name(name: String) -> String {
+    if name.starts_with('_') && name.contains('.') {
+        name[1..].to_string()
+    } else {
+        name
+    }
+}
+
+/// `cmd/internal/objfile` infers Mach-O/PE symbol size from the next higher address.
+fn apply_nm_inferred_sizes(syms: &mut [JsSymbol]) -> Result<()> {
+    let mut addrs = Vec::with_capacity(syms.len());
+    for s in syms.iter() {
+        addrs.push(bigint_to_u64(s.value.clone())?);
+    }
+    addrs.sort_unstable();
+    for s in syms.iter_mut() {
+        let addr = bigint_to_u64(s.value.clone())?;
+        let next = addrs.partition_point(|&x| x <= addr);
+        if next < addrs.len() {
+            s.size = u64_big(addrs[next] - addr);
+        }
+    }
+    Ok(())
+}
+
 fn symbol_kind(file: &object::File<'_>, sym: &object::Symbol<'_, '_>) -> String {
     if sym.is_undefined() {
         return "undefined".into();
@@ -922,8 +971,11 @@ fn symbol_kind(file: &object::File<'_>, sym: &object::Symbol<'_, '_>) -> String 
     }
     if let SymbolSection::Section(index) = sym.section() {
         if let Ok(section) = file.section_by_index(index) {
-            if let SectionFlags::Elf { sh_flags } = section.flags() {
-                return elf_nm_kind(sh_flags);
+            match section.flags() {
+                SectionFlags::Elf { sh_flags } => return elf_nm_kind(sh_flags),
+                SectionFlags::Coff { characteristics } => return pe_nm_kind(characteristics),
+                SectionFlags::MachO { .. } => return macho_nm_kind(&section),
+                _ => {}
             }
             return match section.kind() {
                 SectionKind::Text => "text".into(),
@@ -934,6 +986,38 @@ fn symbol_kind(file: &object::File<'_>, sym: &object::Symbol<'_, '_>) -> String 
         }
     }
     fallback_symbol_kind(sym)
+}
+
+/// Match `cmd/internal/objfile` Mach-O codes: `__TEXT __text`→T, `__DATA __bss`→B, else seg.
+fn macho_nm_kind(section: &object::Section<'_, '_>) -> String {
+    let seg = section.segment_name().ok().flatten().unwrap_or("");
+    let name = section.name().unwrap_or("");
+    match (seg, name) {
+        ("__TEXT", "__text") => "text".into(),
+        ("__DATA", "__bss") | ("__DATA", "__noptrbss") => "bss".into(),
+        _ => match seg {
+            "__TEXT" | "__DATA_CONST" => "rodata".into(),
+            "__DATA" => "data".into(),
+            _ => "unknown".into(),
+        },
+    }
+}
+
+/// Match `cmd/internal/objfile` PE section characteristics: CODE→T, INIT+!WRITE→R, INIT→D, UNINIT→B.
+fn pe_nm_kind(characteristics: u32) -> String {
+    if characteristics & pe::IMAGE_SCN_CNT_CODE != 0 {
+        return "text".into();
+    }
+    if characteristics & pe::IMAGE_SCN_CNT_INITIALIZED_DATA != 0 {
+        if characteristics & pe::IMAGE_SCN_MEM_WRITE == 0 {
+            return "rodata".into();
+        }
+        return "data".into();
+    }
+    if characteristics & pe::IMAGE_SCN_CNT_UNINITIALIZED_DATA != 0 {
+        return "bss".into();
+    }
+    "unknown".into()
 }
 
 /// Match `cmd/internal/objfile` ELF codes: ALLOC|EXEC→T, ALLOC→R, ALLOC|WRITE→D.
@@ -1069,7 +1153,11 @@ pub(crate) fn go_name_with_static(name: &str, static_: bool) -> Option<JsGoName>
 fn to_js_buildinfo(info: buildinfo::BuildInfo) -> JsBuildInfo {
     fn module(m: buildinfo::Module) -> JsModule {
         let (replace_path, replace_version, replace_sum) = match m.replace {
-            Some(r) => (Some(r.path.clone()), Some(r.version.clone()), Some(r.sum.clone())),
+            Some(r) => (
+                Some(r.path.clone()),
+                Some(r.version.clone()),
+                Some(r.sum.clone()),
+            ),
             None => (None, None, None),
         };
         JsModule {
@@ -1112,7 +1200,8 @@ fn buildinfo_bytes(bytes: &[u8], kind: Kind) -> Option<Vec<u8>> {
 #[napi]
 pub fn native_read_buildinfo_bytes(buf: Uint8Array) -> Result<JsBuildInfo> {
     let bytes = buf.to_vec();
-    let kind = sniff::sniff(&bytes).ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
+    let kind =
+        sniff::sniff(&bytes).ok_or_else(|| format_err("magic", 0, "unrecognized binary format"))?;
     let blob = buildinfo_bytes(&bytes, kind).unwrap_or(bytes);
     buildinfo::parse_blob(&blob)
         .map(to_js_buildinfo)

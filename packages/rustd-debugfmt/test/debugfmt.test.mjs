@@ -922,12 +922,23 @@ function parseGoNmSize(text) {
   };
   const rows = [];
   for (const line of text.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const parts = trimmed.split(/\s+/);
-    if (parts.length < 4) continue;
-    const [addr, size, code] = parts;
-    const name = parts.slice(3).join(' ');
+    if (!line) continue;
+    // Defined: addr size code name. Undefined (`U`): go tool nm blanks the addr field,
+    // so the trimmed line is `size U name` (cmd/nm prints "%8s" then size).
+    const defined = line.match(/^\s*([0-9a-f]+)\s+(\d+)\s+([A-Za-z_?])\s+(.*)$/i);
+    const undef = !defined ? line.match(/^\s+(\d+)\s+([Uu])\s+(.*)$/) : null;
+    let addr;
+    let size;
+    let code;
+    let name;
+    if (defined) {
+      [, addr, size, code, name] = defined;
+    } else if (undef) {
+      addr = '0';
+      [, size, code, name] = undef;
+    } else {
+      continue;
+    }
     const kind = letter[code];
     if (!kind) continue;
     rows.push({
@@ -1853,6 +1864,73 @@ test('issue #18 §4.8: mmap-open ≥100MB Go binary, enumerate symbols, median <
   assert.ok(med < 300, `symbol enumerate median ${med.toFixed(2)}ms, want <300ms (runs=${times.map((t) => t.toFixed(1)).join(',')})`);
   assert.ok(grew < cap, `RSS grew ${grew} bytes (rss0=${rss0} peak=${peakRss} rss1=${rss1} hwmΔ=${hwm1 - hwm0}), want <20% of ${fileBytes} (${cap})`);
 });
+
+const CROSS_FIXTURES = [
+  { goos: 'linux', goarch: 'arm64', kind: 'elf', arch: 'arm64' },
+  { goos: 'darwin', goarch: 'arm64', kind: 'macho', arch: 'arm64' },
+  { goos: 'windows', goarch: 'amd64', kind: 'pe', arch: 'amd64' },
+];
+
+for (const target of CROSS_FIXTURES) {
+  test(`issue #18 §4.1: ${target.goos}/${target.goarch} fixture symbols() vs go tool nm -size and buildInfo() vs go version -m`, () => {
+    const dir = mkdtempSync(join(tmpdir(), `rustd-debugfmt-${target.goos}-${target.goarch}-`));
+    const out = join(dir, target.goos === 'windows' ? 'hello.exe' : 'hello');
+    const built = go(['build', '-o', out, '-ldflags', '-X main.version=1.2.3', '.'], {
+      cwd: join(pkg, 'gofixtures'),
+      env: {
+        ...process.env,
+        GOWORK: 'off',
+        CGO_ENABLED: '0',
+        GOOS: target.goos,
+        GOARCH: target.goarch,
+      },
+    });
+    assert.equal(built.status, 0, built.stderr + built.stdout);
+
+    const file = open(out);
+    assert.equal(file.kind, target.kind);
+    assert.equal(file.arch(), target.arch);
+    assert.equal(file.endian(), 'little');
+
+    const ours = file.symbols().map((s) => ({
+      name: s.name,
+      value: s.value,
+      size: s.size,
+      kind: s.kind,
+    }));
+    const info = file.buildInfo();
+    file.close();
+
+    assert.ok(ours.some((s) => s.name === 'main.main'), `${target.goos}/${target.goarch} symbols include main.main`);
+    assert.ok(info, `${target.goos}/${target.goarch} must expose buildinfo`);
+
+    const nm = go(['tool', 'nm', '-size', out]);
+    assert.equal(nm.status, 0, nm.stderr);
+    const nmRows = parseGoNmSize(nm.stdout);
+    assert.ok(nmRows.some((r) => r.name === 'main.main'), 'go tool nm lists main.main');
+
+    const nmSet = new Set(nmRows.map(tupleKey));
+    const ourSet = new Set(ours.map(tupleKey));
+    const onlyNm = [...nmSet].filter((k) => !ourSet.has(k)).slice(0, 12);
+    const onlyOurs = [...ourSet].filter((k) => !nmSet.has(k)).slice(0, 12);
+    assert.equal(ourSet.size, nmSet.size, `${target.goos}/${target.goarch} count ours=${ourSet.size} nm=${nmSet.size}`);
+    assert.equal(onlyNm.length, 0, `${target.goos}/${target.goarch} only nm: ${onlyNm.join('\n')}`);
+    assert.equal(onlyOurs.length, 0, `${target.goos}/${target.goarch} only ours: ${onlyOurs.join('\n')}`);
+
+    const version = go(['version', '-m', out]);
+    assert.equal(version.status, 0, version.stderr);
+    const expected = parseGoVersionM(version.stdout);
+    assert.equal(info.goVersion, expected.goVersion);
+    assert.equal(info.path, expected.path);
+    assert.deepEqual(info.main, expected.main);
+    assert.deepEqual(info.deps, expected.deps);
+    assert.deepEqual(info.settings, expected.settings);
+    const byKey = Object.fromEntries(info.settings.map((s) => [s.key, s.value]));
+    assert.equal(byKey.GOOS, target.goos);
+    assert.equal(byKey.GOARCH, target.goarch);
+    assert.match(byKey['-ldflags'] ?? '', /main\.version=1\.2\.3/);
+  });
+}
 
 void UnsupportedFeatureError;
 void root;
