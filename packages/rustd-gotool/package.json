@@ -14,7 +14,8 @@
     "index.js",
     "index.mjs",
     "index.d.ts",
-    "README.md"
+    "README.md",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=20"

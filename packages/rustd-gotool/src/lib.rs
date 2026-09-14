@@ -1,4 +1,13 @@
 use napi_derive::napi;
+use std::collections::HashMap;
+
+mod fileset;
+mod scanner;
+mod token;
+mod unicode_go;
+
+pub use fileset::{FileSet, GoFile, GoPosition};
+pub use scanner::{Scanner, SCAN_COMMENTS};
 
 // Semantics match Go 1.24.13 `internal/gover` + `go/version` (toolchain names, not semver).
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -186,4 +195,39 @@ pub fn version_is_valid(x: String) -> bool {
 #[napi]
 pub fn version_lang(x: String) -> String {
     lang(&x)
+}
+
+#[napi]
+pub fn token_lookup(ident: String) -> i32 {
+    token::lookup(&ident)
+}
+
+#[napi]
+pub fn token_is_keyword(tok: i32) -> bool {
+    token::is_keyword_tok(tok)
+}
+
+#[napi]
+pub fn token_is_exported(name: String) -> bool {
+    fileset::is_exported(&name)
+}
+
+#[napi]
+pub fn token_string(tok: i32) -> String {
+    token::token_string(tok)
+}
+
+#[napi]
+pub fn token_constants() -> HashMap<String, i32> {
+    token::TOKEN_ENTRIES
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), *v))
+        .collect()
+}
+
+#[napi]
+pub fn scan_mode_constants() -> HashMap<String, u32> {
+    let mut m = HashMap::new();
+    m.insert("ScanComments".into(), SCAN_COMMENTS);
+    m
 }

@@ -96,7 +96,26 @@ func fail(err error) { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 func main() {
 	out := flag.String("out", "", "output JSON file; stdout by default")
 	verify := flag.Bool("verify", false, "verify a packet read from stdin")
+	scan := flag.Bool("scan", false, "dump go/scanner fixtures")
+	verifyScanFlag := flag.Bool("verify-scan", false, "verify a scanner packet read from stdin")
 	flag.Parse()
+	if *verifyScanFlag {
+		verifyScan(os.Stdin)
+		return
+	}
+	if *scan {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpScan(writer)
+		return
+	}
 	if *verify {
 		dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
 		dec.DisallowUnknownFields()
