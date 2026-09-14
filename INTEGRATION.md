@@ -311,7 +311,7 @@ pnpm-lock.yaml
   packages/rustd-mathx: {}
 ```
 
-  Cause: mathx merge-base is `de3e643` (archive merge, pre-log). After `rustd-log` landed, both sides add a different `importers` entry. Worker should rebase onto current `origin/main` and re-push. Newer tip `a8246ba` (JS state() UnmarshalBinary) is a descendant of `efd0592` and still conflicts.
+  Cause: mathx merge-base is `de3e643` (archive merge, pre-log). After `rustd-log` landed, both sides add a different `importers` entry. Worker should rebase onto current `origin/main` and re-push. Newer tip `a8246ba` (JS state() UnmarshalBinary) is a descendant of `efd0592` and still conflicts. LoopX `todo update --note` on `todo_cd9db5d9748d` / `todo_7d22617a1dca` was refused (`agent_id=grok-integrator` cannot update a todo `claimed_by=grok-bulk-10`).
 
 - `pkg/rustd-encoding-grok-bulk-2` @ `b5f930e` — same SHA as last round; still lockfile conflict. Not re-verified.
 - `pkg/rustd-mime-grok-bulk-3` — still lockfile conflict (tip moved `ca892a9` → `0660cea`, merge-base still `0da14ff`). Not re-verified this round.
