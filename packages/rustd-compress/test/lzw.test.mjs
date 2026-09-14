@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import {
-  lzwCompress, lzwDecompress, LzwCompressor, LzwDecompressor, LzwConfigError, LzwFormatError,
+  lzwCompress, lzwDecompress, lzwCompressStream, LzwCompressor, LzwDecompressor, LzwConfigError, LzwFormatError,
 } from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -14,7 +14,7 @@ function go(args = [], input) {
   const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
   const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
   const result = spawnSync(command, [...prefix, 'run', './tools/gofixtures/compress', ...args], {
-    cwd: root, encoding: 'utf8', input, maxBuffer: 16 << 20, timeout: 120000,
+    cwd: root, encoding: 'utf8', input, maxBuffer: 32 << 20, timeout: 180000,
   });
   if (result.error) throw result.error;
   return result;
@@ -126,4 +126,48 @@ test('typed-array slices are respected and outputs are independent', () => {
   assert.deepEqual([...output], [1, 2, 3]);
   output[0] = 77;
   assert.equal(source[1], 1);
+});
+
+function lcg(n, seed) {
+  const data = Buffer.alloc(n);
+  let state = seed >>> 0;
+  for (let i = 0; i < n; i++) {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    data[i] = (state >>> 24) & 0xff;
+  }
+  return data;
+}
+
+test('1MiB LZW matches Go compress and round-trips for both orders', () => {
+  const input = lcg(1 << 20, 42);
+  const cases = [];
+  for (const order of ['lsb', 'msb']) {
+    const opts = { order, litWidth: 8 };
+    const compressed = lzwCompress(input, opts);
+    assert.equal(hex(lzwDecompress(compressed, opts)), hex(input), `${order} js roundtrip`);
+    cases.push({
+      id: `js-1mib-${order}`,
+      order,
+      litWidth: 8,
+      inputHex: hex(input),
+      compressedHex: hex(compressed),
+    });
+  }
+  const verified = go(['-pkg', 'lzw', '-verify'], JSON.stringify({ schema: 1, package: 'lzw', lzw: cases }));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 2 lzw cases/);
+});
+
+test('lzwCompressStream matches one-shot', async () => {
+  const opts = { order: 'msb', litWidth: 7 };
+  const input = Uint8Array.from({ length: 2048 }, (_, i) => (i * 3) & 127);
+  const expected = lzwCompress(input, opts);
+  async function* chunks() {
+    yield input.subarray(0, 1);
+    yield input.subarray(1, 64);
+    yield input.subarray(64);
+  }
+  const out = [];
+  for await (const part of lzwCompressStream(chunks(), opts)) out.push(part);
+  assert.equal(hex(Buffer.concat(out)), hex(expected));
 });

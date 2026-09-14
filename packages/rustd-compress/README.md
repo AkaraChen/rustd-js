@@ -27,9 +27,10 @@ clears codec state.
 - Go may over-read a non-`io.ByteReader` source. Chunked JS writes do not.
 - `read()` always copies into a fresh `Uint8Array`. Go fills a caller buffer.
 - Error classes are thrown (not `(value, error)`). `Bzip2FormatError` keeps the
-  `bzip2 data invalid: …` prefix. Exact Go `StructuralError` wording is matched
-  when the decoder names the same failure; truncated streams may surface
-  `unexpected EOF` instead of Go's `EOF`.
+  `bzip2 data invalid: …` prefix for structural failures (`bad magic value`,
+  `block checksum mismatch`). Truncated streams match Go's `io.ReadAll` text
+  `unexpected EOF` with no prefix. Go's bare `EOF` is normalized to
+  `unexpected EOF`.
 - LZW early-change timing follows Go fixtures, not GIF/TIFF folklore.
 
 ## Support matrix
@@ -39,9 +40,9 @@ clears codec state.
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **447,840 bytes** (issue cap 1.5 MB).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **448,464 bytes** (issue cap 1.5 MB).
 
 ```text
 $ ls -l packages/rustd-compress/*.node
--rwxrwxr-x 1 akrc akrc 447840 Sep 14 15:44 packages/rustd-compress/rustd-compress.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 448464 Sep 14 16:30 packages/rustd-compress/rustd-compress.linux-x64-gnu.node
 ```

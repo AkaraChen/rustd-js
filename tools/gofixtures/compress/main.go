@@ -17,18 +17,18 @@ import (
 )
 
 type LzwCase struct {
-	ID             string `json:"id"`
-	Order          string `json:"order"`
-	LitWidth       int    `json:"litWidth"`
-	InputHex       string `json:"inputHex"`
-	CompressedHex  string `json:"compressedHex"`
+	ID            string `json:"id"`
+	Order         string `json:"order"`
+	LitWidth      int    `json:"litWidth"`
+	InputHex      string `json:"inputHex"`
+	CompressedHex string `json:"compressedHex"`
 }
 
 type BzipCase struct {
-	ID             string  `json:"id"`
-	CompressedB64  string  `json:"compressedB64"`
-	SHA256         string  `json:"sha256,omitempty"`
-	Error          string  `json:"error,omitempty"`
+	ID            string `json:"id"`
+	CompressedB64 string `json:"compressedB64"`
+	SHA256        string `json:"sha256,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 type Packet struct {
@@ -313,7 +313,7 @@ func main() {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
 	if *verify {
-		dec := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20))
+		dec := json.NewDecoder(io.LimitReader(os.Stdin, 64<<20))
 		dec.DisallowUnknownFields()
 		var packet Packet
 		if err := dec.Decode(&packet); err != nil {

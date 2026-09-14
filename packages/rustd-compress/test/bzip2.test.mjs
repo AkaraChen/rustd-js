@@ -28,14 +28,9 @@ function decodeCase(c) {
   if (c.error) {
     assert.throws(() => bzip2Decompress(data), (err) => {
       assert.equal(err instanceof Bzip2FormatError, true, `${c.id} type ${err}`);
+      assert.equal(err.message, c.error, `${c.id} message`);
       return true;
     }, c.id);
-    try {
-      bzip2Decompress(data);
-    } catch (err) {
-      // Keep Go's structural prefix when the decoder can name the same failure.
-      assert.match(String(err.message), /bzip2 data invalid:|unexpected EOF|EOF/i, `${c.id} ${err.message}`);
-    }
     return;
   }
   const plain = bzip2Decompress(data);

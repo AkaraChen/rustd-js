@@ -18,23 +18,36 @@ fn bzip_reason(err: impl std::fmt::Display) -> String {
     let reason = text
         .strip_prefix("bzip2 data invalid: ")
         .unwrap_or(text.as_str());
-    if reason.contains("invalid file signature") || reason.contains("invalid magic") {
+    if reason.contains("invalid file signature")
+        || reason.contains("invalid magic")
+        || reason.contains("bad magic")
+    {
         return "bad magic value".into();
     }
     if reason.contains("bad crc") {
         return "block checksum mismatch".into();
     }
-    if reason.contains("truncated") || reason.contains("unexpected EOF") {
+    if reason.contains("truncated")
+        || reason.contains("unexpected EOF")
+        || reason == "EOF"
+        || reason.ends_with(": EOF")
+    {
         return "unexpected EOF".into();
     }
     reason.to_string()
 }
 
 fn bzip_err(offset: u64, err: impl std::fmt::Display) -> Error {
+    let reason = bzip_reason(err);
+    // Go's io.ReadAll on a truncated stream returns "unexpected EOF" with no
+    // StructuralError prefix; keep that wording so fixture strings match.
+    if reason == "unexpected EOF" {
+        return fail("Bzip2FormatError", offset, reason);
+    }
     fail(
         "Bzip2FormatError",
         offset,
-        format!("bzip2 data invalid: {}", bzip_reason(err)),
+        format!("bzip2 data invalid: {reason}"),
     )
 }
 
@@ -167,15 +180,18 @@ fn min_member_len(data: &[u8]) -> Result<usize> {
 }
 
 fn decompress_all(data: &[u8]) -> Result<Vec<u8>> {
+    if data.is_empty() {
+        return Err(bzip_err(0, "unexpected EOF"));
+    }
     let mut rest = data;
     let mut output = Vec::new();
     while !rest.is_empty() {
+        // Decode the remaining bytes first so header/CRC errors surface instead
+        // of being swallowed by the concat splitter's binary search.
+        decode_member(rest)?;
         let n = min_member_len(rest)?;
         output.extend(decode_member(&rest[..n])?);
         rest = &rest[n..];
-    }
-    if data.is_empty() {
-        return decode_member(data);
     }
     Ok(output)
 }
