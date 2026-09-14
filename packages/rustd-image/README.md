@@ -60,7 +60,7 @@ logical screen **before** frame buffers are allocated (`ImageTooLargeError`).
 
 ## Size
 
-Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **882,232 bytes** / 3,000,000.
+Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **882,856 bytes** / 3,000,000.
 
 Go `image/png` testdata + pngsuite + generated JPEG/GIF/boundary fixtures: **46** files. PNG
 `DecodeConfig` fields and RGBA64 pixdumps match Go, including 1/2/4/8/16-bit,
@@ -70,5 +70,5 @@ Adam7, tRNS, 1×1, gray, and fully-transparent. Every truncated prefix of the Go
 
 ```text
 $ ls -l packages/rustd-image/*.node
--rwxrwxr-x 1 akrc akrc 882232 Sep 14 17:09 packages/rustd-image/rustd-image.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 882856 Sep 14 17:46 packages/rustd-image/rustd-image.linux-x64-gnu.node
 ```
