@@ -53,6 +53,11 @@ do not need `close()`.
 - Non-UTF-8 zip names keep the raw bytes on `rawName` and set `nonUtf8`. The
   `name` string is a lossy UTF-8 view and must not be treated as round-trippable.
 - Filesystem helpers such as `extractTo` belong in `rustd-fs`, not this package.
+- Zip `entry.mode` is Go `FileHeader.Mode()` (`io/fs.FileMode` bits), not the
+  raw unix extra-attr word. FAT/NTFS/VFAT creators with empty attrs decode as
+  `0o666` (and `ModeDir|0o666` when the name ends in `/`); unix creator with
+  empty attrs is `0`. `zipCreate` / `ZipWriter` treat a provided `mode` like
+  `FileHeader.SetMode`. There is no archive-level zip comment field.
 - PAX `atime` / `ctime` stay on `entry.pax` as strings. They are not `Date`
   fields; the public TS shape only has `mtime` (issue #2). Invalid `atime` /
   `ctime` / `mtime` values still throw `TarFormatError`, matching Go `ErrHeader`.
@@ -72,11 +77,11 @@ Every proper prefix of a well-formed archive must throw one of these errors
 
 ## Size
 
-Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **557,008 bytes** (cap 2,000,000).
+Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **557,568 bytes** (cap 2,000,000).
 
 ```text
 $ ls -l packages/rustd-archive/*.node
--rwxrwxr-x 1 akrc akrc 557008 Sep 14 19:32 packages/rustd-archive/rustd-archive.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 557568 Sep 14 20:07 packages/rustd-archive/rustd-archive.linux-x64-gnu.node
 ```
 
 Same-machine microbench, 200 files × 4 KiB, 20-run average: `tarCreate` **2.80 ms**,
