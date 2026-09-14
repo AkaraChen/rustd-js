@@ -39612,7 +39612,17 @@
         65533,
         65533
       ]
-    ]
+    ],
+    "full": {
+      "encodeAllChecksum": 1078351135,
+      "encodeAllLen": 2162688,
+      "encodeRuneChecksum": 3705494981,
+      "predChecksum": 3030040005,
+      "decodeEncodeChecksum": 3679859999,
+      "decodeBmpChecksum": 4246525498,
+      "decodeBmpLen": 65535,
+      "decodeRuneSurrChecksum": 947690949
+    }
   },
   "jsDiffs": {
     "toUpper": [

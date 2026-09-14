@@ -271,6 +271,18 @@ type utf16Fix struct {
 	Surrogate   [][2]any   `json:"surrogate"`
 	RuneLen     [][2]int32 `json:"runeLen"`
 	EncodeRune  [][3]int32 `json:"encodeRune"`
+	Full        utf16Full  `json:"full"`
+}
+
+type utf16Full struct {
+	EncodeAllChecksum      uint32 `json:"encodeAllChecksum"`
+	EncodeAllLen           int    `json:"encodeAllLen"`
+	EncodeRuneChecksum     uint32 `json:"encodeRuneChecksum"`
+	PredChecksum           uint32 `json:"predChecksum"`
+	DecodeEncodeChecksum   uint32 `json:"decodeEncodeChecksum"`
+	DecodeBmpChecksum      uint32 `json:"decodeBmpChecksum"`
+	DecodeBmpLen           int    `json:"decodeBmpLen"`
+	DecodeRuneSurrChecksum uint32 `json:"decodeRuneSurrChecksum"`
 }
 
 type utf16Enc struct {
@@ -281,6 +293,74 @@ type utf16Enc struct {
 type jsDiffs struct {
 	ToUpper [][2]string `json:"toUpper"`
 	ToLower [][2]string `json:"toLower"`
+}
+
+func mix32(h, v uint32) uint32 {
+	h ^= v
+	return h * 16777619
+}
+
+func utf16FullChecksums() utf16Full {
+	runes := make([]rune, unicode.MaxRune+1)
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		runes[r] = r
+	}
+	encoded := utf16.Encode(runes)
+	encH := uint32(2166136261)
+	encH = mix32(encH, uint32(len(encoded)))
+	for _, u := range encoded {
+		encH = mix32(encH, uint32(u))
+	}
+
+	erH := uint32(2166136261)
+	predH := uint32(2166136261)
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		r1, r2 := utf16.EncodeRune(r)
+		erH = mix32(erH, uint32(r1))
+		erH = mix32(erH, uint32(r2))
+		var s uint32
+		if utf16.IsSurrogate(r) {
+			s = 1
+		}
+		predH = mix32(predH, s)
+		predH = mix32(predH, uint32(int32(utf16.RuneLen(r))))
+	}
+
+	decoded := utf16.Decode(encoded)
+	deH := uint32(2166136261)
+	deH = mix32(deH, uint32(len(decoded)))
+	for _, r := range decoded {
+		deH = mix32(deH, uint32(r))
+	}
+
+	bmp := make([]uint16, 0x10000)
+	for i := range bmp {
+		bmp[i] = uint16(i)
+	}
+	bmpDecoded := utf16.Decode(bmp)
+	bmpH := uint32(2166136261)
+	bmpH = mix32(bmpH, uint32(len(bmpDecoded)))
+	for _, r := range bmpDecoded {
+		bmpH = mix32(bmpH, uint32(r))
+	}
+
+	pairH := uint32(2166136261)
+	for r1 := rune(0xD800); r1 <= 0xDFFF; r1++ {
+		for r2 := rune(0xD800); r2 <= 0xDFFF; r2++ {
+			pairH = mix32(pairH, uint32(utf16.DecodeRune(r1, r2)))
+		}
+	}
+
+	return utf16Full{
+		EncodeAllChecksum:      encH,
+		EncodeAllLen:           len(encoded),
+		EncodeRuneChecksum:     erH,
+		PredChecksum:           predH,
+		DecodeEncodeChecksum:   deH,
+		DecodeBmpChecksum:      bmpH,
+		DecodeBmpLen:           len(bmpDecoded),
+		DecodeRuneSurrChecksum: pairH,
+	}
 }
 
 func lcgBytes(n int) []byte {
@@ -400,8 +480,7 @@ func writeFixtures(dir string, named []namedTable) {
 		fx.Utf16.Surrogate = append(fx.Utf16.Surrogate, [2]any{r, utf16.IsSurrogate(r)})
 	}
 	fx.Utf16.DecodeLone = [][2]int32{{0xD83D, 0xFFFD}, {0xDE00, 0xFFFD}}
-	decoded := utf16.Decode([]uint16{0xD83D, 0xDE00})
-	_ = decoded
+	fx.Utf16.Full = utf16FullChecksums()
 
 	randBuf := lcgBytes(1 << 20)
 	fx.RandomUtf8 = randomUtf8{Len: len(randBuf), Valid: utf8.Valid(randBuf), RuneCount: utf8.RuneCount(randBuf)}
