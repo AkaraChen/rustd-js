@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 mod ast;
 mod codec;
+mod constant;
 mod fileset;
 mod parser;
 mod print;

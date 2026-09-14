@@ -33,6 +33,46 @@ function versionLang(x) {
   return binding.versionLang(versionString(x, 'x'));
 }
 
+function asBigInt(value, label) {
+  if (typeof value !== 'bigint') {
+    throw new TypeError(`gotool: ${label} must be a bigint`);
+  }
+  return value;
+}
+
+class GoConstValue {
+  constructor(native) {
+    this._n = native;
+  }
+  get kind() {
+    return this._n.kind;
+  }
+}
+
+function asConst(value, label) {
+  if (!(value instanceof GoConstValue)) {
+    throw new TypeError(`gotool: ${label} must be a GoConstValue`);
+  }
+  return value;
+}
+
+function constMakeInt64(v) {
+  return new GoConstValue(binding.constMakeInt64(asBigInt(v, 'v')));
+}
+function constToInt(v) {
+  const r = binding.constToInt(asConst(v, 'v')._n);
+  return [r.value, r.ok];
+}
+function constCompare(x, y) {
+  return binding.constCompare(asConst(x, 'x')._n, asConst(y, 'y')._n);
+}
+function constSign(v) {
+  return binding.constSign(asConst(v, 'v')._n);
+}
+function constBitLen(v) {
+  return binding.constBitLen(asConst(v, 'v')._n);
+}
+
 function asNumber(value, label) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new TypeError(`gotool: ${label} must be a finite number`);
@@ -296,6 +336,12 @@ function astNewIdent(name) {
 module.exports.versionCompare = versionCompare;
 module.exports.versionIsValid = versionIsValid;
 module.exports.versionLang = versionLang;
+module.exports.GoConstValue = GoConstValue;
+module.exports.constMakeInt64 = constMakeInt64;
+module.exports.constToInt = constToInt;
+module.exports.constCompare = constCompare;
+module.exports.constSign = constSign;
+module.exports.constBitLen = constBitLen;
 module.exports.TOKEN = TOKEN;
 module.exports.SCAN_MODE = SCAN_MODE;
 module.exports.PARSE_MODE = PARSE_MODE;
