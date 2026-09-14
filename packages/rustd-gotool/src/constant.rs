@@ -289,11 +289,28 @@ pub fn const_to_int(v: &GoConstValue) -> ConstToIntResult {
     }
 }
 
+/// Go `match` then `big.Rat.Cmp` for Int/Float (`int64Val`/`intVal`/`ratVal`).
+fn as_rat(v: &GoConstValue, label: &str) -> Result<BigRational> {
+    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref()) {
+        ("Int", Some(n), _) => Ok(BigRational::from_integer(n.clone())),
+        ("Float", _, Some(r)) => Ok(r.clone()),
+        ("Unknown", _, _) => Err(Error::new(
+            Status::InvalidArg,
+            format!("gotool: {label} is Unknown"),
+        )),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            format!("gotool: {label} must be Int or Float"),
+        )),
+    }
+}
+
+/// Go `Compare` for Int/Float: -1 / 0 / 1. Unknown throws.
 #[napi]
 pub fn const_compare(x: &GoConstValue, y: &GoConstValue) -> Result<i32> {
-    let xi = as_int(x, "x")?;
-    let yi = as_int(y, "y")?;
-    Ok(match xi.cmp(yi) {
+    let xr = as_rat(x, "x")?;
+    let yr = as_rat(y, "y")?;
+    Ok(match xr.cmp(&yr) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,

@@ -653,3 +653,171 @@ func verifyConstantVal(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-int-float-val cases\n", len(packet.Cases))
 }
+
+type ConstFCmpCase struct {
+	ID      string `json:"id"`
+	FormX   string `json:"formX"`
+	XX      string `json:"xx"`
+	XY      string `json:"xy"`
+	XS      string `json:"xs"`
+	FormY   string `json:"formY"`
+	YX      string `json:"yx"`
+	YY      string `json:"yy"`
+	YS      string `json:"ys"`
+	KindX   string `json:"kindX"`
+	KindY   string `json:"kindY"`
+	ExactX  string `json:"exactX"`
+	ExactY  string `json:"exactY"`
+	Compare int    `json:"compare"`
+}
+
+type ConstFCmpPacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Slice   string          `json:"slice"`
+	Cases   []ConstFCmpCase `json:"cases"`
+}
+
+type fcmpSrc struct {
+	form, x, y, s string
+}
+
+func makeConst(form, xStr, yStr, sStr string) (constant.Value, error) {
+	switch form {
+	case "int":
+		x, err := strconv.ParseInt(xStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return constant.MakeInt64(x), nil
+	case "quo":
+		x, err := strconv.ParseInt(xStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		y, err := strconv.ParseInt(yStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if y == 0 {
+			return nil, fmt.Errorf("quo by zero")
+		}
+		return constant.BinaryOp(constant.MakeInt64(x), token.QUO, constant.MakeInt64(y)), nil
+	case "shift-quo":
+		x, err := strconv.ParseInt(xStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		s, err := strconv.ParseUint(sStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		den := constant.Shift(constant.MakeInt64(1), token.SHL, uint(s))
+		return constant.BinaryOp(constant.MakeInt64(x), token.QUO, den), nil
+	default:
+		return nil, fmt.Errorf("unknown form %q", form)
+	}
+}
+
+func evalFloatCmp(a, b fcmpSrc) (ConstFCmpCase, error) {
+	vx, err := makeConst(a.form, a.x, a.y, a.s)
+	if err != nil {
+		return ConstFCmpCase{}, err
+	}
+	vy, err := makeConst(b.form, b.x, b.y, b.s)
+	if err != nil {
+		return ConstFCmpCase{}, err
+	}
+	return ConstFCmpCase{
+		FormX:   a.form,
+		XX:      a.x,
+		XY:      a.y,
+		XS:      a.s,
+		FormY:   b.form,
+		YX:      b.x,
+		YY:      b.y,
+		YS:      b.s,
+		KindX:   vx.Kind().String(),
+		KindY:   vy.Kind().String(),
+		ExactX:  vx.ExactString(),
+		ExactY:  vy.ExactString(),
+		Compare: constCmp(vx, vy),
+	}, nil
+}
+
+func floatCmpCorpus() []fcmpSrc {
+	var out []fcmpSrc
+	for _, x := range []int64{0, 1, -1, 2, 3, -3, 42, math.MaxInt64, math.MinInt64} {
+		out = append(out, fcmpSrc{"int", strconv.FormatInt(x, 10), "0", "0"})
+	}
+	for _, p := range [][2]int64{
+		{1, 2}, {1, 3}, {2, 3}, {-1, 2}, {1, -2}, {2, 4}, {2, 1}, {0, 5},
+		{3, 1}, {22, 7}, {-22, 7}, {1, -3},
+		{math.MaxInt64, 2}, {1, math.MaxInt64}, {math.MinInt64, 2},
+		{math.MaxInt64, math.MaxInt64}, {-1, math.MaxInt64},
+	} {
+		out = append(out, fcmpSrc{"quo", strconv.FormatInt(p[0], 10), strconv.FormatInt(p[1], 10), "0"})
+	}
+	for _, s := range []uint{1, 53, 64} {
+		out = append(out, fcmpSrc{"shift-quo", "1", "0", strconv.FormatUint(uint64(s), 10)})
+		out = append(out, fcmpSrc{"shift-quo", "-1", "0", strconv.FormatUint(uint64(s), 10)})
+	}
+	return out
+}
+
+func dumpConstantFloatCompare(w io.Writer) {
+	packet := ConstFCmpPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-float-compare",
+	}
+	corpus := floatCmpCorpus()
+	for i, a := range corpus {
+		for j, b := range corpus {
+			c, err := evalFloatCmp(a, b)
+			if err != nil {
+				fail(err)
+			}
+			c.ID = fmt.Sprintf("go-fcmp-%d-%d", i, j)
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantFloatCompare(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstFCmpPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-float-compare" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-float-compare packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		got, err := evalFloatCmp(
+			fcmpSrc{c.FormX, c.XX, c.XY, c.XS},
+			fcmpSrc{c.FormY, c.YX, c.YY, c.YS},
+		)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.KindX != c.KindX || got.KindY != c.KindY || got.ExactX != c.ExactX || got.ExactY != c.ExactY || got.Compare != c.Compare {
+			fail(fmt.Errorf("mismatch case %d id=%s: go kind=(%s,%s) exact=(%s,%s) compare=%d got kind=(%s,%s) exact=(%s,%s) compare=%d",
+				i, c.ID, got.KindX, got.KindY, got.ExactX, got.ExactY, got.Compare,
+				c.KindX, c.KindY, c.ExactX, c.ExactY, c.Compare))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-float-compare cases\n", len(packet.Cases))
+}

@@ -385,6 +385,102 @@ test('JS StringVal/Float64Val extras → native computes → Go verifies; corrup
   })).status, 0);
 });
 
+function makeCmpVal(form, x, y, s) {
+  if (form === 'int') return constMakeInt64(BigInt(x));
+  if (form === 'quo') return constBinaryOp(TOKEN.QUO, constMakeInt64(BigInt(x)), constMakeInt64(BigInt(y)));
+  if (form === 'shift-quo') {
+    return constBinaryOp(
+      TOKEN.QUO,
+      constMakeInt64(BigInt(x)),
+      constShift(TOKEN.SHL, constMakeInt64(1n), BigInt(s)),
+    );
+  }
+  throw new Error(`unknown form ${form}`);
+}
+
+function evaluateFCmp(c) {
+  const vx = makeCmpVal(c.formX, c.xx, c.xy, c.xs);
+  const vy = makeCmpVal(c.formY, c.yx, c.yy, c.ys);
+  return {
+    ...c,
+    kindX: vx.kind,
+    kindY: vy.kind,
+    exactX: vx.toString(),
+    exactY: vy.toString(),
+    compare: constCompare(vx, vy),
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant Float constCompare fixtures; native matches every case', () => {
+  const generated = go(['-constant-float-compare']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-float-compare-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go Float constCompare fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-float-compare');
+  assert.ok(fixture.cases.length >= 32 * 32, `too few cases: ${fixture.cases.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateFCmp(c);
+    assert.equal(got.kindX, c.kindX, `${c.id} kindX`);
+    assert.equal(got.kindY, c.kindY, `${c.id} kindY`);
+    assert.equal(got.exactX, c.exactX, `${c.id} exactX`);
+    assert.equal(got.exactY, c.exactY, `${c.id} exactY`);
+    assert.equal(got.compare, c.compare, `${c.id} compare`);
+  }
+});
+
+test('JS Float constCompare extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { form: 'int', x: '0', y: '0', s: '0' },
+    { form: 'int', x: '1', y: '0', s: '0' },
+    { form: 'int', x: '-1', y: '0', s: '0' },
+    { form: 'quo', x: '1', y: '2', s: '0' },
+    { form: 'quo', x: '2', y: '4', s: '0' },
+    { form: 'quo', x: '-1', y: '2', s: '0' },
+    { form: 'quo', x: '22', y: '7', s: '0' },
+    { form: 'shift-quo', x: '1', y: '0', s: '53' },
+  ];
+  const cases = [];
+  for (let i = 0; i < extras.length; i++) {
+    for (let j = 0; j < extras.length; j++) {
+      cases.push(evaluateFCmp({
+        id: `js-fcmp-${i}-${j}`,
+        formX: extras[i].form, xx: extras[i].x, xy: extras[i].y, xs: extras[i].s,
+        formY: extras[j].form, yx: extras[j].x, yy: extras[j].y, ys: extras[j].s,
+      }));
+    }
+  }
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-float-compare', cases };
+  const verified = go(['-verify-constant-float-compare'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 64 gotool constant-float-compare cases/);
+  const broken = structuredClone(packet);
+  broken.cases[1].compare = 99;
+  const rejected = go(['-verify-constant-float-compare'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 1/);
+  assert.notEqual(go(['-verify-constant-float-compare'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-float-compare', cases: [],
+  })).status, 0);
+});
+
+test('constCompare Float vs Int uses exact Rat; 2/4 ≡ 1/2; Unknown still throws', () => {
+  const half = constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n));
+  const twoOverFour = constBinaryOp(TOKEN.QUO, constMakeInt64(2n), constMakeInt64(4n));
+  const one = constMakeInt64(1n);
+  const two = constMakeInt64(2n);
+  assert.equal(half.kind, 'Float');
+  assert.equal(constCompare(half, twoOverFour), 0);
+  assert.equal(constCompare(twoOverFour, half), 0);
+  assert.equal(constCompare(half, one), -1);
+  assert.equal(constCompare(one, half), 1);
+  assert.equal(constCompare(constBinaryOp(TOKEN.QUO, two, one), two), 0);
+  const unk = constBinaryOp(TOKEN.QUO, one, constMakeInt64(0n));
+  assert.throws(() => constCompare(unk, one), /Unknown/);
+  assert.throws(() => constCompare(half, unk), /Unknown/);
+});
+
 test('constToString Int/Float is not StringVal; Unknown is empty+ok; Float64Val signed zero', () => {
   const one = constMakeInt64(1n);
   const z = constMakeInt64(0n);

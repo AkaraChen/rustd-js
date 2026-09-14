@@ -5,14 +5,16 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 11 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 12 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
 / `constBinaryOp` / `constUnaryOp` / `constShift` vs Go `MakeInt64` /
 `Int64Val` / `Compare` / `Sign` / `BitLen` / `BinaryOp` including AND_NOT /
-`UnaryOp` ADD/SUB/XOR / `Shift` SHL/SHR) and Int/Float `constToString` /
-`constFloat64Val` vs Go `StringVal` / `Float64Val`.
+`UnaryOp` ADD/SUB/XOR / `Shift` SHL/SHR), Int/Float `constToString` /
+`constFloat64Val` vs Go `StringVal` / `Float64Val`, and Int/Float
+`constCompare` vs Go `Compare` (`big.Rat.Cmp`, including mixed Int vs QUO
+Float).
 `go/format` / `gofmt`, Complex/`MakeFromLiteral`/Bool/String, and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
@@ -27,6 +29,7 @@ import {
 versionLang('go1.21rc2'); // "go1.21"
 constMakeInt64(-42n).kind; // "Int"
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
+constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
 constToInt(constMakeInt64(1n)); // [1n, true]
 constToString(constMakeInt64(1n)); // ["", false] — Int is not a Go string constant
 constFloat64Val(constMakeInt64(1n)); // [1, true]
@@ -101,16 +104,18 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `Float64Val` (IEEE bits + exact flag; Unknown is `[0, false]`).
   `GoConstValue#toString` is decimal for Int and `ExactString` (`n` or
   `n/d`) for Float from QUO, not Go's 512-bit `String()` approximation.
-  QUO/REM by zero returns `Unknown` instead of panicking. `constCompare` /
-  `constBitLen` throw on non-Int. Float+Float compare, Complex, `MakeFromLiteral`,
-  and Bool/String stay later.
+  QUO/REM by zero returns `Unknown` instead of panicking. `constCompare` is
+  Go `Compare` for Int/Float (`match` to `big.Rat` then `Cmp`): mixed Int vs
+  Float is allowed; `2/4` equals `1/2`. Unknown still throws. `constBitLen`
+  throws on non-Int. Float BinaryOp, Complex, `MakeFromLiteral`, and
+  Bool/String stay later.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **743,080 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **746,400 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 743080 Sep 14 22:36 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 746400 Sep 14 22:47 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```
