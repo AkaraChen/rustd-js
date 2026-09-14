@@ -2,9 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as api from '../index.mjs';
 
-test('multipart reader still later; writer WriteField/CreateFormField is in (checkpoint 11)', () => {
+test('multipart nextPart is in; 1-byte feed and ReadForm later (checkpoint 12)', () => {
   assert.equal(typeof api.MultipartWriter, 'function');
-  for (const name of ['MultipartReader', 'fileContentDisposition', 'MessageTooLargeError']) {
+  assert.equal(typeof api.MultipartReader, 'function');
+  assert.equal(typeof api.MultipartPart, 'function');
+  for (const name of ['fileContentDisposition', 'MessageTooLargeError', 'readForm']) {
     assert.equal(api[name], undefined, name);
   }
   assert.equal(typeof api.canonicalMIMEHeaderKey, 'function');

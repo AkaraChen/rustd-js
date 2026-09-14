@@ -18,7 +18,16 @@ pub fn canonical_mime_header_key(s: &str) -> String {
     s.to_string()
 }
 
-fn canonical_mime_header_key_bytes(a: &[u8]) -> (String, bool) {
+pub(crate) fn canonical_mime_header_key_ok(a: &[u8]) -> Option<String> {
+    let (s, ok) = canonical_mime_header_key_bytes(a);
+    if ok {
+        Some(s)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn canonical_mime_header_key_bytes(a: &[u8]) -> (String, bool) {
     if a.is_empty() {
         return (String::new(), false);
     }

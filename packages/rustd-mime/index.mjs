@@ -5,5 +5,5 @@ export const {
   quotedPrintableEncode, quotedPrintableDecode, QuotedPrintableReader, QuotedPrintableWriter,
   encodeWord, MimeWordDecoder,
   canonicalMIMEHeaderKey, mimeHeaderGet, mimeHeaderValues, mimeHeaderSet, mimeHeaderAdd, mimeHeaderDel,
-  MultipartWriter,
+  MultipartWriter, MultipartReader, MultipartPart,
 } = api;

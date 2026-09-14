@@ -1,7 +1,6 @@
 //! Go `mime/multipart.Writer` (Go 1.24 `writer.go`).
 //!
-//! This slice is CreateFormField / WriteField / Close only. No reader, no
-//! ReadForm limits, no CreateFormFile.
+//! This slice is CreateFormField / WriteField / Close only. No CreateFormFile.
 
 use getrandom::getrandom;
 
