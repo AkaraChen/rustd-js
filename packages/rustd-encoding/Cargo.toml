@@ -1,0 +1,24 @@
+[package]
+name = "rustd-encoding"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+serde_json = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", default-features = false, features = ["std"] }
+base64-simd = "0.8.0"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
