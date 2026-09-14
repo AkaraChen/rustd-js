@@ -5,6 +5,14 @@ const zip = zipCreate([{ name: 'a.txt', data: new Uint8Array([1]), method: 8 }])
 const zipEntries = zipExtract(zip);
 const zipMethod: 0 | 8 = zipEntries[0]!.method;
 void zipMethod;
+const zipComment: string | undefined = zipEntries[0]!.comment;
+void zipComment;
+// @ts-expect-error ZipEntry has no extra field (do not invent FileHeader.Extra).
+const zipExtra = zipEntries[0]!.extra;
+void zipExtra;
+// @ts-expect-error zipExtract returns ZipEntry[]; no archive-level comment.
+const archiveComment = zipExtract(zip).archiveComment;
+void archiveComment;
 const err: TarFormatError = new TarFormatError('archive/tar: invalid tar header');
 const offset: number = err.offset;
 const reader = new ZipReader();
