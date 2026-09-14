@@ -109,33 +109,71 @@ func dumpRing(r *ring.Ring) []any {
 	return out
 }
 
-func generate() packet {
+func saInputs() [][]byte {
 	inputs := [][]byte{
 		{},
 		[]byte{0},
 		[]byte("a"),
 		[]byte("aa"),
 		[]byte("aaa"),
+		[]byte("aaaaaa"),
 		[]byte("banana"),
 		[]byte("mississippi"),
 		[]byte("abcabxabcd"),
 		[]byte("the quick brown fox"),
 		[]byte("你好世界"),
+		[]byte("😀éñΩж"),
 		bytes.Repeat([]byte("a"), 64),
 		bytes.Repeat([]byte("ab"), 32),
 		{0, 1, 2, 255, 0, 1},
 		[]byte("DNAACGTACGTACGTAAAA"),
 	}
-	for i := 0; i < 200; i++ {
-		b := make([]byte, 8+(i%40))
-		for j := range b {
-			b[j] = byte(i*13 + j*7)
+	for b := 0; b < 256; b++ {
+		inputs = append(inputs, []byte{byte(b)})
+	}
+	dna := []byte("ACGT")
+	for i := 0; i < 120; i++ {
+		n := 8 + (i % 72)
+		buf := make([]byte, n)
+		for j := range buf {
+			buf[j] = dna[(i*7+j*3)%4]
 		}
-		inputs = append(inputs, b)
+		inputs = append(inputs, buf)
 	}
-	for n := 1; n <= 32; n++ {
-		inputs = append(inputs, bytes.Repeat([]byte{byte(n)}, n))
+	glyphs := []string{"你", "好", "世界", "😀", "é", "ñ", "Ω", "ж"}
+	for i := 0; i < 80; i++ {
+		var buf bytes.Buffer
+		for j := 0; j < 1+(i%8); j++ {
+			buf.WriteString(glyphs[(i+j)%len(glyphs)])
+		}
+		inputs = append(inputs, buf.Bytes())
 	}
+	for n := 1; n <= 96; n++ {
+		inputs = append(inputs, bytes.Repeat([]byte{byte('a' + n%26)}, n))
+	}
+	for i := 0; i < 280; i++ {
+		n := 8 + (i % 48)
+		buf := make([]byte, n)
+		x := uint32(i*2654435761 + 1)
+		for j := range buf {
+			x = x*1664525 + 1013904223
+			buf[j] = byte(x >> 24)
+		}
+		inputs = append(inputs, buf)
+	}
+	patterns := [][]byte{[]byte("ab"), []byte("abc"), []byte("banana"), {0, 1}, []byte("aa")}
+	for i := 0; i < 120; i++ {
+		p := patterns[i%len(patterns)]
+		inputs = append(inputs, bytes.Repeat(p, 2+(i%16)))
+	}
+	for i := 0; i < 64; i++ {
+		inputs = append(inputs, []byte{byte(i), byte(255 - i)})
+	}
+	return inputs
+}
+
+func generate() packet {
+	inputs := saInputs()
 
 	saCases := make([]saCase, 0, len(inputs))
 	queries := [][]byte{[]byte("a"), []byte("an"), []byte("na"), []byte("aa"), {0}, []byte("世界"), []byte("xyz")}

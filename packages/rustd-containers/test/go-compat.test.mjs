@@ -129,7 +129,14 @@ test('Go generates suffixarray/heap/list/ring fixtures; native and JS match', ()
   assert.equal(generated.status, 0, generated.stderr);
   writeFileSync(fixturePath, generated.stdout);
   const fixture = JSON.parse(generated.stdout);
-  assert.ok(fixture.suffixarray.length >= 200, fixture.suffixarray.length);
+  assert.ok(fixture.suffixarray.length >= 1000, fixture.suffixarray.length);
+  const empty = fixture.suffixarray.find((c) => c.dataHex === '');
+  assert.ok(empty, 'empty data Write fixture');
+  const emptyRestored = SuffixArray.read(Buffer.from(empty.writeHex, 'hex'));
+  assert.equal(emptyRestored.length, 0);
+  assert.equal(Buffer.from(emptyRestored.write()).toString('hex'), empty.writeHex);
+  emptyRestored.dispose();
+  let truncated = false;
   for (const c of fixture.suffixarray) {
     const ix = saFrom(c.dataHex);
     assert.equal(Buffer.from(ix.write()).toString('hex'), c.writeHex, c.name);
@@ -139,9 +146,19 @@ test('Go generates suffixarray/heap/list/ring fixtures; native and JS match', ()
       const hits = [...ix.lookup(Buffer.from(look.queryHex, 'hex'), look.n)];
       assert.deepEqual(hits, look.hits, `${c.name} lookup ${look.queryHex} n=${look.n}`);
     }
+    if (!truncated) {
+      const all = c.lookups.find((l) => l.n === -1 && l.hits.length > 2);
+      const one = all && c.lookups.find((l) => l.queryHex === all.queryHex && l.n === 1);
+      if (all && one) {
+        assert.equal(one.hits.length, 1, `${c.name} Lookup n=1 truncates`);
+        assert.deepEqual(one.hits, all.hits.slice(0, 1), `${c.name} Lookup n=1 prefix`);
+        truncated = true;
+      }
+    }
     ix.dispose();
     restored.dispose();
   }
+  assert.ok(truncated, 'need a Lookup where n=1 differs from n=-1');
   let heapOps = 0;
   for (const c of fixture.heap) {
     if (c.ops) {
@@ -205,11 +222,11 @@ test('Go generates suffixarray/heap/list/ring fixtures; native and JS match', ()
 });
 
 test('JS write bytes → Go Read/Lookup verifies', () => {
-  const cases = ['', 'banana', 'mississippi', 'a'.repeat(1024), '你好'].map((text, i) => {
+  const cases = ['', 'banana', 'mississippi', 'a'.repeat(1024), '你好', 'ACGTACGTAAAA'].map((text, i) => {
     const data = Buffer.from(text, 'utf8');
     const ix = SuffixArray.build(data);
     const writeHex = Buffer.from(ix.write()).toString('hex');
-    const lookups = ['a', 'an', 'na', '你'].map(q => ({
+    const lookups = ['a', 'an', 'na', '你', 'AC'].map(q => ({
       queryHex: Buffer.from(q, 'utf8').toString('hex'),
       n: -1,
       hits: [...ix.lookup(Buffer.from(q, 'utf8'), -1)],
@@ -220,7 +237,7 @@ test('JS write bytes → Go Read/Lookup verifies', () => {
   const packet = { version: 1, suffixarray: cases, heap: [], list: [], ring: [] };
   const verified = go(['-verify'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 5 suffixarray cases/);
+  assert.match(verified.stdout, /Go verified 6 suffixarray cases/);
   const broken = structuredClone(packet);
   broken.suffixarray[1].writeHex = '00';
   assert.notEqual(go(['-verify'], JSON.stringify(broken)).status, 0);
