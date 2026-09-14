@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import {
-  Heap, heapInit, heapPush, heapPop, List, Element, newRing, ringFrom, SuffixArray,
+  Heap, heapInit, heapPush, heapPop, List, newRing, ringFrom, SuffixArray,
 } from '../index.mjs';
 
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +22,106 @@ function go(args = [], input) {
 
 function saFrom(hex) {
   return SuffixArray.build(Uint8Array.from(Buffer.from(hex, 'hex')));
+}
+
+function dumpRing(r) {
+  if (!r) return [];
+  const out = [];
+  r.do((value) => out.push(value));
+  return out;
+}
+
+function listAt(list, index) {
+  let e = list.front();
+  for (let i = 0; i < index; i++) e = e.next;
+  return e;
+}
+
+function replayHeapOp(h, op, label) {
+  switch (op.kind) {
+    case 'push':
+      h.push(op.v);
+      break;
+    case 'pop':
+      assert.equal(h.pop(), op.out, label);
+      break;
+    case 'remove':
+      assert.equal(h.remove(op.i), op.out, label);
+      break;
+    case 'fix':
+      h.toArray()[op.i] = op.v;
+      h.fix(op.i);
+      break;
+    default:
+      throw new Error(`${label}: unknown heap op ${op.kind}`);
+  }
+  assert.deepEqual(h.toArray(), op.after, label);
+}
+
+function replayListOp(list, op, label) {
+  switch (op.kind) {
+    case 'pushBack':
+      list.pushBack(op.v);
+      break;
+    case 'pushFront':
+      list.pushFront(op.v);
+      break;
+    case 'removeIndex':
+      assert.equal(list.remove(listAt(list, op.i)), op.out, label);
+      break;
+    case 'removeForeign': {
+      const foreign = new List().pushBack(op.v);
+      assert.equal(list.remove(foreign), op.out, label);
+      break;
+    }
+    case 'pushBackList': {
+      const other = new List();
+      for (const v of op.other) other.pushBack(v);
+      list.pushBackList(other);
+      assert.deepEqual(other.toArray(), op.afterOther, `${label} other`);
+      break;
+    }
+    case 'pushFrontList': {
+      const other = new List();
+      for (const v of op.other) other.pushBack(v);
+      list.pushFrontList(other);
+      assert.deepEqual(other.toArray(), op.afterOther, `${label} other`);
+      break;
+    }
+    case 'moveToFront':
+      list.moveToFront(listAt(list, op.i));
+      break;
+    case 'moveToBack':
+      list.moveToBack(listAt(list, op.i));
+      break;
+    case 'insertBefore':
+      list.insertBefore(op.v, listAt(list, op.mark));
+      break;
+    case 'insertAfter':
+      list.insertAfter(op.v, listAt(list, op.mark));
+      break;
+    default:
+      throw new Error(`${label}: unknown list op ${op.kind}`);
+  }
+  assert.deepEqual(list.toArray(), op.after, label);
+}
+
+function replayRing(c) {
+  if (c.n <= 0) {
+    const r = newRing(0);
+    let n = 0;
+    r.do(() => { n++; });
+    assert.equal(n, c.doCalls ?? 0, c.name);
+    assert.equal(r.len(), 0, c.name);
+    assert.deepEqual(dumpRing(r), [], c.name);
+    return;
+  }
+  const r = ringFrom(c.values);
+  const moved = r.move(c.move);
+  const took = r.unlink(c.unlink);
+  assert.deepEqual(dumpRing(moved), c.moved, `${c.name} moved`);
+  assert.deepEqual(dumpRing(r), c.left, `${c.name} left`);
+  assert.deepEqual(dumpRing(took), c.took, `${c.name} took`);
 }
 
 test('Go generates suffixarray/heap/list/ring fixtures; native and JS match', () => {
@@ -42,11 +142,19 @@ test('Go generates suffixarray/heap/list/ring fixtures; native and JS match', ()
     ix.dispose();
     restored.dispose();
   }
+  let heapOps = 0;
   for (const c of fixture.heap) {
+    if (c.ops) {
+      const replay = new Heap((a, b) => a - b);
+      for (const [i, op] of c.ops.entries()) {
+        replayHeapOp(replay, op, `${c.name}#${i}`);
+        heapOps++;
+      }
+      continue;
+    }
     const h = new Heap((a, b) => a - b, c.pushes);
     const pops = [h.pop(), h.pop()];
     // The Go fixture pops once, pushes 0, pops again, removes index 1, then Fix(0) after setting 7.
-    // Rebuild the documented after-state by replaying with the same comparator.
     const replay = new Heap((a, b) => a - b, c.pushes);
     const gotPops = [heapPop(replay)];
     heapPush(replay, 0);
@@ -59,16 +167,40 @@ test('Go generates suffixarray/heap/list/ring fixtures; native and JS match', ()
     heapInit(h);
     assert.ok(pops.length === 2);
   }
+  assert.ok(heapOps >= 400, `heap ops ${heapOps}`);
+
+  const emptyHeap = new Heap((a, b) => a - b);
+  assert.equal(emptyHeap.pop(), undefined);
+  assert.equal(emptyHeap.peek(), undefined);
+
+  let listOps = 0;
   for (const c of fixture.list) {
+    if (c.ops) {
+      const replay = new List();
+      for (const [i, op] of c.ops.entries()) {
+        replayListOp(replay, op, `${c.name}#${i}`);
+        listOps++;
+      }
+      continue;
+    }
     const a = new List();
     const b = new List();
     for (const v of c.a) a.pushBack(v);
     for (const v of c.b) b.pushBack(v);
-    const foreign = new List().pushBack(c.removeVal);
-    assert.equal(a.remove(foreign), c.removeOut);
-    a.pushBackList(b);
-    assert.deepEqual(a.toArray(), c.afterA);
-    assert.deepEqual(b.toArray(), c.afterB);
+    if (c.removeVal !== undefined) {
+      const foreign = new List().pushBack(c.removeVal);
+      assert.equal(a.remove(foreign), c.removeOut);
+    }
+    if (c.join === 'front') a.pushFrontList(b);
+    else a.pushBackList(b);
+    assert.deepEqual(a.toArray(), c.afterA, c.name);
+    assert.deepEqual(b.toArray(), c.afterB, c.name);
+  }
+  assert.ok(listOps >= 80, `list ops ${listOps}`);
+
+  assert.ok(fixture.ring.length >= 8, fixture.ring.length);
+  for (const c of fixture.ring) {
+    replayRing(c);
   }
 });
 

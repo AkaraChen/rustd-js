@@ -27,32 +27,55 @@ type saCase struct {
 	Looks []lookupCase `json:"lookups"`
 }
 
+type heapOp struct {
+	Kind  string `json:"kind"`
+	V     *int   `json:"v,omitempty"`
+	I     *int   `json:"i,omitempty"`
+	Out   *int   `json:"out,omitempty"`
+	After []int  `json:"after"`
+}
+
 type heapCase struct {
-	Name   string `json:"name"`
-	Pushes []int  `json:"pushes"`
-	Pops   []int  `json:"pops"`
-	After  []int  `json:"after"`
+	Name   string   `json:"name"`
+	Pushes []int    `json:"pushes,omitempty"`
+	Pops   []int    `json:"pops,omitempty"`
+	After  []int    `json:"after,omitempty"`
+	Ops    []heapOp `json:"ops,omitempty"`
+}
+
+type listOp struct {
+	Kind       string `json:"kind"`
+	V          *int   `json:"v,omitempty"`
+	I          *int   `json:"i,omitempty"`
+	Mark       *int   `json:"mark,omitempty"`
+	Other      []int  `json:"other,omitempty"`
+	Out        *int   `json:"out,omitempty"`
+	After      []int  `json:"after"`
+	AfterOther []int  `json:"afterOther,omitempty"`
 }
 
 type listCase struct {
-	Name      string `json:"name"`
-	A         []int  `json:"a"`
-	B         []int  `json:"b"`
-	AfterA    []int  `json:"afterA"`
-	AfterB    []int  `json:"afterB"`
-	RemoveVal int    `json:"removeVal"`
-	RemoveOut int    `json:"removeOut"`
+	Name      string   `json:"name"`
+	A         []int    `json:"a,omitempty"`
+	B         []int    `json:"b,omitempty"`
+	AfterA    []int    `json:"afterA,omitempty"`
+	AfterB    []int    `json:"afterB,omitempty"`
+	RemoveVal int      `json:"removeVal,omitempty"`
+	RemoveOut int      `json:"removeOut,omitempty"`
+	Join      string   `json:"join,omitempty"`
+	Ops       []listOp `json:"ops,omitempty"`
 }
 
 type ringCase struct {
-	Name   string `json:"name"`
-	N      int    `json:"n"`
-	Move   int    `json:"move"`
-	Values []any  `json:"values"`
-	Moved  []any  `json:"moved"`
-	Unlink int    `json:"unlink"`
-	Left   []any  `json:"left"`
-	Took   []any  `json:"took"`
+	Name    string `json:"name"`
+	N       int    `json:"n"`
+	Move    int    `json:"move"`
+	Values  []any  `json:"values"`
+	Moved   []any  `json:"moved"`
+	Unlink  int    `json:"unlink"`
+	Left    []any  `json:"left"`
+	Took    []any  `json:"took"`
+	DoCalls *int   `json:"doCalls,omitempty"`
 }
 
 type packet struct {
@@ -155,6 +178,9 @@ func generate() packet {
 		Pops:   pops,
 		After:  after,
 	}}
+	for _, seed := range []uint32{1, 7, 99} {
+		heapCases = append(heapCases, makeHeapSeq(fmt.Sprintf("seq-%d", seed), seed, 400))
+	}
 
 	a := list.New()
 	b := list.New()
@@ -167,58 +193,255 @@ func generate() packet {
 	foreign := list.New().PushBack(99)
 	removed := a.Remove(foreign)
 	a.PushBackList(b)
-	listCases := []listCase{{
-		Name:      "copy-back",
-		A:         []int{1, 2, 3},
-		B:         []int{4, 5},
-		AfterA:    dumpList(a),
-		AfterB:    dumpList(b),
-		RemoveVal: 99,
-		RemoveOut: removed.(int),
-	}}
+	frontA := list.New()
+	frontB := list.New()
+	for _, v := range []int{10, 20} {
+		frontA.PushBack(v)
+	}
+	for _, v := range []int{30, 40, 50} {
+		frontB.PushBack(v)
+	}
+	frontA.PushFrontList(frontB)
+	listCases := []listCase{
+		{
+			Name:      "copy-back",
+			A:         []int{1, 2, 3},
+			B:         []int{4, 5},
+			AfterA:    dumpList(a),
+			AfterB:    dumpList(b),
+			RemoveVal: 99,
+			RemoveOut: removed.(int),
+		},
+		{
+			Name:   "copy-front",
+			A:      []int{10, 20},
+			B:      []int{30, 40, 50},
+			AfterA: dumpList(frontA),
+			AfterB: dumpList(frontB),
+			Join:   "front",
+		},
+		makeListSeq("seq-1", 1, 80),
+		makeListSeq("seq-2", 2, 80),
+	}
 
-	r := ring.New(3)
-	vals := []any{"x", "y", "z"}
+	ringCases := []ringCase{
+		makeRingCase("move-unlink", []any{"x", "y", "z"}, 2, 1),
+		makeRingCase("unlink-len", []any{1, 2, 3}, 0, 3),
+		makeRingCase("unlink-0", []any{1, 2, 3}, 0, 0),
+		makeRingCase("move-0", []any{"a", "b", "c"}, 0, 1),
+		makeRingCase("move-len", []any{"a", "b", "c"}, 3, 1),
+		makeRingCase("move-neg-len", []any{"a", "b", "c"}, -3, 1),
+		makeRingCase("move-len-plus-1", []any{"a", "b", "c"}, 4, 1),
+		makeRingCase("unlink-neg", []any{7, 8}, 0, -1),
+	}
+	zero := 0
+	ringCases = append(ringCases, ringCase{
+		Name:    "empty",
+		N:       0,
+		Values:  []any{},
+		Moved:   []any{},
+		Left:    []any{},
+		Took:    []any{},
+		DoCalls: &zero,
+	})
+
+	return packet{Version: 1, SA: saCases, Heap: heapCases, List: listCases, Ring: ringCases}
+}
+
+func intptr(v int) *int { return &v }
+
+func dumpHeap(h *intHeap) []int {
+	out := make([]int, len(*h))
+	copy(out, *h)
+	return out
+}
+
+func makeHeapSeq(name string, seed uint32, n int) heapCase {
+	h := &intHeap{}
+	heap.Init(h)
+	ops := make([]heapOp, 0, n)
+	rng := seed
+	next := func() int {
+		rng = rng*1664525 + 1013904223
+		return int(rng)
+	}
+	for i := 0; i < n; i++ {
+		r := next() % 10
+		if r < 0 {
+			r = -r
+		}
+		switch {
+		case h.Len() == 0 || r < 4:
+			v := next() % 1000
+			if v < 0 {
+				v = -v
+			}
+			heap.Push(h, v)
+			ops = append(ops, heapOp{Kind: "push", V: intptr(v), After: dumpHeap(h)})
+		case r < 7:
+			out := heap.Pop(h).(int)
+			ops = append(ops, heapOp{Kind: "pop", Out: &out, After: dumpHeap(h)})
+		case r < 8 && h.Len() > 0:
+			idx := next() % h.Len()
+			if idx < 0 {
+				idx = -idx
+			}
+			out := heap.Remove(h, idx).(int)
+			ops = append(ops, heapOp{Kind: "remove", I: intptr(idx), Out: &out, After: dumpHeap(h)})
+		default:
+			idx := next() % h.Len()
+			if idx < 0 {
+				idx = -idx
+			}
+			v := next() % 1000
+			if v < 0 {
+				v = -v
+			}
+			(*h)[idx] = v
+			heap.Fix(h, idx)
+			ops = append(ops, heapOp{Kind: "fix", I: intptr(idx), V: intptr(v), After: dumpHeap(h)})
+		}
+	}
+	return heapCase{Name: name, Ops: ops}
+}
+
+func listAt(l *list.List, i int) *list.Element {
+	e := l.Front()
+	for j := 0; j < i && e != nil; j++ {
+		e = e.Next()
+	}
+	return e
+}
+
+func makeListSeq(name string, seed uint32, n int) listCase {
+	l := list.New()
+	ops := make([]listOp, 0, n)
+	rng := seed
+	next := func() int {
+		rng = rng*1664525 + 1013904223
+		return int(rng)
+	}
+	pos := func(mod int) int {
+		if mod <= 0 {
+			return 0
+		}
+		v := next() % mod
+		if v < 0 {
+			v = -v
+		}
+		return v
+	}
+	val := func() int {
+		v := next() % 1000
+		if v < 0 {
+			v = -v
+		}
+		return v
+	}
+	for i := 0; i < n; i++ {
+		r := pos(10)
+		switch {
+		case l.Len() == 0 || r < 3:
+			v := val()
+			if r%2 == 0 {
+				l.PushBack(v)
+				ops = append(ops, listOp{Kind: "pushBack", V: intptr(v), After: dumpList(l)})
+			} else {
+				l.PushFront(v)
+				ops = append(ops, listOp{Kind: "pushFront", V: intptr(v), After: dumpList(l)})
+			}
+		case r == 3 && l.Len() > 0:
+			idx := pos(l.Len())
+			out := l.Remove(listAt(l, idx)).(int)
+			ops = append(ops, listOp{Kind: "removeIndex", I: intptr(idx), Out: &out, After: dumpList(l)})
+		case r == 4:
+			v := val()
+			foreign := list.New().PushBack(v)
+			out := l.Remove(foreign).(int)
+			ops = append(ops, listOp{Kind: "removeForeign", V: intptr(v), Out: &out, After: dumpList(l)})
+		case r == 5:
+			otherVals := []int{val(), val()}
+			other := list.New()
+			for _, v := range otherVals {
+				other.PushBack(v)
+			}
+			l.PushBackList(other)
+			ops = append(ops, listOp{Kind: "pushBackList", Other: otherVals, After: dumpList(l), AfterOther: dumpList(other)})
+		case r == 6:
+			otherVals := []int{val(), val()}
+			other := list.New()
+			for _, v := range otherVals {
+				other.PushBack(v)
+			}
+			l.PushFrontList(other)
+			ops = append(ops, listOp{Kind: "pushFrontList", Other: otherVals, After: dumpList(l), AfterOther: dumpList(other)})
+		case r == 7 && l.Len() > 0:
+			idx := pos(l.Len())
+			l.MoveToFront(listAt(l, idx))
+			ops = append(ops, listOp{Kind: "moveToFront", I: intptr(idx), After: dumpList(l)})
+		case r == 8 && l.Len() > 0:
+			idx := pos(l.Len())
+			l.MoveToBack(listAt(l, idx))
+			ops = append(ops, listOp{Kind: "moveToBack", I: intptr(idx), After: dumpList(l)})
+		default:
+			if l.Len() == 0 {
+				v := val()
+				l.PushBack(v)
+				ops = append(ops, listOp{Kind: "pushBack", V: intptr(v), After: dumpList(l)})
+				continue
+			}
+			mark := pos(l.Len())
+			v := val()
+			if r%2 == 0 {
+				l.InsertBefore(v, listAt(l, mark))
+				ops = append(ops, listOp{Kind: "insertBefore", V: intptr(v), Mark: intptr(mark), After: dumpList(l)})
+			} else {
+				l.InsertAfter(v, listAt(l, mark))
+				ops = append(ops, listOp{Kind: "insertAfter", V: intptr(v), Mark: intptr(mark), After: dumpList(l)})
+			}
+		}
+	}
+	return listCase{Name: name, Ops: ops}
+}
+
+func fillRing(values []any) *ring.Ring {
+	if len(values) == 0 {
+		return ring.New(0)
+	}
+	r := ring.New(len(values))
 	p := r
-	for i, v := range vals {
+	for i, v := range values {
 		p.Value = v
-		if i < len(vals)-1 {
+		if i < len(values)-1 {
 			p = p.Next()
 		}
 	}
-	moved := r.Move(2)
-	took := r.Unlink(1)
-	ringCases := []ringCase{{
-		Name:   "move-unlink",
-		N:      3,
-		Move:   2,
-		Values: vals,
+	return r
+}
+
+func makeRingCase(name string, values []any, move, unlink int) ringCase {
+	r := fillRing(values)
+	moved := r.Move(move)
+	took := r.Unlink(unlink)
+	return ringCase{
+		Name:   name,
+		N:      len(values),
+		Move:   move,
+		Values: values,
 		Moved:  dumpRing(moved),
-		Unlink: 1,
+		Unlink: unlink,
 		Left:   dumpRing(r),
 		Took:   dumpRing(took),
-	}, {
-		Name:   "unlink-len",
-		N:      3,
-		Move:   0,
-		Values: []any{1, 2, 3},
-		Moved:  []any{1, 2, 3},
-		Unlink: 3,
-		Left:   []any{1, 2, 3},
-		Took:   dumpRing(func() *ring.Ring {
-			rr := ring.New(3)
-			rr.Value, rr.Next().Value, rr.Next().Next().Value = 1, 2, 3
-			return rr.Unlink(3)
-		}()),
-	}}
-
-	return packet{Version: 1, SA: saCases, Heap: heapCases, List: listCases, Ring: ringCases}
+	}
 }
 
 func dumpList(l *list.List) []int {
 	out := make([]int, 0, l.Len())
 	for e := l.Front(); e != nil; e = e.Next() {
 		out = append(out, e.Value.(int))
+	}
+	if out == nil {
+		out = []int{}
 	}
 	return out
 }
