@@ -1,0 +1,22 @@
+{
+  "name": "rustd-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node scripts/workspace.mjs build",
+    "typecheck": "tsc --noEmit && node scripts/workspace.mjs typecheck",
+    "test": "node --test scripts/test/*.test.mjs && node scripts/workspace.mjs test",
+    "test:go": "node scripts/compare-with-go.ts",
+    "check:size": "node scripts/check-size.mjs",
+    "test:pack": "node scripts/pack-smoke.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.9.1",
+    "@types/node": "24.13.4",
+    "typescript": "7.0.2"
+  },
+  "type": "module"
+}

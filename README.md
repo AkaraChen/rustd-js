@@ -29,3 +29,21 @@
 - ❌ 完全没有 —— 没有任何东西能承担，从零做
 
 `scope/` 是对照 ECMA-429 得出的结论，不是对 Go 标准库的评论。
+
+## Native extension development
+
+Use Node 24, pnpm 11.20.0, Rust 1.97.1 and Go 1.24.13 (`mise exec -- go`).
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm typecheck
+pnpm test
+pnpm test:go
+pnpm check:size
+pnpm test:pack
+```
+
+The initial workspace includes a private native transport template and real Go
+fixture tooling. Public package implementations are tracked separately in the
+GitHub sub-issues. See [package conventions](docs/CONVENTIONS.md).
