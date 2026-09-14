@@ -618,6 +618,108 @@ func generateCompile() Packet {
 	return Packet{Schema: 1, Package: "regexsyntax-compile", Cases: cases}
 }
 
+type EmptyOpCase struct {
+	ID      string `json:"id"`
+	R1      int32  `json:"r1"`
+	R2      int32  `json:"r2"`
+	Context uint8  `json:"context"`
+	Word1   bool   `json:"word1"`
+	Word2   bool   `json:"word2"`
+}
+
+type WordCase struct {
+	ID   string `json:"id"`
+	R    int32  `json:"r"`
+	Word bool   `json:"word"`
+}
+
+type EmptyOpPacket struct {
+	Schema  int           `json:"schema"`
+	Package string        `json:"package"`
+	Pairs   []EmptyOpCase `json:"pairs"`
+	Word    []WordCase    `json:"word"`
+}
+
+func uniqueRunes(runes []int32) []int32 {
+	seen := map[int32]bool{}
+	out := make([]int32, 0, len(runes))
+	for _, r := range runes {
+		if seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+func emptyOpPairRunes() []int32 {
+	return uniqueRunes([]int32{
+		-1, -2, 0, '\t', '\n', '\r', ' ', '/', '0', '9', ':', '@', 'A', 'Z', '[',
+		'_', '`', 'a', 'z', '{', 0x7f, 0xe9, 0xff, 0x17f, 0x4e2d, 0x1f600, 0x10ffff,
+	})
+}
+
+func emptyOpWordRunes() []int32 {
+	runes := []int32{-1, -2, 0xe9, 0xff, 0x17f, 0x4e2d, 0x1f600, 0x10ffff}
+	for r := int32(0); r < 128; r++ {
+		runes = append(runes, r)
+	}
+	return uniqueRunes(runes)
+}
+
+func generateEmptyOp() EmptyOpPacket {
+	wordRunes := emptyOpWordRunes()
+	word := make([]WordCase, 0, len(wordRunes))
+	for _, r := range wordRunes {
+		word = append(word, WordCase{
+			ID:   fmt.Sprintf("w_%d", r),
+			R:    r,
+			Word: syntax.IsWordChar(r),
+		})
+	}
+	pairRunes := emptyOpPairRunes()
+	pairs := make([]EmptyOpCase, 0, len(pairRunes)*len(pairRunes))
+	for _, r1 := range pairRunes {
+		for _, r2 := range pairRunes {
+			pairs = append(pairs, EmptyOpCase{
+				ID:      fmt.Sprintf("p_%d_%d", r1, r2),
+				R1:      r1,
+				R2:      r2,
+				Context: uint8(syntax.EmptyOpContext(r1, r2)),
+				Word1:   syntax.IsWordChar(r1),
+				Word2:   syntax.IsWordChar(r2),
+			})
+		}
+	}
+	return EmptyOpPacket{Schema: 1, Package: "regexsyntax-emptyop", Pairs: pairs, Word: word}
+}
+
+func verifyEmptyOp(packet EmptyOpPacket) {
+	if packet.Schema != 1 || packet.Package != "regexsyntax-emptyop" {
+		fail(fmt.Errorf("invalid emptyop packet"))
+	}
+	if len(packet.Word) == 0 || len(packet.Pairs) == 0 {
+		fail(fmt.Errorf("empty emptyop cases"))
+	}
+	for _, c := range packet.Word {
+		got := syntax.IsWordChar(c.R)
+		if got != c.Word {
+			fail(fmt.Errorf("%s: IsWordChar(%d)=%v want %v", c.ID, c.R, got, c.Word))
+		}
+	}
+	for _, c := range packet.Pairs {
+		got := uint8(syntax.EmptyOpContext(c.R1, c.R2))
+		if got != c.Context {
+			fail(fmt.Errorf("%s: EmptyOpContext(%d,%d)=%d want %d", c.ID, c.R1, c.R2, got, c.Context))
+		}
+		if syntax.IsWordChar(c.R1) != c.Word1 || syntax.IsWordChar(c.R2) != c.Word2 {
+			fail(fmt.Errorf("%s: word flags mismatch", c.ID))
+		}
+	}
+	fmt.Printf("Go verified %d emptyop pairs + %d word cases\n", len(packet.Pairs), len(packet.Word))
+}
+
 func verify(packet Packet) {
 	if packet.Schema != 1 || (packet.Package != "regexsyntax" && packet.Package != "regexsyntax-simplify" && packet.Package != "regexsyntax-compile") {
 		fail(fmt.Errorf("invalid packet"))
@@ -689,12 +791,24 @@ func main() {
 	out := flag.String("out", "", "output JSON file")
 	verifyFlag := flag.Bool("verify", false, "verify stdin packet")
 	flag.Parse()
-	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" {
+	if *pkg != "regexsyntax" && *pkg != "regexsyntax-simplify" && *pkg != "regexsyntax-compile" && *pkg != "regexsyntax-emptyop" {
 		fail(fmt.Errorf("unsupported package %q", *pkg))
 	}
 	if *verifyFlag {
+		raw, err := io.ReadAll(io.LimitReader(os.Stdin, 32<<20))
+		if err != nil {
+			fail(err)
+		}
+		if *pkg == "regexsyntax-emptyop" {
+			var packet EmptyOpPacket
+			if err := json.Unmarshal(raw, &packet); err != nil {
+				fail(err)
+			}
+			verifyEmptyOp(packet)
+			return
+		}
 		var packet Packet
-		if err := json.NewDecoder(io.LimitReader(os.Stdin, 32<<20)).Decode(&packet); err != nil {
+		if err := json.Unmarshal(raw, &packet); err != nil {
 			fail(err)
 		}
 		verify(packet)
@@ -708,6 +822,12 @@ func main() {
 		}
 		defer f.Close()
 		enc = json.NewEncoder(f)
+	}
+	if *pkg == "regexsyntax-emptyop" {
+		if err := enc.Encode(generateEmptyOp()); err != nil {
+			fail(err)
+		}
+		return
 	}
 	packet := generate()
 	if *pkg == "regexsyntax-simplify" {

@@ -22,6 +22,39 @@ pub const EMPTY_END_TEXT: u32 = 1 << 3;
 pub const EMPTY_WORD_BOUNDARY: u32 = 1 << 4;
 pub const EMPTY_NO_WORD_BOUNDARY: u32 = 1 << 5;
 
+/// Go `syntax.IsWordChar`: ASCII `[A-Za-z0-9_]` only.
+pub fn is_word_char(r: i32) -> bool {
+    (b'a' as i32 <= r && r <= b'z' as i32)
+        || (b'A' as i32 <= r && r <= b'Z' as i32)
+        || (b'0' as i32 <= r && r <= b'9' as i32)
+        || r == b'_' as i32
+}
+
+/// Go `syntax.EmptyOpContext(r1, r2)`.
+/// `r1 < 0` is beginning of text; `r2 < 0` is end of text.
+pub fn empty_op_context(r1: i32, r2: i32) -> u32 {
+    let mut op = EMPTY_NO_WORD_BOUNDARY;
+    let mut boundary: u8 = 0;
+    if is_word_char(r1) {
+        boundary = 1;
+    } else if r1 == b'\n' as i32 {
+        op |= EMPTY_BEGIN_LINE;
+    } else if r1 < 0 {
+        op |= EMPTY_BEGIN_TEXT | EMPTY_BEGIN_LINE;
+    }
+    if is_word_char(r2) {
+        boundary ^= 1;
+    } else if r2 == b'\n' as i32 {
+        op |= EMPTY_END_LINE;
+    } else if r2 < 0 {
+        op |= EMPTY_END_TEXT | EMPTY_END_LINE;
+    }
+    if boundary != 0 {
+        op ^= EMPTY_WORD_BOUNDARY | EMPTY_NO_WORD_BOUNDARY;
+    }
+    op
+}
+
 #[derive(Clone, Debug)]
 pub struct Inst {
     pub op: u8,

@@ -102,4 +102,6 @@ export class SyntaxRegexp {
 export function syntaxParse(pattern: string, flags: number): SyntaxRegexp;
 export function syntaxSimplify(pattern: string, flags: number): SyntaxRegexp;
 export function syntaxCompile(pattern: string, flags: number): Prog;
+export function emptyOpContext(before: number, after: number): number;
+export function isWordChar(r: number): boolean;
 export function flagsToString(flags: number): string;
