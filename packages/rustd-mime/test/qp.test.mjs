@@ -47,12 +47,56 @@ test('quoted-printable rejects NUL and exposes partial decoded bytes', () => {
   }
 });
 
-test('python quopri decodes native quoted-printable output', () => {
-  const payload = Buffer.from("Now's the time for all folk to come to the aid of their country.");
-  const encoded = Buffer.from(quotedPrintableEncode(payload)).toString();
-  const py = spawnSync('python3', ['-c', 'import sys,quopri; sys.stdout.buffer.write(quopri.decodestring(sys.stdin.buffer.read()))'], {
-    input: Buffer.from(encoded), timeout: 10000,
+function pythonQuopri(mode, input) {
+  const code = mode === 'encode'
+    ? 'import sys,quopri; sys.stdout.buffer.write(quopri.encodestring(sys.stdin.buffer.read()))'
+    : 'import sys,quopri; sys.stdout.buffer.write(quopri.decodestring(sys.stdin.buffer.read()))';
+  const py = spawnSync('python3', ['-c', code], {
+    input, timeout: 10000, maxBuffer: 16 << 20,
   });
   assert.equal(py.status, 0, String(py.stderr ?? ''));
-  assert.equal(Buffer.from(py.stdout).toString(), payload.toString());
+  return Buffer.from(py.stdout);
+}
+
+test('python3 quopri encode/decode round-trips with quotedPrintable*', () => {
+  const samples = [
+    Buffer.from("Now's the time for all folk to come to the aid of their country."),
+    Buffer.from('hello=world'),
+    Buffer.from('trailing space '),
+    Buffer.from('tab\there'),
+    Buffer.from('foo bar\r\n'),
+    Buffer.from('A'.repeat(80)),
+    Buffer.from('x'.repeat(200)),
+    Buffer.from({ length: 256 }, (_, i) => i),
+  ];
+  for (const payload of samples) {
+    const pyEncoded = pythonQuopri('encode', payload);
+    assert.deepEqual(Buffer.from(quotedPrintableDecode(pyEncoded)), payload, `py encode → native decode ${payload.length}`);
+    const reader = new QuotedPrintableReader(pyEncoded);
+    const chunks = [];
+    for (;;) {
+      const piece = reader.read(1);
+      if (piece.length === 0) break;
+      chunks.push(Buffer.from(piece));
+    }
+    assert.deepEqual(Buffer.concat(chunks), payload, `py encode → 1-byte reader ${payload.length}`);
+
+    for (const binary of [false, true]) {
+      const nativeEncoded = Buffer.from(quotedPrintableEncode(payload, { binary }));
+      assert.deepEqual(pythonQuopri('decode', nativeEncoded), payload, `native encode binary=${binary} → py decode ${payload.length}`);
+      const writer = new QuotedPrintableWriter({ binary });
+      writer.write(payload);
+      assert.deepEqual(pythonQuopri('decode', Buffer.from(writer.finish())), payload, `writer binary=${binary} → py decode ${payload.length}`);
+    }
+  }
+});
+
+test('python3 quopri keeps lone LF; Go/native text-mode quoted-printable emits CRLF', () => {
+  const lf = Buffer.from('foo bar\n');
+  const pyEncoded = pythonQuopri('encode', lf);
+  assert.equal(pyEncoded.toString(), 'foo bar\n');
+  assert.deepEqual(Buffer.from(quotedPrintableDecode(pyEncoded)), lf);
+  const nativeText = Buffer.from(quotedPrintableEncode(lf, { binary: false }));
+  assert.equal(nativeText.toString(), 'foo bar\r\n');
+  assert.deepEqual(pythonQuopri('decode', nativeText), Buffer.from('foo bar\r\n'));
 });

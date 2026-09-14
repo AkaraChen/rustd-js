@@ -125,3 +125,35 @@ test('JS generates quoted-printable and media types → Go verifies', () => {
   const rejected = go(['-verify'], JSON.stringify(broken));
   assert.notEqual(rejected.status, 0);
 });
+
+test('Go ParseMediaType matches native parse of formatMediaType strings', () => {
+  const generated = go();
+  assert.equal(generated.status, 0, generated.stderr);
+  const fixture = JSON.parse(generated.stdout);
+  const extras = [
+    { type: 'text/plain', params: { charset: 'utf-8' } },
+    { type: 'multipart/form-data', params: { boundary: '----WebKitFormBoundary7MA4YWxkTrZu0gW' } },
+    { type: 'application/json', params: {} },
+    { type: 'application/x-stuff', params: { title: 'This is fun€', lang: 'en' } },
+  ];
+  const specs = [
+    ...fixture.format.map((c) => ({ type: c.type, params: c.params ?? {} })),
+    ...extras,
+  ];
+  const parse = [];
+  for (const spec of specs) {
+    const formatted = formatMediaType(spec.type, spec.params);
+    if (!formatted) continue;
+    const native = parseNative(formatted);
+    parse.push({ in: formatted, ...native });
+  }
+  assert.ok(parse.length >= 20, `format→parse cases ${parse.length}`);
+  const packet = { schema: 1, package: 'mime', parse, qpEnc: [], qpDec: [], words: [], format: [], headers: [] };
+  const verified = go(['-verify'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified \d+ mime cases/);
+  const broken = structuredClone(packet);
+  broken.parse[0].mediaType = 'not-the-type';
+  const rejected = go(['-verify'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+});
