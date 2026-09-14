@@ -48,7 +48,7 @@ ix.dispose();
 
 ## Size
 
-Recorded after `napi build --platform --release` + strip on this builder (Linux x64 GNU, Rust 1.97.1). Cap is 2,000,000 bytes. 1 MiB of identical bytes builds in ~16 ms.
+Recorded after `napi build --platform --release` + strip on this builder (Linux x64 GNU, Rust 1.97.1). Cap is 2,000,000 bytes.
 
 ```text
 $ ls -l packages/rustd-containers/*.node
@@ -56,6 +56,17 @@ $ ls -l packages/rustd-containers/*.node
 ```
 
 `372616` bytes / `2000000`.
+
+## SuffixArray.build scaling (issue #23 §4.3)
+
+Median of 3 runs after one warmup, same builder, existing linux-x64-gnu `.node`. 16 MiB and five-platform numbers are not in this slice.
+
+| input | 256 KiB | 1 MiB | 4 MiB | 1M/256K | 4M/1M |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| identical `a` | 2.02 ms | 7.82 ms | 36.9 ms | 3.87 | 4.72 |
+| patterned bytes | 9.44 ms | 47.5 ms | 278 ms | 5.04 | 5.84 |
+
+`lookup` of `aaaa` (`n=8`) on 1 MiB identical input: ~119k QPS (2000 calls / 16.8 ms). Naive suffix sort would blow up on identical bytes; SA-IS stays near-linear through 4 MiB.
 
 ## Errors
 
