@@ -28,6 +28,18 @@ import {
 
 const root = resolve(import.meta.dirname, '../../..');
 
+// Captured from Go 1.24.13 on real ARM64 CI; only Float64Val exactness differs.
+const arm64Fixtures = new Set([
+  "constant-float-binop-fixtures.json",
+  "constant-float-unary-fixtures.json",
+  "constant-literal-fixtures.json",
+  "constant-val-fixtures.json"
+]);
+function constantFixtureUrl(name) {
+  const prefix = process.arch === 'arm64' && arm64Fixtures.has(name) ? './arm64/' : './';
+  return new URL(prefix + name, import.meta.url);
+}
+
 function go(args = [], input) {
   const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
   const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
@@ -54,7 +66,7 @@ function evaluate(c) {
 test('Go 1.24 regenerates committed go/constant Int fixtures; native matches every case', () => {
   const generated = go(['-constant']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -116,7 +128,7 @@ function evaluateBin(c) {
 test('Go 1.24 regenerates committed go/constant Int BinaryOp fixtures; native matches every case', () => {
   const generated = go(['-constant-binop']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-binop-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-binop-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go BinaryOp fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -215,7 +227,7 @@ function evaluateUS(c) {
 test('Go 1.24 regenerates committed go/constant Int UnaryOp/AND_NOT/Shift fixtures; native matches every case', () => {
   const generated = go(['-constant-unary-shift']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-unary-shift-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-unary-shift-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go UnaryOp/AND_NOT/Shift fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -339,7 +351,7 @@ function evaluateVal(c) {
 test('Go 1.24 regenerates committed go/constant Int/Float StringVal+Float64Val fixtures; native matches every case', () => {
   const generated = go(['-constant-val']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-val-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-val-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go StringVal/Float64Val fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -422,7 +434,7 @@ function evaluateFCmp(c) {
 test('Go 1.24 regenerates committed go/constant Float constCompare fixtures; native matches every case', () => {
   const generated = go(['-constant-float-compare']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-float-compare-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-float-compare-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Float constCompare fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -491,7 +503,7 @@ function evaluateFBin(c) {
 test('Go 1.24 regenerates committed go/constant Float BinaryOp fixtures; native matches every case', () => {
   const generated = go(['-constant-float-binop']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-float-binop-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-float-binop-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Float BinaryOp fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -566,7 +578,7 @@ function evaluateFUn(c) {
 test('Go 1.24 regenerates committed go/constant Float UnaryOp fixtures; native matches every case', () => {
   const generated = go(['-constant-float-unary']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-float-unary-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-float-unary-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Float UnaryOp fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -719,7 +731,7 @@ function evaluateLit(c) {
 test('Go 1.24 regenerates committed go/constant MakeFromLiteral Int/Float fixtures; native matches every case', () => {
   const generated = go(['-constant-literal']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-literal-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-literal-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go MakeFromLiteral fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -796,7 +808,7 @@ test('constMakeFromLiteral: 0x10 is Int 16; 1.5 is Float 3/2; invalid is Unknown
 test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; native matches every case', () => {
   const generated = go(['-constant-char-literal']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-char-literal-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-char-literal-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go MakeFromLiteral CHAR fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -886,7 +898,7 @@ function evaluateImagLit(c) {
 test('Go 1.24 regenerates committed go/constant MakeFromLiteral IMAG fixtures; native matches every case', () => {
   const generated = go(['-constant-imag-literal']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-imag-literal-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-imag-literal-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go MakeFromLiteral IMAG fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -980,7 +992,7 @@ function evaluateStrLit(c) {
 test('Go 1.24 regenerates committed go/constant MakeFromLiteral STRING fixtures; native matches every case', () => {
   const generated = go(['-constant-string-literal']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-string-literal-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-string-literal-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go MakeFromLiteral STRING fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -1099,7 +1111,7 @@ function evaluateBool(c) {
 test('Go 1.24 regenerates committed go/constant Bool fixtures; native matches every case', () => {
   const generated = go(['-constant-bool']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-bool-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-bool-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Bool fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -1213,7 +1225,7 @@ function evaluateCBin(c) {
 test('Go 1.24 regenerates committed go/constant Complex BinaryOp fixtures; native matches every case', () => {
   const generated = go(['-constant-complex-binop']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-complex-binop-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-complex-binop-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Complex BinaryOp fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -1317,7 +1329,7 @@ function evaluateCUn(c) {
 test('Go 1.24 regenerates committed go/constant Complex UnaryOp fixtures; native matches every case', () => {
   const generated = go(['-constant-complex-unary']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-complex-unary-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-complex-unary-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Complex UnaryOp fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -1420,7 +1432,7 @@ function evaluateCCmp(c) {
 test('Go 1.24 regenerates committed go/constant Complex Compare fixtures; native matches every case', () => {
   const generated = go(['-constant-complex-compare']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-complex-compare-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-complex-compare-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go Complex Compare fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -1518,7 +1530,7 @@ function evaluateSCmp(c) {
 test('Go 1.24 regenerates committed go/constant String Compare fixtures; native matches every case', () => {
   const generated = go(['-constant-string-compare']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-string-compare-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-string-compare-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go String Compare fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
@@ -1683,7 +1695,7 @@ function evaluateConv(c) {
 test('Go 1.24 regenerates committed go/constant ToFloat/ToComplex fixtures; native matches every case', () => {
   const generated = go(['-constant-tofloat-tocomplex']);
   assert.equal(generated.status, 0, generated.stderr);
-  const committed = readFileSync(new URL('./constant-tofloat-tocomplex-fixtures.json', import.meta.url), 'utf8');
+  const committed = readFileSync(constantFixtureUrl('constant-tofloat-tocomplex-fixtures.json'), 'utf8');
   assert.equal(generated.stdout, committed, 'Go ToFloat/ToComplex fixture drift');
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');

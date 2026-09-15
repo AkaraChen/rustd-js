@@ -216,7 +216,13 @@ pub fn load_system_mime_types(paths: Option<Vec<String>>) -> u32 {
     let mut guard = TABLES.lock().expect("mime type table");
     let tables = ensure(&mut guard);
     match paths {
-        None => load_unix_defaults(tables),
+        None => {
+            // mime.types can overwrite existing entries (unlike globs2). Report
+            // changes to the resulting table, not lines re-read on a no-op reload.
+            let before = tables.mime_types.clone();
+            load_unix_defaults(tables);
+            tables.mime_types.iter().filter(|(ext, typ)| before.get(*ext) != Some(*typ)).count() as u32
+        }
         Some(list) => list.iter().map(|path| load_one_path(tables, path)).sum(),
     }
 }

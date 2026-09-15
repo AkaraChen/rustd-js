@@ -257,12 +257,18 @@ fn abs_int(n: &num_bigint::BigInt) -> num_bigint::BigInt {
 fn float64_val_int(n: &num_bigint::BigInt) -> (f64, bool) {
     if let Ok(x) = i64::try_from(n) {
         let f = x as f64;
-        // Go compares `int64(f) == x`. Out-of-range f64→int64 (including +2^63)
-        // is MinInt64 on gc/amd64 (`CVTTSD2SI`), not Rust's saturating cast.
-        const TWO63: f64 = 9223372036854775808.0;
-        let back_ok = f.is_finite() && {
-            let t = f.trunc();
-            t >= i64::MIN as f64 && t < TWO63 && t as i64 == x
+        // Go compares `int64(f) == x`. gc/arm64 uses saturating FCVTZS;
+        // gc/amd64 returns MinInt64 on overflow with CVTTSD2SI.
+        // In particular MaxInt64 rounds to +2^63 and is "exact" only on arm64.
+        #[cfg(target_arch = "aarch64")]
+        let back_ok = f as i64 == x;
+        #[cfg(not(target_arch = "aarch64"))]
+        let back_ok = {
+            const TWO63: f64 = 9223372036854775808.0;
+            f.is_finite() && {
+                let t = f.trunc();
+                t >= i64::MIN as f64 && t < TWO63 && t as i64 == x
+            }
         };
         return (f, back_ok);
     }
