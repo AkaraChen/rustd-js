@@ -1321,6 +1321,19 @@ func charLiteralCorpus() []string {
 		"\t\t中\t\t", "'e\u0301\u0301'",
 		// Malformed: inner unescaped quote; incomplete hex.
 		"''中''", `'\x0g'`,
+		// Multibyte Unicode wrap/pad splits the pad rune (first/last BYTE) → U+FFFD.
+		// Contrast single-byte C0 pad (FF/VT) which keeps 中, same as `#中#`.
+		"\u00a0中\u00a0", "\u00a0a\u00a0", "\u3000中\u3000",
+		"\ufeffa\ufeff", "＇a＇", "＇＇", "\u0085中\u0085",
+		"\f中\f", "\v中\v",
+		// CRLF pad: strip CR/LF leaves a leading LF → Int 10, not 中.
+		"\r\n中\r\n",
+		// ASCII space around NBSP+中: inner starts with NBSP → Int 160.
+		" \u00a0中\u00a0 ",
+		// Quote mismatch still UnquoteChar(..., '\'').
+		"\"a'", "'a\"",
+		// Malformed: hex underscore, backslash+CR, 7-digit \U.
+		`'\x4_1'`, "'\\\r'", `'\U0010FFF'`,
 	}
 }
 

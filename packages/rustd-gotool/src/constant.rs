@@ -1692,7 +1692,8 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
 /// Other toks throw. `prec` must be 0 (Go panics otherwise). CHAR is an Int (rune).
 /// CHAR strips first/last **bytes** then `UnquoteChar(..., '\'')`: ASCII-padded
 /// UTF-8 (` 中 `) keeps the rune; double pad (`  中  `) is Int 32 because the
-/// inner starts with space. `"\x41"` / `"\'"` / `` `\n` `` still parse as
+/// inner starts with space. Multibyte pad (NBSP/BOM/fullwidth) is U+FFFD
+/// because the pad rune is split. `"\x41"` / `"\'"` / `` `\n` `` still parse as
 /// CHAR. IMAG is Complex `(0 + <float>i)`. STRING is `strconv.Unquote`
 /// (CHAR `'ab'` is Int 97; STRING `'ab'` is Unknown because Unquote rejects leftover).
 #[napi]
