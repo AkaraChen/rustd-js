@@ -128,7 +128,26 @@ func main() {
 	verifyConstantStrLitFlag := flag.Bool("verify-constant-string-literal", false, "verify a constant-string-literal packet read from stdin")
 	constantBoolFlag := flag.Bool("constant-bool", false, "dump go/constant Bool fixtures")
 	verifyConstantBoolFlag := flag.Bool("verify-constant-bool", false, "verify a constant-bool packet read from stdin")
+	constantCBinFlag := flag.Bool("constant-complex-binop", false, "dump go/constant Complex BinaryOp fixtures")
+	verifyConstantCBinFlag := flag.Bool("verify-constant-complex-binop", false, "verify a constant-complex-binop packet read from stdin")
 	flag.Parse()
+	if *verifyConstantCBinFlag {
+		verifyConstantComplexBin(os.Stdin)
+		return
+	}
+	if *constantCBinFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantComplexBin(writer)
+		return
+	}
 	if *verifyConstantBoolFlag {
 		verifyConstantBool(os.Stdin)
 		return

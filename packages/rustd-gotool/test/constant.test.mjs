@@ -1185,3 +1185,108 @@ test('constMakeBool / BoolVal / NOT / LAND / LOR vs Go; malformed throw', () => 
   assert.throws(() => constSign(t), /numeric or Unknown/);
   assert.throws(() => constCompare(t, f), /Int or Float/);
 });
+
+function makeCplx(form, x, y) {
+  if (form === 'imag') return constMakeFromLiteral(x, TOKEN.IMAG, 0);
+  if (form === 'int') return constMakeInt64(BigInt(x));
+  if (form === 'quo') return constBinaryOp(TOKEN.QUO, constMakeInt64(BigInt(x)), constMakeInt64(BigInt(y)));
+  if (form === 'unknown') return constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+  throw new Error(`unknown complex src ${form}`);
+}
+
+function evaluateCBin(c) {
+  const r = constBinaryOp(TOKEN[c.op], makeCplx(c.formX, c.xx, c.xy), makeCplx(c.formY, c.yx, c.yy));
+  const re = constReal(r);
+  const im = constImag(r);
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    sign: constSign(r),
+    reKind: re.kind,
+    reExact: re.toString(),
+    imKind: im.kind,
+    imExact: im.toString(),
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant Complex BinaryOp fixtures; native matches every case', () => {
+  const generated = go(['-constant-complex-binop']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-complex-binop-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go Complex BinaryOp fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-complex-binop');
+  assert.ok(fixture.cases.length >= 180, `too few Complex BinaryOp cases: ${fixture.cases.length}`);
+  const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(unknown.length >= 3, `need Unknown Complex BinaryOp cases, got ${unknown.length}`);
+  const complex = fixture.cases.filter((c) => c.kind === 'Complex');
+  assert.ok(complex.length >= 3, `need Complex BinaryOp cases, got ${complex.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateCBin(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.sign, c.sign, `${c.id} sign`);
+    assert.equal(got.reKind, c.reKind, `${c.id} reKind`);
+    assert.equal(got.reExact, c.reExact, `${c.id} reExact`);
+    assert.equal(got.imKind, c.imKind, `${c.id} imKind`);
+    assert.equal(got.imExact, c.imExact, `${c.id} imExact`);
+    assert.equal(got.opTok, TOKEN[c.op], `${c.id} opTok`);
+  }
+});
+
+test('JS Complex BinaryOp extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { formX: 'imag', xx: '4i', xy: '0', formY: 'imag', yx: '2i', yy: '0', op: 'ADD' },
+    { formX: 'imag', xx: '4i', xy: '0', formY: 'imag', yx: '2i', yy: '0', op: 'MUL' },
+    { formX: 'int', xx: '7', xy: '0', formY: 'imag', yx: '1i', yy: '0', op: 'ADD' },
+    { formX: 'quo', xx: '1', xy: '4', formY: 'imag', yx: '1i', yy: '0', op: 'SUB' },
+    { formX: 'imag', xx: '2i', xy: '0', formY: 'unknown', yx: '0', yy: '0', op: 'MUL' },
+    { formX: 'imag', xx: '8i', xy: '0', formY: 'imag', yx: '2i', yy: '0', op: 'QUO' },
+  ];
+  const cases = extras.map((c, i) => evaluateCBin({
+    id: `js-cbin-${i}`, opTok: TOKEN[c.op], ...c,
+  }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-complex-binop', cases };
+  const verified = go(['-verify-constant-complex-binop'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 6 gotool constant-complex-binop cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-a-complex';
+  const rejected = go(['-verify-constant-complex-binop'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-complex-binop'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-complex-binop', cases: [],
+  })).status, 0);
+});
+
+test('constBinaryOp Complex: 1i*1i, mixed Int, QUO-0 Unknown, REM/AND throw', () => {
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const twoI = constMakeFromLiteral('2i', TOKEN.IMAG, 0);
+  const one = constMakeInt64(1n);
+  const z = constMakeInt64(0n);
+  const prod = constBinaryOp(TOKEN.MUL, i, i);
+  assert.equal(prod.kind, 'Complex');
+  assert.equal(prod.toString(), '(-1 + 0i)');
+  assert.equal(constReal(prod).kind, 'Float');
+  assert.equal(constReal(prod).toString(), '-1');
+  assert.equal(constImag(prod).kind, 'Float');
+  assert.equal(constImag(prod).toString(), '0');
+  assert.equal(constSign(prod), -1);
+  const sum = constBinaryOp(TOKEN.ADD, one, i);
+  assert.equal(sum.toString(), '(1 + 1i)');
+  assert.equal(constReal(sum).kind, 'Int');
+  assert.equal(constImag(sum).kind, 'Float');
+  const quo = constBinaryOp(TOKEN.QUO, constMakeFromLiteral('5i', TOKEN.IMAG, 0), constMakeFromLiteral('3i', TOKEN.IMAG, 0));
+  assert.equal(quo.toString(), '(5/3 + 0i)');
+  const unk = constBinaryOp(TOKEN.QUO, i, z);
+  assert.equal(unk.kind, 'Unknown');
+  const zeroI = constMakeFromLiteral('0i', TOKEN.IMAG, 0);
+  assert.equal(constBinaryOp(TOKEN.QUO, i, zeroI).kind, 'Unknown');
+  assert.equal(constBinaryOp(TOKEN.ADD, i, unk).kind, 'Unknown');
+  assert.throws(() => constBinaryOp(TOKEN.REM, i, twoI), /ADD, SUB, MUL, or QUO/);
+  assert.throws(() => constBinaryOp(TOKEN.AND, i, one), /ADD, SUB, MUL, or QUO/);
+  assert.throws(() => constBinaryOp(TOKEN.XOR, i, i), /ADD, SUB, MUL, or QUO/);
+});

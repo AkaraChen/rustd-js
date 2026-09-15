@@ -8,6 +8,7 @@ use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 /// Opaque `go/constant.Value` (issue #28). Int is arbitrary-precision.
 /// QUO of Ints is a Float (`big.Rat`); QUO/REM by zero is Unknown.
 /// MakeFromLiteral IMAG is Complex with real Int 0 and imag Float (`im_rat`).
+/// Complex BinaryOp keeps both parts (`int`/`rat` = re, `im_int`/`im_rat` = im).
 /// MakeFromLiteral STRING is Go `strconv.Unquote` bytes (`str_bytes`).
 /// Bool is `MakeBool` / `BoolVal` (`bool_val`).
 #[napi]
@@ -15,6 +16,7 @@ pub struct GoConstValue {
     kind: String,
     int: Option<num_bigint::BigInt>,
     rat: Option<BigRational>,
+    im_int: Option<num_bigint::BigInt>,
     im_rat: Option<BigRational>,
     str_bytes: Option<Vec<u8>>,
     bool_val: Option<bool>,
@@ -50,6 +52,7 @@ fn make_int(n: num_bigint::BigInt) -> GoConstValue {
         kind: "Int".into(),
         int: Some(n),
         rat: None,
+        im_int: None,
         im_rat: None,
         str_bytes: None,
         bool_val: None,
@@ -61,6 +64,7 @@ fn make_float(r: BigRational) -> GoConstValue {
         kind: "Float".into(),
         int: None,
         rat: Some(r),
+        im_int: None,
         im_rat: None,
         str_bytes: None,
         bool_val: None,
@@ -72,21 +76,31 @@ fn make_unknown() -> GoConstValue {
         kind: "Unknown".into(),
         int: None,
         rat: None,
+        im_int: None,
         im_rat: None,
         str_bytes: None,
         bool_val: None,
     }
 }
 
-fn make_complex_from_imag(im: BigRational) -> GoConstValue {
+/// Go `makeComplex`. Unknown component → Unknown. Does not simplify imag 0 to Float.
+fn make_complex(re: GoConstValue, im: GoConstValue) -> GoConstValue {
+    if re.kind == "Unknown" || im.kind == "Unknown" {
+        return make_unknown();
+    }
     GoConstValue {
         kind: "Complex".into(),
-        int: None,
-        rat: None,
-        im_rat: Some(im),
+        int: re.int,
+        rat: re.rat,
+        im_int: im.int,
+        im_rat: im.rat,
         str_bytes: None,
         bool_val: None,
     }
+}
+
+fn make_complex_from_imag(im: BigRational) -> GoConstValue {
+    make_complex(make_int(num_bigint::BigInt::from(0)), make_float(im))
 }
 
 fn make_string(s: Vec<u8>) -> GoConstValue {
@@ -94,6 +108,7 @@ fn make_string(s: Vec<u8>) -> GoConstValue {
         kind: "String".into(),
         int: None,
         rat: None,
+        im_int: None,
         im_rat: None,
         str_bytes: Some(s),
         bool_val: None,
@@ -105,6 +120,7 @@ fn make_bool(b: bool) -> GoConstValue {
         kind: "Bool".into(),
         int: None,
         rat: None,
+        im_int: None,
         im_rat: None,
         str_bytes: None,
         bool_val: Some(b),
@@ -116,6 +132,7 @@ fn clone_value(v: &GoConstValue) -> GoConstValue {
         kind: v.kind.clone(),
         int: v.int.clone(),
         rat: v.rat.clone(),
+        im_int: v.im_int.clone(),
         im_rat: v.im_rat.clone(),
         str_bytes: v.str_bytes.clone(),
         bool_val: v.bool_val,
@@ -417,15 +434,20 @@ pub fn const_compare(x: &GoConstValue, y: &GoConstValue) -> Result<i32> {
 }
 
 /// Go `Sign`. Unknown is 1. Bool/String panic in Go → throw.
+/// Complex is `Sign(re) | Sign(im)`.
 #[napi]
 pub fn const_sign(v: &GoConstValue) -> Result<i32> {
-    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref(), v.im_rat.as_ref()) {
-        ("Int", Some(n), _, _) => Ok(sign_i32(n.sign())),
-        ("Float", _, Some(r), _) => Ok(sign_i32(r.numer().sign())),
-        // Go `Sign(complexVal)` is `Sign(re) | Sign(im)`; IMAG re is 0.
-        ("Complex", _, _, Some(im)) => Ok(sign_i32(im.numer().sign())),
-        // go/constant.Sign(unknownVal) returns 1.
-        ("Unknown", _, _, _) => Ok(1),
+    match v.kind.as_str() {
+        "Int" => match v.int.as_ref() {
+            Some(n) => Ok(sign_i32(n.sign())),
+            None => Ok(0),
+        },
+        "Float" => match v.rat.as_ref() {
+            Some(r) => Ok(sign_i32(r.numer().sign())),
+            None => Ok(0),
+        },
+        "Complex" => Ok(const_sign(&real_part(v)?)? | const_sign(&imag_part(v)?)?),
+        "Unknown" => Ok(1),
         _ => Err(Error::new(
             Status::InvalidArg,
             "gotool: constSign requires a numeric or Unknown value",
@@ -446,35 +468,52 @@ pub fn const_bit_len(v: &GoConstValue) -> Result<i32> {
 }
 
 /// Int: decimal. Float: `ExactString` (`n` or `n/d`).
-/// Complex IMAG: Go `ExactString` `"(0 + <imag>i)"`.
+/// Complex: Go `ExactString` `"(<re> + <im>i)"`.
 /// String: Go `ExactString` (`strconv.Quote`). Bool: `"true"`/`"false"`.
 /// Unknown: `"unknown"`.
 #[napi]
 pub fn const_string(v: &GoConstValue) -> String {
-    match (
-        v.kind.as_str(),
-        v.int.as_ref(),
-        v.rat.as_ref(),
-        v.im_rat.as_ref(),
-        v.str_bytes.as_ref(),
-        v.bool_val,
-    ) {
-        ("Int", Some(n), _, _, _, _) => n.to_string(),
-        ("Float", _, Some(r), _, _, _) => rat_exact_string(r),
-        ("Complex", _, _, Some(im), _, _) => format!("(0 + {}i)", rat_exact_string(im)),
-        ("String", _, _, _, Some(b), _) => quote_go(b),
-        ("Bool", _, _, _, _, Some(true)) => "true".into(),
-        ("Bool", _, _, _, _, Some(false)) => "false".into(),
+    match v.kind.as_str() {
+        "Int" => v
+            .int
+            .as_ref()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "unknown".into()),
+        "Float" => v
+            .rat
+            .as_ref()
+            .map(rat_exact_string)
+            .unwrap_or_else(|| "unknown".into()),
+        "Complex" => match (real_part(v), imag_part(v)) {
+            (Ok(re), Ok(im)) => format!("({} + {}i)", const_string(&re), const_string(&im)),
+            _ => "unknown".into(),
+        },
+        "String" => v
+            .str_bytes
+            .as_ref()
+            .map(|b| quote_go(b))
+            .unwrap_or_else(|| "unknown".into()),
+        "Bool" => match v.bool_val {
+            Some(true) => "true".into(),
+            Some(false) => "false".into(),
+            None => "unknown".into(),
+        },
         _ => "unknown".into(),
     }
 }
 
-/// Go `Real`. Numeric non-Complex returns `x`; Complex IMAG real is Int 0.
-#[napi]
-pub fn const_real(v: &GoConstValue) -> Result<GoConstValue> {
+fn real_part(v: &GoConstValue) -> Result<GoConstValue> {
     match v.kind.as_str() {
         "Unknown" | "Int" | "Float" => Ok(clone_value(v)),
-        "Complex" => Ok(make_int(num_bigint::BigInt::from(0))),
+        "Complex" => {
+            if let Some(n) = v.int.as_ref() {
+                Ok(make_int(n.clone()))
+            } else if let Some(r) = v.rat.as_ref() {
+                Ok(make_float(r.clone()))
+            } else {
+                Ok(make_unknown())
+            }
+        }
         _ => Err(Error::new(
             Status::InvalidArg,
             "gotool: constReal requires a numeric or Unknown value",
@@ -482,21 +521,52 @@ pub fn const_real(v: &GoConstValue) -> Result<GoConstValue> {
     }
 }
 
-/// Go `Imag`. Int/Float → Int 0; Complex IMAG imag is the Float prefix.
-#[napi]
-pub fn const_imag(v: &GoConstValue) -> Result<GoConstValue> {
+fn imag_part(v: &GoConstValue) -> Result<GoConstValue> {
     match v.kind.as_str() {
         "Unknown" => Ok(make_unknown()),
         "Int" | "Float" => Ok(make_int(num_bigint::BigInt::from(0))),
-        "Complex" => match v.im_rat.as_ref() {
-            Some(r) => Ok(make_float(r.clone())),
-            None => Ok(make_unknown()),
-        },
+        "Complex" => {
+            if let Some(n) = v.im_int.as_ref() {
+                Ok(make_int(n.clone()))
+            } else if let Some(r) = v.im_rat.as_ref() {
+                Ok(make_float(r.clone()))
+            } else {
+                Ok(make_unknown())
+            }
+        }
         _ => Err(Error::new(
             Status::InvalidArg,
             "gotool: constImag requires a numeric or Unknown value",
         )),
     }
+}
+
+/// Go `vtoc`: numeric → Complex with imag Int 0.
+fn to_complex(v: &GoConstValue) -> Result<GoConstValue> {
+    match v.kind.as_str() {
+        "Unknown" => Ok(make_unknown()),
+        "Complex" => Ok(clone_value(v)),
+        "Int" | "Float" => Ok(make_complex(
+            clone_value(v),
+            make_int(num_bigint::BigInt::from(0)),
+        )),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constBinaryOp Complex operands must be Int, Float, or Complex",
+        )),
+    }
+}
+
+/// Go `Real`. Numeric non-Complex returns `x`; Complex returns the stored re.
+#[napi]
+pub fn const_real(v: &GoConstValue) -> Result<GoConstValue> {
+    real_part(v)
+}
+
+/// Go `Imag`. Int/Float → Int 0; Complex returns the stored im.
+#[napi]
+pub fn const_imag(v: &GoConstValue) -> Result<GoConstValue> {
+    imag_part(v)
 }
 
 fn is_int_kind(v: &GoConstValue) -> bool {
@@ -505,6 +575,10 @@ fn is_int_kind(v: &GoConstValue) -> bool {
 
 fn is_num_kind(v: &GoConstValue) -> bool {
     v.kind == "Int" || v.kind == "Float"
+}
+
+fn is_numeric(v: &GoConstValue) -> bool {
+    matches!(v.kind.as_str(), "Int" | "Float" | "Complex")
 }
 
 fn rat_binop(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue> {
@@ -526,8 +600,68 @@ fn rat_binop(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue
     }
 }
 
+/// Go `BinaryOp` on `complexVal`: ADD/SUB/MUL/QUO of the re/im components.
+/// Mixed Int/Float promote via `vtoc` (imag Int 0). QUO by 0+0i → Unknown.
+fn complex_binop(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue> {
+    match op {
+        token::ADD | token::SUB | token::MUL | token::QUO => {}
+        _ => {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constBinaryOp Complex ops must be ADD, SUB, MUL, or QUO",
+            ))
+        }
+    }
+    let x = to_complex(x)?;
+    let y = to_complex(y)?;
+    if x.kind == "Unknown" || y.kind == "Unknown" {
+        return Ok(make_unknown());
+    }
+    let a = real_part(&x)?;
+    let b = imag_part(&x)?;
+    let c = real_part(&y)?;
+    let d = imag_part(&y)?;
+    match op {
+        token::ADD => Ok(make_complex(
+            const_binary_op(token::ADD, &a, &c)?,
+            const_binary_op(token::ADD, &b, &d)?,
+        )),
+        token::SUB => Ok(make_complex(
+            const_binary_op(token::SUB, &a, &c)?,
+            const_binary_op(token::SUB, &b, &d)?,
+        )),
+        token::MUL => {
+            let ac = const_binary_op(token::MUL, &a, &c)?;
+            let bd = const_binary_op(token::MUL, &b, &d)?;
+            let bc = const_binary_op(token::MUL, &b, &c)?;
+            let ad = const_binary_op(token::MUL, &a, &d)?;
+            Ok(make_complex(
+                const_binary_op(token::SUB, &ac, &bd)?,
+                const_binary_op(token::ADD, &bc, &ad)?,
+            ))
+        }
+        token::QUO => {
+            let cc = const_binary_op(token::MUL, &c, &c)?;
+            let dd = const_binary_op(token::MUL, &d, &d)?;
+            let s = const_binary_op(token::ADD, &cc, &dd)?;
+            if s.kind == "Unknown" || const_sign(&s)? == 0 {
+                return Ok(make_unknown());
+            }
+            let ac = const_binary_op(token::MUL, &a, &c)?;
+            let bd = const_binary_op(token::MUL, &b, &d)?;
+            let bc = const_binary_op(token::MUL, &b, &c)?;
+            let ad = const_binary_op(token::MUL, &a, &d)?;
+            let re = const_binary_op(token::QUO, &const_binary_op(token::ADD, &ac, &bd)?, &s)?;
+            let im = const_binary_op(token::QUO, &const_binary_op(token::SUB, &bc, &ad)?, &s)?;
+            Ok(make_complex(re, im))
+        }
+        _ => unreachable!(),
+    }
+}
+
 /// Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
 /// Float (and mixed Int/Float) ADD/SUB/MUL/QUO via `big.Rat` (`match` then `makeRat`).
+/// Complex ADD/SUB/MUL/QUO via Go's component formula (`vtoc` then `makeComplex`).
 /// Bool LAND/LOR. QUO of Ints is Float. QUO/REM by zero → Unknown.
 #[napi]
 pub fn const_binary_op(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue> {
@@ -551,6 +685,15 @@ pub fn const_binary_op(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<Go
                 "gotool: constBinaryOp Bool ops must be LAND or LOR",
             )),
         };
+    }
+    if x.kind == "Complex" || y.kind == "Complex" {
+        if !is_numeric(x) || !is_numeric(y) {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constBinaryOp Complex operands must be Int, Float, or Complex",
+            ));
+        }
+        return complex_binop(op, x, y);
     }
     if !is_num_kind(x) {
         return Err(Error::new(
