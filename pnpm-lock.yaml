@@ -214,34 +214,6 @@ importers:
 
   packages/rustd-encoding/npm/win32-x64-msvc: {}
 
-  packages/rustd-gotool:
-    optionalDependencies:
-      rustd-gotool-darwin-arm64:
-        specifier: 0.1.0
-        version: link:npm/darwin-arm64
-      rustd-gotool-darwin-x64:
-        specifier: 0.1.0
-        version: link:npm/darwin-x64
-      rustd-gotool-linux-arm64-gnu:
-        specifier: 0.1.0
-        version: link:npm/linux-arm64-gnu
-      rustd-gotool-linux-x64-gnu:
-        specifier: 0.1.0
-        version: link:npm/linux-x64-gnu
-      rustd-gotool-win32-x64-msvc:
-        specifier: 0.1.0
-        version: link:npm/win32-x64-msvc
-
-  packages/rustd-gotool/npm/darwin-arm64: {}
-
-  packages/rustd-gotool/npm/darwin-x64: {}
-
-  packages/rustd-gotool/npm/linux-arm64-gnu: {}
-
-  packages/rustd-gotool/npm/linux-x64-gnu: {}
-
-  packages/rustd-gotool/npm/win32-x64-msvc: {}
-
   packages/rustd-image:
     optionalDependencies:
       rustd-image-darwin-arm64:
