@@ -438,6 +438,78 @@ type xmlNSBadPathAttr struct {
 	V       string   `xml:"url a>b,attr"`
 }
 
+// Go printer.createAttrPrefix: last path segment, xml* rewrite, collision _N.
+type xmlNSPrefix struct {
+	XMLName xml.Name `xml:"root"`
+	H       string    `xml:"http://www.w3.org/TR/html4/ table,attr"`
+	F       string    `xml:"http://www.w3schools.com/furniture table,attr"`
+	Lang    string    `xml:"http://www.w3.org/XML/1998/namespace lang,attr,omitempty"`
+	Other1  string    `xml:"http://golang.org/xml/ other,attr,omitempty"`
+	Other2  string    `xml:"http://golang.org/xmlfoo/ other,attr,omitempty"`
+	Other3  string    `xml:"http://golang.org/json/ other,attr,omitempty"`
+	Other4  string    `xml:"http://golang.org/2/json/ other,attr,omitempty"`
+}
+
+type xmlNSSlash34 struct {
+	XMLName xml.Name `xml:"root"`
+	X       string    `xml:"/34 x,attr"`
+}
+
+type xmlNSXSI struct {
+	XMLName xml.Name `xml:"root"`
+	Nil     string    `xml:"http://www.w3.org/2001/xmlSchema-instance nil,attr"`
+}
+
+type xmlNSXSI2 struct {
+	XMLName xml.Name `xml:"root"`
+	Nil     string    `xml:"http://www.w3.org/2001/XMLSchema-instance nil,attr"`
+}
+
+type xmlNSXMLNSNS struct {
+	XMLName xml.Name `xml:"root"`
+	Foo     string    `xml:"http://www.w3.org/2000/xmlns/ foo,attr"`
+}
+
+type xmlNSXMLNSAttr struct {
+	XMLName xml.Name `xml:"root"`
+	Ns      string    `xml:"xmlns,attr"`
+}
+
+type xmlNSXMLNSPref struct {
+	XMLName xml.Name `xml:"root"`
+	Foo     string    `xml:"xmlns foo,attr"`
+}
+
+type xmlNSColonURL struct {
+	XMLName xml.Name `xml:"root"`
+	X       string    `xml:"http://a:b/c x,attr"`
+}
+
+type xmlNSEmptyURL struct {
+	XMLName xml.Name `xml:"root"`
+	X       string    `xml:"/// x,attr"`
+}
+
+type xmlNSXMLSpace struct {
+	XMLName xml.Name `xml:"root"`
+	Space   string    `xml:"http://www.w3.org/XML/1998/namespace space,attr"`
+}
+
+type xmlNSBadJSONEmpty struct {
+	XMLName xml.Name `xml:"root"`
+	V       string    `xml:"http://golang.org/2/json/ ,attr"`
+}
+
+type xmlNSBadXMLNSEmpty struct {
+	XMLName xml.Name `xml:"root"`
+	V       string    `xml:"xmlns ,attr"`
+}
+
+type xmlNSBadSlash34Empty struct {
+	XMLName xml.Name `xml:"root"`
+	V       string    `xml:"/34 ,attr"`
+}
+
 func decodeCase(id, kind string, xmlBytes []byte, value any) XmlDecodeCase {
 	raw, err := json.Marshal(value)
 	if err != nil {
