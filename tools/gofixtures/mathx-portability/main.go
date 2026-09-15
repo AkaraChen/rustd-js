@@ -15,6 +15,16 @@ func main() {
 	fmt.Printf("go=%s arch=%s\n", runtime.Version(), runtime.GOARCH)
 	fmt.Printf("Reverse8(1) constant=%d runtime=%d\n", bits.Reverse8(1), bits.Reverse8(opaque(1)))
 	fmt.Printf("Reverse8(1)==128 constant=%t runtime=%t\n", bits.Reverse8(1) == 128, bits.Reverse8(opaque(1)) == 128)
+	if bits.Reverse8(opaque(1)) != 128 {
+		fmt.Printf("direct branch: FAIL (value printed separately: %d)\n", bits.Reverse8(opaque(1)))
+	} else {
+		fmt.Println("direct branch: PASS")
+	}
+	if opaque(bits.Reverse8(opaque(1))) != 128 {
+		fmt.Println("materialized result branch: FAIL")
+	} else {
+		fmt.Println("materialized result branch: PASS")
+	}
 	x, y := complex(math.Pi, 1), complex(math.Pi, math.Pi)
 	m, phase := cmplx.Abs(x), cmplx.Phase(x)
 	theta := real(y) * phase
