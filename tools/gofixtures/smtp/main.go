@@ -1384,6 +1384,148 @@ func main() {
 			},
 		},
 		{
+			id:     "client-auth-plain-challenge",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-localhost\n250 AUTH PLAIN LOGIN",
+				"334 VXNlcm5hbWU6",
+				"501 aborted",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				// AUTH PLAIN must not see a 334 challenge (auth.go Next more=true).
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return c.Auth(smtp.PlainAuth("", "user", "pass", "127.0.0.1"))
+			},
+		},
+		{
+			id:     "client-auth-no-advertise",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"235 Accepted",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				// Client.Auth does not check EHLO AUTH; SendMail does.
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Auth(smtp.PlainAuth("", "user", "pass", "127.0.0.1")); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:      "client-banner-421",
+			kind:    "client",
+			banner:  "421 Service not available",
+			replies: []string{},
+			fn: func(addr string) error {
+				// NewClient ReadResponse(220) fails; no commands on the wire.
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return nil
+			},
+		},
+		{
+			id:     "sendMail-null-from",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "client-rcpt-251",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"251 User not local; will forward",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				// Rcpt uses cmd(25, ...): any 25x, not only 250.
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("a@b.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("c@d.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-implicit-tls-send",
+			kind:   "client",
+			banner: "220 SIGNS",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			tls:         true,
+			implicitTLS: true,
+			fn: func(addr string) error {
+				conn, err := tls.Dial("tcp", addr, clientTLS())
+				if err != nil {
+					return err
+				}
+				c, err := smtp.NewClient(conn, "127.0.0.1")
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("a@b.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("c@d.com"); err != nil {
+					return err
+				}
+				w, err := c.Data()
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(msgCRLF(sendMsg)); err != nil {
+					return err
+				}
+				if err := w.Close(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
