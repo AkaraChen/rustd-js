@@ -107,6 +107,10 @@ async function runTsCase(c, addr) {
     await sendMail(addr, null, 'a@b.com', ['one@b.com', 'two@b.com'], sendMsg);
     return;
   }
+  if (c.id === 'sendMail-starttls') {
+    await sendMail(addr, null, 'joe1@example.com', ['joe2@example.com'], 'Subject: test\n\nhowdy!', { tls: tlsClient });
+    return;
+  }
   if (c.id === 'client-starttls-auth') {
     const client = await SmtpClient.dial(addr);
     try {
@@ -387,6 +391,238 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-mail-auth-required') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('user@gmail.com');
+    } catch (err) {
+      await client.quit().catch(() => {});
+      throw err;
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-vrfy-252') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.verify('user1@gmail.com');
+    } catch (err) {
+      await client.quit().catch(() => {});
+      throw err;
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-vrfy') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.verify('test@example.com');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-mail') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.mail('test@example.com');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-mail-inject') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello();
+      await client.mail('user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-rcpt-inject') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello();
+      await client.rcpt('golang-nuts@googlegroups.com>\r\nDATA\r\nInjected message body\r\n.\r\nQUIT\r\n');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-auth') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-rset') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.reset();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-noop') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.noop();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-quit') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-helo-mail') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('user@gmail.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-newclient-helo') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello();
+      if (client.extension('DSN')) throw new Error('Shouldn\'t support DSN');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-newclient-ehlo') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello();
+      if (!client.extension('aUtH') || client.extensionParams('aUtH') !== 'LOGIN PLAIN') {
+        throw new Error('Expected AUTH supported');
+      }
+      if (client.extension('DSN')) throw new Error('Shouldn\'t support DSN');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-newclient-implicit-tls') {
+    const client = await SmtpClient.dial(addr, { tls: { implicit: true, ...tlsClient } });
+    try {
+      if (!client.serverInfo.tls) throw new Error('expected serverInfo.tls');
+      const st = client.tlsConnectionState();
+      if (!st || !st.protocol) throw new Error('expected tlsConnectionState');
+      await client.hello();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-implicit-tls-auth') {
+    const client = await SmtpClient.dial(addr, {
+      host: 'smtp.test.local',
+      tls: { implicit: true, ca: tlsCert, serverName: 'smtp.test.local' },
+    });
+    try {
+      if (!client.serverInfo.tls) throw new Error('expected serverInfo.tls');
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: 'smtp.test.local' }));
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-tls-connstate') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.startTls(tlsClient);
+      const st = client.tlsConnectionState();
+      if (!st || !st.protocol.startsWith('TLSv1.') || !st.authorized) {
+        throw new Error('bad TLS connection state');
+      }
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-auth-plain-challenge') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-auth-no-advertise') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-banner-421') {
+    await SmtpClient.dial(addr);
+    return;
+  }
+  if (c.id === 'sendMail-null-from') {
+    await sendMail(addr, null, '', ['c@d.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'client-rcpt-251') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-implicit-tls-send') {
+    const client = await SmtpClient.dial(addr, { tls: { implicit: true, ...tlsClient } });
+    try {
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      const w = await client.data();
+      await w.write(sendMsg);
+      await w.close();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -399,7 +635,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 35, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 58, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -413,7 +649,11 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
       continue;
     }
     let caught;
-    const bytes = await withFakeSmtp({ ...c, tls: c.tls ? tlsServer : undefined }, async (addr) => {
+    const bytes = await withFakeSmtp({
+      ...c,
+      tls: (c.tls || c.implicitTls) ? tlsServer : undefined,
+      implicitTls: c.implicitTls,
+    }, async (addr) => {
       try {
         await runTsCase(c, addr);
       } catch (err) {
@@ -441,7 +681,11 @@ test('Go net/smtp against Node fake server matches committed clientHex', async (
     for (const c of packet.cases) {
       if (c.kind === 'validate') continue;
       let goErr;
-      const bytes = await withFakeSmtp({ ...c, tls: c.tls ? tlsServer : undefined }, async (addr) => {
+      const bytes = await withFakeSmtp({
+        ...c,
+        tls: (c.tls || c.implicitTls) ? tlsServer : undefined,
+        implicitTls: c.implicitTls,
+      }, async (addr) => {
         const result = await goClient(built.bin, c.id, addr);
         if (result.status !== 0) goErr = (result.stderr || '') + (result.stdout || '');
       }).catch((err) => {
@@ -575,6 +819,8 @@ test('plainAuth start matches Go TestAuth / TestAuthPlain', () => {
 
   const local = plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: 'localhost' });
   local.start({ name: 'localhost', tls: false, auth: [] });
+  plainAuth({ identity: '', username: 'u', password: 'p', host: '::1' })
+    .start({ name: '::1', tls: false, auth: [] });
 
   assert.throws(
     () => plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: 'servername' })
@@ -599,6 +845,19 @@ test('Extension is case-insensitive like Go Client.Extension', async () => {
     assert.equal(client.extensionParams('aUtH'), 'LOGIN PLAIN');
     assert.equal(client.extension('DSN'), false);
     assert.equal(client.extensionParams('DSN'), '');
+    await client.quit();
+  });
+});
+
+test('HELO fallback does not parse FEATURE the way EHLO would (Go TestHello case 5)', async () => {
+  await withFakeSmtp({
+    banner: '220 hello world',
+    replies: ['502 EH?', '250-mx.google.com at your service\n250 FEATURE', '221 Goodbye'],
+  }, async (addr) => {
+    const client = await SmtpClient.dial(addr);
+    await client.hello('customhost');
+    assert.equal(client.extension('feature'), false);
+    assert.equal(client.extensionParams('feature'), '');
     await client.quit();
   });
 });
@@ -690,6 +949,31 @@ test('hung banner respects timeoutMs and does not hang', async () => {
   } finally {
     server.close();
   }
+});
+
+test('sendMail with AUTH after HELO-only errors instead of Go silent skip', async () => {
+  // Go SendMail skips AUTH when helo() left c.ext == nil. Issue #12 forbids
+  // silently sending mail after the caller passed credentials.
+  const recorded = await withFakeSmtp({
+    banner: '220 hello world',
+    replies: ['502 EH?', '250 mx.google.com at your service', '221 Goodbye'],
+  }, async (addr) => {
+    await assert.rejects(
+      () => sendMail(
+        addr,
+        plainAuth({ username: 'user', password: 's3cret-password', host: '127.0.0.1' }),
+        'a@b.com',
+        ['c@d.com'],
+        sendMsg,
+      ),
+      (err) => err instanceof SmtpError && err.message === "smtp: server doesn't support AUTH",
+    );
+  });
+  const wire = recorded.toString('binary');
+  assert.match(wire, /^EHLO localhost\r\nHELO localhost\r\n/);
+  assert.equal(wire.includes('AUTH'), false);
+  assert.equal(wire.includes('MAIL FROM'), false);
+  assert.equal(wire.includes('s3cret-password'), false);
 });
 
 test('linux-x64 .node is under 2MB', () => {

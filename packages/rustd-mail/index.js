@@ -553,6 +553,11 @@ class SmtpClient {
     const id = await smtpCall('DIAL', binding.smtpDial(addr, timeoutMs >>> 0));
     const client = new SmtpClient(new NativeSmtpIo(id), host, timeoutMs);
     try {
+      // Go NewClient sets client.tls from conn.(*tls.Conn). rustd-net fromConn is
+      // gone, so dial({ tls: { implicit: true } }) is tls.Dial + NewClient.
+      if (opts.tls && opts.tls.implicit) {
+        await client._wrapTls(opts.tls);
+      }
       await client._readResponse(220, '');
       return client;
     } catch (err) {
@@ -750,9 +755,7 @@ class SmtpClient {
     return Object.prototype.hasOwnProperty.call(this._ext, key) ? this._ext[key] : '';
   }
 
-  async startTls(config = {}) {
-    await this._hello();
-    await this._cmd(220, 'STARTTLS');
+  async _wrapTls(config = {}) {
     if (typeof this._io.takeFd !== 'function') {
       throw new FeatureNotBuiltError('smtp: STARTTLS handshake not built', { command: 'STARTTLS' });
     }
@@ -794,6 +797,12 @@ class SmtpClient {
       serverName: servername,
       cipher: tlsSock.getCipher() || null,
     };
+  }
+
+  async startTls(config = {}) {
+    await this._hello();
+    await this._cmd(220, 'STARTTLS');
+    await this._wrapTls(config);
     await this._ehlo();
   }
 
