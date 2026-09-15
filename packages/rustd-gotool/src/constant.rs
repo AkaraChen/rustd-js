@@ -1695,7 +1695,10 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
 /// inner starts with space. Multibyte pad (NBSP/BOM/fullwidth) is U+FFFD
 /// because the pad rune is split. Grapheme clusters (ZWJ family / VS16 / RI)
 /// keep only the first rune; named/hex/octal leftover (`\\n` + UTF-8 /
-/// `\\x41` + UTF-8) is ignored. `"\x41"` / `"\'"` / `` `\n` `` still parse as
+/// `\\x41` + UTF-8) is ignored. Hex/octal `\\x27`/`\\047`/`\\x22`/`\\042`
+/// produce the quote *value* without hitting the raw-quote syntax check;
+/// wrap-strip of `"''"` / `` `'` `` starts with raw `'` and is Unknown;
+/// `\\\\x27` is backslash 92 with leftover. `"\x41"` / `"\'"` / `` `\n` `` still parse as
 /// CHAR. IMAG is Complex `(0 + <float>i)`. STRING is `strconv.Unquote`
 /// (CHAR `'ab'` is Int 97; STRING `'ab'` is Unknown because Unquote rejects leftover).
 #[napi]

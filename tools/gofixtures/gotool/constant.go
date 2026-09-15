@@ -1345,6 +1345,17 @@ func charLiteralCorpus() []string {
 		// Malformed: unclosed named escape, invalid octal/hex/unicode, backslash+TAB.
 		"'\n", `'\a`, `'\xGG'`, `'\8中'`, `'\u{1F600}'`, "'\\\t'", `'\x0'`, `'\u12G4'`,
 		`'\U0001F600`, `'\nX`, `'\x41中`,
+		// Hex/octal encode the CHAR quote/dquote as a *value*. UnquoteChar
+		// never sees raw '\'' / '\"'. Contrast wrap-strip of "''" / `'`
+		// (raw quote syntax → Unknown) and `\\x27` (backslash 92, leftover x27).
+		`'\x27'`, `'\047'`, `'\x22'`, `'\042'`,
+		`"\x27"`, "`\\x27`",
+		`"''"`, "`'`",
+		`'\\x27'`, `' \x27'`, `'\x27 '`,
+		`'\x27a'`, `'\0478'`, `'\x27\x27'`,
+		`'\u0022'`,
+		// Malformed: incomplete hex, bad hex digit, unclosed hex/octal, 2-digit octal.
+		`'\x2'`, `'\x2G'`, `'\x27`, `'\047`, `'\04'`,
 	}
 }
 

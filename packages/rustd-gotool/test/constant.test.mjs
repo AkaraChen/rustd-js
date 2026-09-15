@@ -802,7 +802,7 @@ test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; n
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
   assert.equal(fixture.slice, 'constant-char-literal');
-  assert.ok(fixture.cases.length >= 210, `too few CHAR cases: ${fixture.cases.length}`);
+  assert.ok(fixture.cases.length >= 230, `too few CHAR cases: ${fixture.cases.length}`);
   const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
   assert.ok(unknown.length >= 3, `need malformed CHAR cases, got ${unknown.length}`);
   for (const c of fixture.cases) {
@@ -953,6 +953,26 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\\U0001F600",
     "'\\nX",
     "'\\x41中",
+    "'\\x27'",
+    "'\\047'",
+    "'\\x22'",
+    "'\\042'",
+    '"\\x27"',
+    '`\\x27`',
+    '"\'\'"',
+    "`'`",
+    "'\\\\x27'",
+    "' \\x27'",
+    "'\\x27 '",
+    "'\\x27a'",
+    "'\\0478'",
+    "'\\x27\\x27'",
+    "'\\u0022'",
+    "'\\x2'",
+    "'\\x2G'",
+    "'\\x27",
+    "'\\047",
+    "'\\04'",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -960,7 +980,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 132 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 152 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -1102,6 +1122,46 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(unclosedU.kind, 'Unknown');
   const unclosedNlX = constMakeFromLiteral("'\\nX", TOKEN.CHAR, 0);
   assert.equal(unclosedNlX.toString(), '10');
+  const hexQuote = constMakeFromLiteral("'\\x27'", TOKEN.CHAR, 0);
+  assert.equal(hexQuote.toString(), '39');
+  const octQuote = constMakeFromLiteral("'\\047'", TOKEN.CHAR, 0);
+  assert.equal(octQuote.toString(), '39');
+  const hexDquote = constMakeFromLiteral("'\\x22'", TOKEN.CHAR, 0);
+  assert.equal(hexDquote.toString(), '34');
+  const octDquote = constMakeFromLiteral("'\\042'", TOKEN.CHAR, 0);
+  assert.equal(octDquote.toString(), '34');
+  const dqHexQuote = constMakeFromLiteral('"\\x27"', TOKEN.CHAR, 0);
+  assert.equal(dqHexQuote.toString(), '39');
+  const bqHexQuote = constMakeFromLiteral('`\\x27`', TOKEN.CHAR, 0);
+  assert.equal(bqHexQuote.toString(), '39');
+  const wrapTwoQuotes = constMakeFromLiteral('"\'\'"', TOKEN.CHAR, 0);
+  assert.equal(wrapTwoQuotes.kind, 'Unknown');
+  const bqQuote = constMakeFromLiteral("`'`", TOKEN.CHAR, 0);
+  assert.equal(bqQuote.kind, 'Unknown');
+  const bsThenHex = constMakeFromLiteral("'\\\\x27'", TOKEN.CHAR, 0);
+  assert.equal(bsThenHex.toString(), '92');
+  const spaceThenHex = constMakeFromLiteral("' \\x27'", TOKEN.CHAR, 0);
+  assert.equal(spaceThenHex.toString(), '32');
+  const hexQuoteSpace = constMakeFromLiteral("'\\x27 '", TOKEN.CHAR, 0);
+  assert.equal(hexQuoteSpace.toString(), '39');
+  const hexQuoteA = constMakeFromLiteral("'\\x27a'", TOKEN.CHAR, 0);
+  assert.equal(hexQuoteA.toString(), '39');
+  const octQuote8 = constMakeFromLiteral("'\\0478'", TOKEN.CHAR, 0);
+  assert.equal(octQuote8.toString(), '39');
+  const hexQuoteTwice = constMakeFromLiteral("'\\x27\\x27'", TOKEN.CHAR, 0);
+  assert.equal(hexQuoteTwice.toString(), '39');
+  const uniDquote = constMakeFromLiteral("'\\u0022'", TOKEN.CHAR, 0);
+  assert.equal(uniDquote.toString(), '34');
+  const shortHex = constMakeFromLiteral("'\\x2'", TOKEN.CHAR, 0);
+  assert.equal(shortHex.kind, 'Unknown');
+  const badHexDigit = constMakeFromLiteral("'\\x2G'", TOKEN.CHAR, 0);
+  assert.equal(badHexDigit.kind, 'Unknown');
+  const unclosedHexQuote = constMakeFromLiteral("'\\x27", TOKEN.CHAR, 0);
+  assert.equal(unclosedHexQuote.kind, 'Unknown');
+  const unclosedOctQuote = constMakeFromLiteral("'\\047", TOKEN.CHAR, 0);
+  assert.equal(unclosedOctQuote.kind, 'Unknown');
+  const twoDigitOct = constMakeFromLiteral("'\\04'", TOKEN.CHAR, 0);
+  assert.equal(twoDigitOct.kind, 'Unknown');
 });
 
 function evaluateImagLit(c) {

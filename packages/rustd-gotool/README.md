@@ -213,7 +213,12 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `'\\中'`) is ignored. Unquoted ZWJ/VS16/RI and ZWSP/ZWJ pad around 中
   wrap-strip to U+FFFD. Unclosed `'\n` / `'\a` / `'\\'`, invalid `'\xGG'` /
   `'\8中'` / `'\x0'` / `'\u12G4'` / `'\u{1F600}'`, and backslash+TAB are
-  Unknown. `aa` (empty inner), `'''` (inner is `'`), `''中''` (inner
+  Unknown. Hex/octal `'\x27'` / `'\047'` / `'\x22'` / `'\042'` encode the
+  quote/dquote *value* (Int 39 / 34) without hitting the raw-quote syntax
+  check; wrap-strip of `"''"` / `` `'` `` starts with raw `'` and is Unknown;
+  `'\\x27'` is backslash Int 92 with leftover `x27`. Incomplete `'\x2'` /
+  `'\x2G'` / `'\04'` and unclosed `'\x27` / `'\047` are Unknown. `aa` (empty
+  inner), `'''` (inner is `'`), `''中''` (inner
   starts with `'`), uppercase `'\X41'`, incomplete `'\x0g'` / `'\x4_1'` /
   `'\U0010FFF'`, backslash+CR, and JS-style `'\u{41}'` are Unknown.
   Unicode noncharacters (`'\uFFFE'`) are valid runes. STRING uses `strconv.Unquote` (leftover is Unknown:
