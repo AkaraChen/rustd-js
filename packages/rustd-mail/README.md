@@ -59,8 +59,12 @@ await sendMail('127.0.0.1:2525', plainAuth({
   TLS-or-localhost rule as `plainAuth`.
 - DATA lines longer than 998 bytes throw (RFC 5321). Go's `DotWriter` does not
   enforce this.
-- Default dial timeout is 30s. Pass `{ timeoutMs: 0 }` for Go-like blocking.
+- Default dial timeout is 30s (connect + read/write). Pass `{ timeoutMs: 0 }`
+  for Go-like blocking. Expired waits throw `smtp: connection timed out`.
 - No connection pool; one `SmtpClient` is one TCP connection.
+- Server response lines have no extra cap (Go `textproto.ReadLine` is
+  unlimited). `250-` then a non-code line is kept as RFC 959 continuation,
+  matching Go. DATA *client* lines over 998 bytes still throw.
 
 ## Size
 

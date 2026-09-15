@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import {
@@ -21,18 +22,80 @@ const sendMsg = 'From: test@example.com\r\nTo: other@example.com\r\nSubject: Sen
 const dotMsg = 'From: user@gmail.com\nTo: golang-nuts@googlegroups.com\nSubject: Hooray for Go\n\nLine 1\n.Leading dot line .\nGoodbye.';
 const lfMsg = 'From: a@b.com\nTo: c@d.com\n\nhello\n.world\nmixed\r\nline\n';
 
-function goSmtp() {
-  const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
-  const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
-  const result = spawnSync(command, [...prefix, 'run', '.'], {
-    cwd: resolve(root, 'tools/gofixtures/smtp'),
+let cachedGo;
+function goBin() {
+  if (cachedGo) return cachedGo;
+  if (process.env.RUSTD_GO === 'path') {
+    cachedGo = { command: 'go', prefix: [] };
+    return cachedGo;
+  }
+  if (process.env.RUSTD_GO) {
+    cachedGo = { command: process.env.RUSTD_GO, prefix: [] };
+    return cachedGo;
+  }
+  const probe = spawnSync('mise', ['exec', '--', 'go', 'env', 'GOROOT'], {
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+  if (probe.status === 0 && probe.stdout.trim()) {
+    cachedGo = { command: join(probe.stdout.trim(), 'bin', 'go'), prefix: [] };
+    return cachedGo;
+  }
+  cachedGo = { command: 'mise', prefix: ['exec', '--', 'go'] };
+  return cachedGo;
+}
+
+function goSmtp(args = []) {
+  const { command, prefix } = goBin();
+  const result = spawnSync(command, [...prefix, 'run', '.', ...args], {
+    cwd: testdata,
     encoding: 'utf8',
     maxBuffer: 32 << 20,
-    timeout: 60000,
+    timeout: 120000,
     env: { ...process.env, GOWORK: 'off' },
   });
   if (result.error) throw result.error;
   return result;
+}
+
+function goBuildClient() {
+  const dir = mkdtempSync(join(tmpdir(), 'rustd-smtp-'));
+  const bin = join(dir, 'smtp-client');
+  const { command, prefix } = goBin();
+  const result = spawnSync(command, [...prefix, 'build', '-o', bin, '.'], {
+    cwd: testdata,
+    encoding: 'utf8',
+    timeout: 180000,
+    env: { ...process.env, GOWORK: 'off' },
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(result.stderr + result.stdout);
+  return { bin, dir };
+}
+
+function goClient(bin, id, addr) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, ['-client', id, '-addr', addr], {
+      cwd: testdata,
+      env: { ...process.env, GOWORK: 'off' },
+    });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`go client timeout ${id}`));
+    }, 10000);
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (status) => {
+      clearTimeout(timer);
+      resolve({ status, stdout, stderr });
+    });
+  });
 }
 
 async function runTsCase(c, addr) {
@@ -133,6 +196,71 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-auth-cram-md5') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth(cramMd5Auth('user', 'pass'));
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-vrfy-rset-noop') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.verify('alice@example.com');
+      await client.reset();
+      await client.noop();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-smtputf8-mail') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      const w = await client.data();
+      await w.write(sendMsg);
+      await w.close();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-short-response') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-malformed-continue') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-custom') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('testhost');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -145,7 +273,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 8, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 17, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -174,6 +302,34 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
     } else {
       assert.equal(caught, undefined, `${c.id} unexpected ${caught}`);
     }
+  }
+});
+
+test('Go net/smtp against Node fake server matches committed clientHex', async () => {
+  const built = goBuildClient();
+  try {
+    const packet = JSON.parse(readFileSync(fixturePath, 'utf8'));
+    for (const c of packet.cases) {
+      if (c.kind === 'validate') continue;
+      let goErr;
+      const bytes = await withFakeSmtp({ ...c, tls: c.tls ? tlsServer : undefined }, async (addr) => {
+        const result = await goClient(built.bin, c.id, addr);
+        if (result.status !== 0) goErr = (result.stderr || '') + (result.stdout || '');
+      }).catch((err) => {
+        goErr = goErr ?? String(err);
+        return Buffer.alloc(0);
+      });
+      const gotHex = Buffer.from(bytes).toString('hex');
+      assert.equal(gotHex, c.clientHex, `${c.id} reverse Go-on-Node\nNode: ${Buffer.from(bytes).toString('utf8')}\nGo: ${Buffer.from(c.clientHex, 'hex').toString('utf8')}\nerr: ${goErr ?? ''}`);
+      if (c.error) {
+        assert.ok(goErr, `${c.id} expected Go error ${c.error}`);
+        assert.equal(goErr.trim(), c.error, `${c.id} Go error text`);
+      } else {
+        assert.equal(goErr, undefined, `${c.id} unexpected Go ${goErr}`);
+      }
+    }
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
   }
 });
 
@@ -289,6 +445,42 @@ test('CRAM-MD5 next() matches Go hmac-md5 vector', () => {
   );
 });
 
+test('close() then command throws and does not write MAIL', async () => {
+  const recorded = await withFakeSmtp({
+    banner: '220 localhost',
+    replies: ['250 localhost', '221 bye'],
+  }, async (addr) => {
+    const client = await SmtpClient.dial(addr);
+    await client.quit();
+    await assert.rejects(
+      () => client.mail('a@b.com'),
+      (err) => err instanceof SmtpError && /connection closed/.test(err.message),
+    );
+  });
+  const text = recorded.toString();
+  assert.match(text, /^EHLO localhost\r\nQUIT\r\n/);
+  assert.equal(text.includes('MAIL FROM'), false);
+});
+
+test('DATA hangup after 354 throws and is not treated as success', async () => {
+  await withFakeSmtp({
+    banner: '220 localhost',
+    replies: ['250 localhost', '250 sender', '250 rcpt', '354 go'],
+    hangupAfter: '354',
+  }, async (addr) => {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      const w = await client.data();
+      await w.write('hello\r\n').catch(() => {});
+      await assert.rejects(() => w.close(), SmtpError);
+    } finally {
+      await client.abandon();
+    }
+  });
+});
+
 test('DATA overlong line throws and is not truncated', async () => {
   await withFakeSmtp({
     banner: '220 localhost',
@@ -303,6 +495,31 @@ test('DATA overlong line throws and is not truncated', async () => {
     ));
     await client.abandon();
   });
+});
+
+test('hung banner respects timeoutMs and does not hang', async () => {
+  const { createServer } = await import('node:net');
+  const server = createServer((sock) => {
+    sock.setTimeout(8000);
+    sock.on('timeout', () => sock.destroy());
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const { port } = server.address();
+    const start = Date.now();
+    await assert.rejects(
+      () => SmtpClient.dial(`127.0.0.1:${port}`, { timeoutMs: 250 }),
+      (err) => err instanceof SmtpError && err.message === 'smtp: connection timed out',
+    );
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed >= 200, `elapsed ${elapsed} too fast`);
+    assert.ok(elapsed < 4000, `elapsed ${elapsed} too slow`);
+  } finally {
+    server.close();
+  }
 });
 
 test('linux-x64 .node is under 2MB', () => {

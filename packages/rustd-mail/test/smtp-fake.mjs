@@ -48,6 +48,10 @@ function drain(sock, state) {
     if (state.i >= replies.length) continue;
     const reply = replies[state.i++];
     sendReply(sock, reply);
+    if (state.hangupAfter && lastCode(reply) === state.hangupAfter) {
+      sock.destroy();
+      return;
+    }
     if (lastCode(reply) === '354') state.mode = 'data';
     if (state.tlsOpt && lastCode(reply) === '220') {
       state.upgrading = true;
@@ -73,10 +77,11 @@ function drain(sock, state) {
 }
 
 export function withFakeSmtp(script, fn) {
-  const { banner, replies, tls: tlsOpt } = script;
+  const { banner, replies, tls: tlsOpt, hangupAfter } = script;
   const state = {
     replies,
     tlsOpt,
+    hangupAfter,
     chunks: [],
     buf: Buffer.alloc(0),
     mode: 'cmd',
