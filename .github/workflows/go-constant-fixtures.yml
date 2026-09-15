@@ -1,10 +1,6 @@
 name: Go constant fixtures
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/go-constant-fixtures.yml
-      - scripts/generate-constant-fixtures.py
 permissions:
   contents: read
 jobs:

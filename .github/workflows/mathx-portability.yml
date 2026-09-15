@@ -1,11 +1,6 @@
 name: Mathx portability diagnostics
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/mathx-portability.yml
-      - packages/rustd-mathx/**
-      - tools/gofixtures/mathx-portability/**
 permissions:
   contents: read
 jobs:
