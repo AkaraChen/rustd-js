@@ -157,5 +157,6 @@ test('math/cmplx matches Go float64 bit patterns (cartesian specials + seeded ra
 
   const ulp = diffs.filter(d => d.kind === 'libm-ulp');
   const max = ulp.reduce((m, d) => Math.max(m, d.ulp ?? 0), 0);
-  assert.ok(max < 1024, `unexpected huge libm gap max=${max} count=${ulp.length}`);
+  const largest = [...ulp].sort((a, b) => b.ulp - a.ulp).slice(0, 10);
+  assert.ok(max < 1024, `unexpected huge libm gap max=${max} count=${ulp.length}\n${JSON.stringify(largest, null, 2)}`);
 });

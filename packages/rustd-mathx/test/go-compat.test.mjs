@@ -44,7 +44,11 @@ test('JS-generated bit results are accepted by Go math/bits', () => {
   const temp = mkdtempSync(join(tmpdir(), 'rustd-mathx-'));
   try {
     const file = join(temp, 'verify.go');
-    writeFileSync(file, lines.join('\n'));
+    // Include the failed expression: exit status alone cannot distinguish an oracle
+    // compiler issue from a native result mismatch on another architecture.
+    const diagnosticLines = lines.map(line => line.replaceAll('os.Exit(1)',
+      `fmt.Fprintln(os.Stderr, ${JSON.stringify(line)}); os.Exit(1)`));
+    writeFileSync(file, diagnosticLines.join('\n'));
     const command = process.env.RUSTD_GO === 'path' ? 'go' : 'mise';
     const args = command === 'go' ? ['run', file] : ['exec', '--', 'go', 'run', file];
     const result = spawnSync(command, args, { encoding: 'utf8', timeout: 60_000 });
