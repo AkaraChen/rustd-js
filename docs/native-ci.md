@@ -78,3 +78,7 @@ the manual diagnostic workflows do not replace any of its gates.
 Windows cannot adopt a Winsock SOCKET through Node’s Unix-style `net.Socket({ fd })`. SMTP uses a Node-owned TCP stream on Windows from initial connection through TLS upgrade. The stream reader detaches its listeners before transferring ownership to TLS; native DATA dot-stuffing and every Go byte comparison remain in place. Unix keeps the native TCP transport. See the failed Windows job in run 34954842280 for the original `ERR_INVALID_FD_TYPE`.
 
 The unicode test’s recode helper now copies each encoded rune immediately into a bounded output buffer instead of retaining one typed array per rune. It still visits every input rune and uses the same native decode/encode calls and byte/checksum assertions. This avoids the large retained object graph observed when the local test process was killed with SIGKILL.
+
+Go multipart `Part.FileName` returns `filepath.Base` using host path rules. Tests compare that parsed field with the host basename, while preserving the complete filename in the exact wire-header comparison.
+
+The existing checksum chi-square gate retains a random seed, one million samples per modulus and its original critical values. Its seed is now printed for diagnosis. Such a statistical gate can reject a random sample; a macOS ARM64 attempt reported chi-square 19.41176 against the unchanged 18.48 limit. The failure log is retained in the validation report.

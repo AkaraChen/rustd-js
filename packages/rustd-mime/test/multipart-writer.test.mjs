@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import {
   MultipartWriter, MultipartError, fileContentDisposition,
   mimeHeaderSet, mimeHeaderAdd,
@@ -126,7 +126,9 @@ test('fileContentDisposition matches Go CreateFormFile Content-Disposition', () 
     assert.equal(fileContentDisposition(c.fieldname, c.filename), golden.value);
     assert.equal(golden.contentType, 'application/octet-stream');
     assert.equal(golden.formName, c.fieldname);
-    assert.equal(golden.fileName, c.filename);
+    // Go Part.FileName applies filepath.Base for the host OS. The wire header
+    // above must still preserve the complete quoted filename on every platform.
+    assert.equal(golden.fileName, c.filename === '' ? '' : basename(c.filename));
   }
 });
 
@@ -168,7 +170,7 @@ test('createFormFile quoted names and binary body vs Go', () => {
   assert.equal(parsed.error ?? '', '');
   assert.equal(parsed.parts.length, 1);
   assert.equal(parsed.parts[0].formName, 'a"b');
-  assert.equal(parsed.parts[0].fileName, 'x\\y.bin');
+  assert.equal(parsed.parts[0].fileName, basename('x\\y.bin'));
   assert.equal(parsed.parts[0].bodyHex, hex(payload));
   assert.equal(parsed.parts[0].header['Content-Type'][0], 'application/octet-stream');
   assert.equal(

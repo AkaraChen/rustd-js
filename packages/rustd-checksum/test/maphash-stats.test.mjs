@@ -48,8 +48,9 @@ test('avalanche: flipping 1 input bit flips about 32 of 64 output bits', () => {
   assert.ok(mean >= 28 && mean <= 36, `avalanche mean ${mean}`);
 });
 
-test('chi-square distribution of short strings mod 8/64/1024 has p > 0.01', () => {
+test('chi-square distribution of short strings mod 8/64/1024 has p > 0.01', (t) => {
   const seed = maphashSeed();
+  t.diagnostic(`maphash distribution seed=0x${seed.toString(16)}`);
   const n = 1_000_000;
   for (const mod of [8, 64, 1024]) {
     const counts = new Float64Array(mod);
