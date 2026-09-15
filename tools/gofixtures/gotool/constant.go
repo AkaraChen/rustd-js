@@ -1741,3 +1741,217 @@ func verifyConstantBool(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-bool cases\n", len(packet.Cases))
 }
+
+type ConstCBinCase struct {
+	ID      string `json:"id"`
+	Op      string `json:"op"`
+	OpTok   int    `json:"opTok"`
+	FormX   string `json:"formX"`
+	XX      string `json:"xx"`
+	XY      string `json:"xy"`
+	FormY   string `json:"formY"`
+	YX      string `json:"yx"`
+	YY      string `json:"yy"`
+	Kind    string `json:"kind"`
+	Exact   string `json:"exact"`
+	Sign    int    `json:"sign"`
+	ReKind  string `json:"reKind"`
+	ReExact string `json:"reExact"`
+	ImKind  string `json:"imKind"`
+	ImExact string `json:"imExact"`
+}
+
+type ConstCBinPacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Slice   string          `json:"slice"`
+	Cases   []ConstCBinCase `json:"cases"`
+}
+
+type cplxSrc struct {
+	form, x, y string
+}
+
+func makeCplx(s cplxSrc) (constant.Value, error) {
+	switch s.form {
+	case "imag":
+		return constant.MakeFromLiteral(s.x, token.IMAG, 0), nil
+	case "int":
+		n, err := strconv.ParseInt(s.x, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return constant.MakeInt64(n), nil
+	case "quo":
+		a, err := strconv.ParseInt(s.x, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		b, err := strconv.ParseInt(s.y, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		if b == 0 {
+			return nil, fmt.Errorf("quo by zero")
+		}
+		return constant.BinaryOp(constant.MakeInt64(a), token.QUO, constant.MakeInt64(b)), nil
+	case "unknown":
+		return constant.MakeUnknown(), nil
+	default:
+		return nil, fmt.Errorf("unknown complex src form %q", s.form)
+	}
+}
+
+func fillComplexBin(v constant.Value, c *ConstCBinCase) {
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	c.Sign = constant.Sign(v)
+	re := constant.Real(v)
+	im := constant.Imag(v)
+	c.ReKind = re.Kind().String()
+	c.ReExact = re.ExactString()
+	c.ImKind = im.Kind().String()
+	c.ImExact = im.ExactString()
+}
+
+func evalComplexBin(a, b cplxSrc, op token.Token) (ConstCBinCase, error) {
+	vx, err := makeCplx(a)
+	if err != nil {
+		return ConstCBinCase{}, err
+	}
+	vy, err := makeCplx(b)
+	if err != nil {
+		return ConstCBinCase{}, err
+	}
+	v := constant.BinaryOp(vx, op, vy)
+	c := ConstCBinCase{
+		OpTok: int(op),
+		FormX: a.form,
+		XX:    a.x,
+		XY:    a.y,
+		FormY: b.form,
+		YX:    b.x,
+		YY:    b.y,
+	}
+	fillComplexBin(v, &c)
+	return c, nil
+}
+
+func complexBinOps() []struct {
+	name string
+	tok  token.Token
+} {
+	return []struct {
+		name string
+		tok  token.Token
+	}{
+		{"ADD", token.ADD},
+		{"SUB", token.SUB},
+		{"MUL", token.MUL},
+		{"QUO", token.QUO},
+	}
+}
+
+// Official go/constant opTests that involve i, plus mixed Int/Float and Unknown.
+func complexBinCorpus() []cplxSrc {
+	return []cplxSrc{
+		{"imag", "0i", "0"},
+		{"imag", "1i", "0"},
+		{"imag", "-1i", "0"},
+		{"imag", "2i", "0"},
+		{"imag", "1.5i", "0"},
+		{"imag", "0.1i", "0"},
+		{"imag", "-2.5i", "0"},
+		{"imag", "5i", "0"},
+		{"imag", "3i", "0"},
+		{"int", "0", "0"},
+		{"int", "1", "0"},
+		{"int", "-1", "0"},
+		{"int", "3", "0"},
+		{"quo", "1", "2"},
+		{"quo", "-3", "2"},
+		{"unknown", "0", "0"},
+	}
+}
+
+func dumpConstantComplexBin(w io.Writer) {
+	packet := ConstCBinPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-complex-binop",
+	}
+	corpus := complexBinCorpus()
+	for _, op := range complexBinOps() {
+		for i, a := range corpus {
+			for j, b := range corpus {
+				if a.form != "imag" && b.form != "imag" {
+					continue
+				}
+				vy, err := makeCplx(b)
+				if err != nil {
+					fail(err)
+				}
+				if op.tok == token.QUO && constant.Sign(vy) == 0 {
+					continue
+				}
+				c, err := evalComplexBin(a, b, op.tok)
+				if err != nil {
+					fail(err)
+				}
+				c.ID = fmt.Sprintf("go-cbin-%s-%d-%d", op.name, i, j)
+				c.Op = op.name
+				packet.Cases = append(packet.Cases, c)
+			}
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantComplexBin(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstCBinPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-complex-binop" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-complex-binop packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{}
+	for _, op := range complexBinOps() {
+		tokOf[op.name] = op.tok
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		got, err := evalComplexBin(
+			cplxSrc{c.FormX, c.XX, c.XY},
+			cplxSrc{c.FormY, c.YX, c.YY},
+			op,
+		)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ReKind != c.ReKind || got.ReExact != c.ReExact || got.ImKind != c.ImKind || got.ImExact != c.ImExact {
+			fail(fmt.Errorf("mismatch case %d id=%s op=%s: go kind=%s exact=%s sign=%d re=%s/%s im=%s/%s got kind=%s exact=%s sign=%d re=%s/%s im=%s/%s",
+				i, c.ID, c.Op, got.Kind, got.Exact, got.Sign, got.ReKind, got.ReExact, got.ImKind, got.ImExact,
+				c.Kind, c.Exact, c.Sign, c.ReKind, c.ReExact, c.ImKind, c.ImExact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-complex-binop cases\n", len(packet.Cases))
+}

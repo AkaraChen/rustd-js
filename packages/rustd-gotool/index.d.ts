@@ -25,17 +25,18 @@ export function constFloat64Val(v: GoConstValue): [number, boolean];
 /** Int/Float ordering via Go `Compare` (`big.Rat.Cmp`): -1 / 0 / 1. Throws on Unknown. */
 export function constCompare(x: GoConstValue, y: GoConstValue): number;
 export function constSign(v: GoConstValue): number;
-/** Go `Real`. Complex IMAG real is Int 0; Unknown/Int/Float return `x`. */
+/** Go `Real`. Complex returns the stored re (IMAG real is Int 0); Unknown/Int/Float return `x`. */
 export function constReal(v: GoConstValue): GoConstValue;
-/** Go `Imag`. Int/Float → Int 0; Complex IMAG imag is Float; Unknown → Unknown. */
+/** Go `Imag`. Int/Float → Int 0; Complex returns the stored im; Unknown → Unknown. */
 export function constImag(v: GoConstValue): GoConstValue;
 export function constBitLen(v: GoConstValue): number;
 /**
  * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
  * Float (and mixed Int/Float) ADD/SUB/MUL/QUO.
+ * Complex (and mixed Int/Float/Complex) ADD/SUB/MUL/QUO via Go's component formula.
  * Bool LAND/LOR. Unknown operand → Unknown.
  * QUO of Ints is Float (`n` / `n/d` ExactString). Integer-valued Float stays Float.
- * QUO/REM by zero → Unknown. REM/AND/OR/XOR/AND_NOT on Float throw.
+ * QUO/REM by zero (including Complex 0+0i) → Unknown. REM/AND/OR/XOR/AND_NOT on Float/Complex throw.
  * Mixed Bool+numeric LAND/LOR throw (Go `match` would duplicate the Bool; we reject).
  */
 export function constBinaryOp(op: number, x: GoConstValue, y: GoConstValue): GoConstValue;
