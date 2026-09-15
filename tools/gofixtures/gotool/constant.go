@@ -1326,3 +1326,112 @@ func verifyConstantCharLiteral(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-char-literal cases\n", len(packet.Cases))
 }
+
+type ConstImagLitCase struct {
+	ID         string `json:"id"`
+	Lit        string `json:"lit"`
+	Tok        string `json:"tok"`
+	TokNum     int    `json:"tokNum"`
+	Kind       string `json:"kind"`
+	Exact      string `json:"exact"`
+	Sign       int    `json:"sign"`
+	ReKind     string `json:"reKind"`
+	ReExact    string `json:"reExact"`
+	ImKind     string `json:"imKind"`
+	ImExact    string `json:"imExact"`
+	ImF64Bits  string `json:"imF64Bits"`
+	ImF64Exact bool   `json:"imF64Exact"`
+}
+
+type ConstImagLitPacket struct {
+	Schema  int                `json:"schema"`
+	Package string             `json:"package"`
+	Go      string             `json:"go"`
+	Slice   string             `json:"slice"`
+	Cases   []ConstImagLitCase `json:"cases"`
+}
+
+func evalImagLiteral(lit string) ConstImagLitCase {
+	c := ConstImagLitCase{Lit: lit, Tok: "IMAG", TokNum: int(token.IMAG)}
+	v := constant.MakeFromLiteral(lit, token.IMAG, 0)
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	c.Sign = constant.Sign(v)
+	re := constant.Real(v)
+	im := constant.Imag(v)
+	c.ReKind = re.Kind().String()
+	c.ReExact = re.ExactString()
+	c.ImKind = im.Kind().String()
+	c.ImExact = im.ExactString()
+	f, exact := constant.Float64Val(im)
+	c.ImF64Bits = fmt.Sprintf("%016x", math.Float64bits(f))
+	c.ImF64Exact = exact
+	return c
+}
+
+// Official go/constant TestNumbers imagTests (LHS) + TestString complex
+// inputs except 1e9999i (512-bit floatVal ExactString; same deferral as FLOAT).
+func imagLiteralCorpus() []string {
+	return []string{
+		`1_234i`, `1_234_567i`,
+		`0.i`, `123.i`, `0123.i`,
+		`0.e+1i`, `123.E-1_0i`, `01_23.e123i`,
+		`1e-1000000000i`, `1e+1000000000i`, `6e5518446744i`, `-6e5518446744i`,
+		`0i`, `-0i`, `10i`, `-10i`,
+		`1i`, `+1i`, `-1i`, `1.5i`, `-2.1i`, `.5i`, `1.i`, `1e2i`,
+		`0x1p0i`, `0x1.2p0i`, `0Xdeadcafep+1i`, `1_2_3.i`,
+		`08.5i`, `+0i`,
+		``, `1`, `i`, `1I`, `1ii`, `1i2`, `xyz`, `1e`, `+`, `08i`,
+		`1e+i`, `1_i`, `_1i`, `1.2.3i`, `'1i'`,
+	}
+}
+
+func dumpConstantImagLiteral(w io.Writer) {
+	packet := ConstImagLitPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-imag-literal",
+	}
+	for i, lit := range imagLiteralCorpus() {
+		c := evalImagLiteral(lit)
+		c.ID = fmt.Sprintf("go-lit-IMAG-%d", i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantImagLiteral(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstImagLitPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-imag-literal" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-imag-literal packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		if c.Tok != "IMAG" {
+			fail(fmt.Errorf("case %d id=%s: tok %q != IMAG", i, c.ID, c.Tok))
+		}
+		if c.TokNum != int(token.IMAG) {
+			fail(fmt.Errorf("case %d id=%s: tokNum %d != Go IMAG %d", i, c.ID, c.TokNum, int(token.IMAG)))
+		}
+		got := evalImagLiteral(c.Lit)
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ReKind != c.ReKind || got.ReExact != c.ReExact || got.ImKind != c.ImKind || got.ImExact != c.ImExact || got.ImF64Bits != c.ImF64Bits || got.ImF64Exact != c.ImF64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s lit=%q: go kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v got kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v",
+				i, c.ID, c.Lit, got.Kind, got.Exact, got.Sign, got.ReKind, got.ReExact, got.ImKind, got.ImExact, got.ImF64Bits, got.ImF64Exact,
+				c.Kind, c.Exact, c.Sign, c.ReKind, c.ReExact, c.ImKind, c.ImExact, c.ImF64Bits, c.ImF64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-imag-literal cases\n", len(packet.Cases))
+}

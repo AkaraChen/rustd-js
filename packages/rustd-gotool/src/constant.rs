@@ -7,11 +7,13 @@ use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 
 /// Opaque `go/constant.Value` (issue #28). Int is arbitrary-precision.
 /// QUO of Ints is a Float (`big.Rat`); QUO/REM by zero is Unknown.
+/// MakeFromLiteral IMAG is Complex with real Int 0 and imag Float (`im_rat`).
 #[napi]
 pub struct GoConstValue {
     kind: String,
     int: Option<num_bigint::BigInt>,
     rat: Option<BigRational>,
+    im_rat: Option<BigRational>,
 }
 
 #[napi]
@@ -44,6 +46,7 @@ fn make_int(n: num_bigint::BigInt) -> GoConstValue {
         kind: "Int".into(),
         int: Some(n),
         rat: None,
+        im_rat: None,
     }
 }
 
@@ -52,6 +55,7 @@ fn make_float(r: BigRational) -> GoConstValue {
         kind: "Float".into(),
         int: None,
         rat: Some(r),
+        im_rat: None,
     }
 }
 
@@ -60,6 +64,33 @@ fn make_unknown() -> GoConstValue {
         kind: "Unknown".into(),
         int: None,
         rat: None,
+        im_rat: None,
+    }
+}
+
+fn make_complex_from_imag(im: BigRational) -> GoConstValue {
+    GoConstValue {
+        kind: "Complex".into(),
+        int: None,
+        rat: None,
+        im_rat: Some(im),
+    }
+}
+
+fn clone_value(v: &GoConstValue) -> GoConstValue {
+    GoConstValue {
+        kind: v.kind.clone(),
+        int: v.int.clone(),
+        rat: v.rat.clone(),
+        im_rat: v.im_rat.clone(),
+    }
+}
+
+fn rat_exact_string(r: &BigRational) -> String {
+    if r.denom() == &num_bigint::BigInt::from(1) {
+        r.numer().to_string()
+    } else {
+        format!("{}/{}", r.numer(), r.denom())
     }
 }
 
@@ -319,9 +350,11 @@ pub fn const_compare(x: &GoConstValue, y: &GoConstValue) -> Result<i32> {
 
 #[napi]
 pub fn const_sign(v: &GoConstValue) -> i32 {
-    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref()) {
-        ("Int", Some(n), _) => sign_i32(n.sign()),
-        ("Float", _, Some(r)) => sign_i32(r.numer().sign()),
+    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref(), v.im_rat.as_ref()) {
+        ("Int", Some(n), _, _) => sign_i32(n.sign()),
+        ("Float", _, Some(r), _) => sign_i32(r.numer().sign()),
+        // Go `Sign(complexVal)` is `Sign(re) | Sign(im)`; IMAG re is 0.
+        ("Complex", _, _, Some(im)) => sign_i32(im.numer().sign()),
         // go/constant.Sign(unknownVal) returns 1.
         _ => 1,
     }
@@ -339,19 +372,45 @@ pub fn const_bit_len(v: &GoConstValue) -> Result<i32> {
     }
 }
 
-/// Int: decimal. Float: `ExactString` (`n` or `n/d`). Unknown: `"unknown"`.
+/// Int: decimal. Float: `ExactString` (`n` or `n/d`).
+/// Complex IMAG: Go `ExactString` `"(0 + <imag>i)"`. Unknown: `"unknown"`.
 #[napi]
 pub fn const_string(v: &GoConstValue) -> String {
-    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref()) {
-        ("Int", Some(n), _) => n.to_string(),
-        ("Float", _, Some(r)) => {
-            if r.denom() == &num_bigint::BigInt::from(1) {
-                r.numer().to_string()
-            } else {
-                format!("{}/{}", r.numer(), r.denom())
-            }
-        }
+    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref(), v.im_rat.as_ref()) {
+        ("Int", Some(n), _, _) => n.to_string(),
+        ("Float", _, Some(r), _) => rat_exact_string(r),
+        ("Complex", _, _, Some(im)) => format!("(0 + {}i)", rat_exact_string(im)),
         _ => "unknown".into(),
+    }
+}
+
+/// Go `Real`. Numeric non-Complex returns `x`; Complex IMAG real is Int 0.
+#[napi]
+pub fn const_real(v: &GoConstValue) -> Result<GoConstValue> {
+    match v.kind.as_str() {
+        "Unknown" | "Int" | "Float" => Ok(clone_value(v)),
+        "Complex" => Ok(make_int(num_bigint::BigInt::from(0))),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constReal requires a numeric or Unknown value",
+        )),
+    }
+}
+
+/// Go `Imag`. Int/Float → Int 0; Complex IMAG imag is the Float prefix.
+#[napi]
+pub fn const_imag(v: &GoConstValue) -> Result<GoConstValue> {
+    match v.kind.as_str() {
+        "Unknown" => Ok(make_unknown()),
+        "Int" | "Float" => Ok(make_int(num_bigint::BigInt::from(0))),
+        "Complex" => match v.im_rat.as_ref() {
+            Some(r) => Ok(make_float(r.clone())),
+            None => Ok(make_unknown()),
+        },
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constImag requires a numeric or Unknown value",
+        )),
     }
 }
 
@@ -919,6 +978,17 @@ fn parse_char_literal(lit: &str) -> Option<i32> {
     unquote_char(&lit.as_bytes()[1..n - 1])
 }
 
+fn parse_imag_literal(lit: &str) -> Option<GoConstValue> {
+    let n = lit.len();
+    if n == 0 || lit.as_bytes()[n - 1] != b'i' {
+        return None;
+    }
+    match parse_float_literal(&lit[..n - 1]) {
+        Some(im) => im.rat.clone().map(make_complex_from_imag),
+        None => None,
+    }
+}
+
 fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
     if lit.is_empty() {
         return None;
@@ -959,8 +1029,9 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
     apply_exp2_exp5(mant, neg, exp2, exp5)
 }
 
-/// Go `MakeFromLiteral` for INT/FLOAT/CHAR. Invalid lit → Unknown. Other toks throw.
+/// Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR. Invalid lit → Unknown. Other toks throw.
 /// `prec` must be 0 (Go panics otherwise). CHAR is an Int (rune code).
+/// IMAG is Complex `(0 + <float>i)` via `makeFloatFromLiteral` on the prefix.
 #[napi]
 pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoConstValue> {
     if prec != 0 {
@@ -974,12 +1045,13 @@ pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoCon
             .map(make_int)
             .unwrap_or_else(make_unknown)),
         token::FLOAT => Ok(parse_float_literal(&lit).unwrap_or_else(make_unknown)),
+        token::IMAG => Ok(parse_imag_literal(&lit).unwrap_or_else(make_unknown)),
         token::CHAR => Ok(parse_char_literal(&lit)
             .map(|code| make_int(num_bigint::BigInt::from(code)))
             .unwrap_or_else(make_unknown)),
         _ => Err(Error::new(
             Status::InvalidArg,
-            "gotool: constMakeFromLiteral tok must be INT, FLOAT, or CHAR",
+            "gotool: constMakeFromLiteral tok must be INT, FLOAT, CHAR, or IMAG",
         )),
     }
 }

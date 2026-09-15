@@ -12,6 +12,8 @@ import {
   constFloat64Val,
   constCompare,
   constSign,
+  constReal,
+  constImag,
   constBitLen,
   constBinaryOp,
   constUnaryOp,
@@ -780,9 +782,9 @@ test('constMakeFromLiteral: 0x10 is Int 16; 1.5 is Float 3/2; invalid is Unknown
   assert.equal(constMakeFromLiteral('1e-1000000000', TOKEN.FLOAT, 0).toString(), '0');
   assert.throws(() => constMakeFromLiteral('1', TOKEN.INT, 1), /prec must be 0/);
   assert.throws(() => constMakeFromLiteral('1', TOKEN.INT, 0.5), TypeError);
-  assert.throws(() => constMakeFromLiteral('1', TOKEN.STRING, 0), /INT, FLOAT, or CHAR/);
-  assert.throws(() => constMakeFromLiteral('1', TOKEN.IMAG, 0), /INT, FLOAT, or CHAR/);
-  assert.throws(() => constMakeFromLiteral('1', TOKEN.ADD, 0), /INT, FLOAT, or CHAR/);
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.STRING, 0), /INT, FLOAT, CHAR, or IMAG/);
+  assert.equal(constMakeFromLiteral('1', TOKEN.IMAG, 0).kind, 'Unknown');
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.ADD, 0), /INT, FLOAT, CHAR, or IMAG/);
   assert.throws(() => constMakeFromLiteral(1, TOKEN.INT, 0), TypeError);
 });
 
@@ -855,6 +857,104 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(surrogate.kind, 'Unknown');
   const octal = constMakeFromLiteral("'\\400'", TOKEN.CHAR, 0);
   assert.equal(octal.kind, 'Unknown');
+});
+
+function evaluateImagLit(c) {
+  const r = constMakeFromLiteral(c.lit, TOKEN.IMAG, 0);
+  const re = constReal(r);
+  const im = constImag(r);
+  const [f, imF64Exact] = constFloat64Val(im);
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    sign: constSign(r),
+    reKind: re.kind,
+    reExact: re.toString(),
+    imKind: im.kind,
+    imExact: im.toString(),
+    imF64Bits: f64BitsHex(f),
+    imF64Exact,
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant MakeFromLiteral IMAG fixtures; native matches every case', () => {
+  const generated = go(['-constant-imag-literal']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-imag-literal-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go MakeFromLiteral IMAG fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-imag-literal');
+  assert.ok(fixture.cases.length >= 40, `too few IMAG cases: ${fixture.cases.length}`);
+  const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(unknown.length >= 3, `need malformed IMAG cases, got ${unknown.length}`);
+  const complex = fixture.cases.filter((c) => c.kind === 'Complex');
+  assert.ok(complex.length >= 3, `need Complex IMAG cases, got ${complex.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateImagLit(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.exact, c.exact, `${c.id} exact lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.sign, c.sign, `${c.id} sign lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.reKind, c.reKind, `${c.id} reKind lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.reExact, c.reExact, `${c.id} reExact lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.imKind, c.imKind, `${c.id} imKind lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.imExact, c.imExact, `${c.id} imExact lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.imF64Bits, c.imF64Bits, `${c.id} imF64Bits lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.imF64Exact, c.imF64Exact, `${c.id} imF64Exact lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.tokNum, TOKEN.IMAG, `${c.id} tokNum`);
+  }
+});
+
+test('JS MakeFromLiteral IMAG extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    '2.5i',
+    '-0.25i',
+    '0x1.8p4i',
+    '1e-10i',
+    '08i',
+    '',
+    '1',
+    'i',
+    '1I',
+  ];
+  const cases = extras.map((lit, i) => evaluateImagLit({
+    id: `js-imag-${i}`, tok: 'IMAG', tokNum: TOKEN.IMAG, lit,
+  }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-imag-literal', cases };
+  const verified = go(['-verify-constant-imag-literal'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 9 gotool constant-imag-literal cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-a-complex';
+  const rejected = go(['-verify-constant-imag-literal'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-imag-literal'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-imag-literal', cases: [],
+  })).status, 0);
+});
+
+test('constMakeFromLiteral IMAG: Complex (0 + xi), no-i Unknown, leftover Unknown', () => {
+  const one = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  assert.equal(one.kind, 'Complex');
+  assert.equal(one.toString(), '(0 + 1i)');
+  assert.equal(constReal(one).kind, 'Int');
+  assert.equal(constReal(one).toString(), '0');
+  assert.equal(constImag(one).kind, 'Float');
+  assert.equal(constImag(one).toString(), '1');
+  assert.equal(constSign(one), 1);
+  const half = constMakeFromLiteral('1.5i', TOKEN.IMAG, 0);
+  assert.equal(half.toString(), '(0 + 3/2i)');
+  const neg = constMakeFromLiteral('-10i', TOKEN.IMAG, 0);
+  assert.equal(neg.toString(), '(0 + -10i)');
+  assert.equal(constSign(neg), -1);
+  const empty = constMakeFromLiteral('i', TOKEN.IMAG, 0);
+  assert.equal(empty.kind, 'Unknown');
+  const noI = constMakeFromLiteral('1', TOKEN.IMAG, 0);
+  assert.equal(noI.kind, 'Unknown');
+  const leftover = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
+  assert.equal(leftover.kind, 'Unknown');
 });
 
 test('constMakeInt64 rejects non-bigint and values outside int64', () => {

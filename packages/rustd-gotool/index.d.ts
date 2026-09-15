@@ -11,16 +11,20 @@ export class GoConstValue {
   toString(): string;
 }
 export function constMakeInt64(v: bigint): GoConstValue;
-/** Go `MakeFromLiteral` for INT/FLOAT/CHAR. Invalid lit → Unknown. CHAR is Int. `prec` must be 0. */
+/** Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR. Invalid lit → Unknown. CHAR is Int. IMAG is Complex. `prec` must be 0. */
 export function constMakeFromLiteral(lit: string, tok: number, prec: number): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
-/** Go `StringVal`. Int/Float would panic → `["", false]`; Unknown → `["", true]`. */
+/** Go `StringVal`. Int/Float/Complex would panic → `["", false]`; Unknown → `["", true]`. */
 export function constToString(v: GoConstValue): [string, boolean];
-/** Go `Float64Val` for Int/Float/Unknown. Bits match IEEE-754; Unknown is `[0, false]`. */
+/** Go `Float64Val` for Int/Float/Unknown. Bits match IEEE-754; Unknown is `[0, false]`. Complex panics in Go → `[0, false]`. */
 export function constFloat64Val(v: GoConstValue): [number, boolean];
 /** Int/Float ordering via Go `Compare` (`big.Rat.Cmp`): -1 / 0 / 1. Throws on Unknown. */
 export function constCompare(x: GoConstValue, y: GoConstValue): number;
 export function constSign(v: GoConstValue): number;
+/** Go `Real`. Complex IMAG real is Int 0; Unknown/Int/Float return `x`. */
+export function constReal(v: GoConstValue): GoConstValue;
+/** Go `Imag`. Int/Float → Int 0; Complex IMAG imag is Float; Unknown → Unknown. */
+export function constImag(v: GoConstValue): GoConstValue;
 export function constBitLen(v: GoConstValue): number;
 /**
  * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.

@@ -122,7 +122,26 @@ func main() {
 	verifyConstantLitFlag := flag.Bool("verify-constant-literal", false, "verify a constant-int-float-literal packet read from stdin")
 	constantCharLitFlag := flag.Bool("constant-char-literal", false, "dump go/constant MakeFromLiteral CHAR fixtures")
 	verifyConstantCharLitFlag := flag.Bool("verify-constant-char-literal", false, "verify a constant-char-literal packet read from stdin")
+	constantImagLitFlag := flag.Bool("constant-imag-literal", false, "dump go/constant MakeFromLiteral IMAG fixtures")
+	verifyConstantImagLitFlag := flag.Bool("verify-constant-imag-literal", false, "verify a constant-imag-literal packet read from stdin")
 	flag.Parse()
+	if *verifyConstantImagLitFlag {
+		verifyConstantImagLiteral(os.Stdin)
+		return
+	}
+	if *constantImagLitFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantImagLiteral(writer)
+		return
+	}
 	if *verifyConstantCharLitFlag {
 		verifyConstantCharLiteral(os.Stdin)
 		return
