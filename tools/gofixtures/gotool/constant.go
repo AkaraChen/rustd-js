@@ -1356,6 +1356,16 @@ func charLiteralCorpus() []string {
 		`'\u0022'`,
 		// Malformed: incomplete hex, bad hex digit, unclosed hex/octal, 2-digit octal.
 		`'\x2'`, `'\x2G'`, `'\x27`, `'\047`, `'\04'`,
+		// Emoji modifier (Fitzpatrick) / keycap: quoted keeps the first rune.
+		// Unquoted 4-byte wrap-strip is U+FFFD. Unquoted keycap starts with
+		// ASCII '1', so wrap-strip leaves VS16 (U+FE0F), not 1 and not FFFD.
+		"'👋🏻'", "'👍🏽'", "'1️⃣'",
+		"👋🏻", "👍🏽", "1️⃣",
+		"'👋🏻x'", "'👋🏻", "'👍🏽", "'1️⃣",
+		`'\U0001F3FB'`, `'\U0001F44B\U0001F3FB'`,
+		`'\uFE0F'`, `'\u0301'`,
+		// Malformed: incomplete/unclosed \U skin-tone.
+		`'\U0001F3F'`, `'\U0001F3FB`, `'\U0001F3FBx'`,
 	}
 }
 

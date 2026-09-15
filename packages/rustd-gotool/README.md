@@ -217,7 +217,11 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   quote/dquote *value* (Int 39 / 34) without hitting the raw-quote syntax
   check; wrap-strip of `"''"` / `` `'` `` starts with raw `'` and is Unknown;
   `'\\x27'` is backslash Int 92 with leftover `x27`. Incomplete `'\x2'` /
-  `'\x2G'` / `'\04'` and unclosed `'\x27` / `'\047` are Unknown. `aa` (empty
+  `'\x2G'` / `'\04'` and unclosed `'\x27` / `'\047` are Unknown. Quoted emoji
+  modifier / keycap keep the first rune (`'👋🏻'` Int 128075, `'1️⃣'` Int 49);
+  unquoted 4-byte wrap-strip is U+FFFD; unquoted `1️⃣` starts with ASCII `1`
+  so wrap-strip is VS16 Int 65039. Incomplete `'\U0001F3F'` and unclosed
+  `'\U0001F3FB` are Unknown. `aa` (empty
   inner), `'''` (inner is `'`), `''中''` (inner
   starts with `'`), uppercase `'\X41'`, incomplete `'\x0g'` / `'\x4_1'` /
   `'\U0010FFF'`, backslash+CR, and JS-style `'\u{41}'` are Unknown.

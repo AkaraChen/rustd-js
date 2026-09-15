@@ -802,7 +802,7 @@ test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; n
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
   assert.equal(fixture.slice, 'constant-char-literal');
-  assert.ok(fixture.cases.length >= 230, `too few CHAR cases: ${fixture.cases.length}`);
+  assert.ok(fixture.cases.length >= 250, `too few CHAR cases: ${fixture.cases.length}`);
   const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
   assert.ok(unknown.length >= 3, `need malformed CHAR cases, got ${unknown.length}`);
   for (const c of fixture.cases) {
@@ -973,6 +973,23 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\\x27",
     "'\\047",
     "'\\04'",
+    "'👋🏻'",
+    "'👍🏽'",
+    "'1️⃣'",
+    "👋🏻",
+    "👍🏽",
+    "1️⃣",
+    "'👋🏻x'",
+    "'👋🏻",
+    "'👍🏽",
+    "'1️⃣",
+    "'\\U0001F3FB'",
+    "'\\U0001F44B\\U0001F3FB'",
+    "'\\uFE0F'",
+    "'\\u0301'",
+    "'\\U0001F3F'",
+    "'\\U0001F3FB",
+    "'\\U0001F3FBx'",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -980,7 +997,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 152 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 169 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -1162,6 +1179,36 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(unclosedOctQuote.kind, 'Unknown');
   const twoDigitOct = constMakeFromLiteral("'\\04'", TOKEN.CHAR, 0);
   assert.equal(twoDigitOct.kind, 'Unknown');
+  const quotedWave = constMakeFromLiteral("'👋🏻'", TOKEN.CHAR, 0);
+  assert.equal(quotedWave.toString(), '128075');
+  const unquotedWave = constMakeFromLiteral('👋🏻', TOKEN.CHAR, 0);
+  assert.equal(unquotedWave.toString(), '65533');
+  const quotedKeycap = constMakeFromLiteral("'1️⃣'", TOKEN.CHAR, 0);
+  assert.equal(quotedKeycap.toString(), '49');
+  const unquotedKeycap = constMakeFromLiteral('1️⃣', TOKEN.CHAR, 0);
+  assert.equal(unquotedKeycap.toString(), '65039');
+  const quotedThumb = constMakeFromLiteral("'👍🏽'", TOKEN.CHAR, 0);
+  assert.equal(quotedThumb.toString(), '128077');
+  const unquotedThumb = constMakeFromLiteral('👍🏽', TOKEN.CHAR, 0);
+  assert.equal(unquotedThumb.toString(), '65533');
+  const unclosedWave = constMakeFromLiteral("'👋🏻", TOKEN.CHAR, 0);
+  assert.equal(unclosedWave.toString(), '128075');
+  const unclosedKeycap = constMakeFromLiteral("'1️⃣", TOKEN.CHAR, 0);
+  assert.equal(unclosedKeycap.toString(), '49');
+  const skinTone = constMakeFromLiteral("'\\U0001F3FB'", TOKEN.CHAR, 0);
+  assert.equal(skinTone.toString(), '127995');
+  const escapedWaveSkin = constMakeFromLiteral("'\\U0001F44B\\U0001F3FB'", TOKEN.CHAR, 0);
+  assert.equal(escapedWaveSkin.toString(), '128075');
+  const vs16 = constMakeFromLiteral("'\\uFE0F'", TOKEN.CHAR, 0);
+  assert.equal(vs16.toString(), '65039');
+  const acute = constMakeFromLiteral("'\\u0301'", TOKEN.CHAR, 0);
+  assert.equal(acute.toString(), '769');
+  const shortSkin = constMakeFromLiteral("'\\U0001F3F'", TOKEN.CHAR, 0);
+  assert.equal(shortSkin.kind, 'Unknown');
+  const unclosedSkin = constMakeFromLiteral("'\\U0001F3FB", TOKEN.CHAR, 0);
+  assert.equal(unclosedSkin.kind, 'Unknown');
+  const skinLeftover = constMakeFromLiteral("'\\U0001F3FBx'", TOKEN.CHAR, 0);
+  assert.equal(skinLeftover.toString(), '127995');
 });
 
 function evaluateImagLit(c) {

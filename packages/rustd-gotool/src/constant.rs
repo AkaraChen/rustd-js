@@ -1698,7 +1698,10 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
 /// `\\x41` + UTF-8) is ignored. Hex/octal `\\x27`/`\\047`/`\\x22`/`\\042`
 /// produce the quote *value* without hitting the raw-quote syntax check;
 /// wrap-strip of `"''"` / `` `'` `` starts with raw `'` and is Unknown;
-/// `\\\\x27` is backslash 92 with leftover. `"\x41"` / `"\'"` / `` `\n` `` still parse as
+/// `\\\\x27` is backslash 92 with leftover. Emoji modifier / keycap: quoted
+/// `👋🏻` / `1️⃣` keep the first rune (U+1F44B / `1`); unquoted 4-byte
+/// wrap-strip is U+FFFD; unquoted `1️⃣` starts with ASCII so wrap-strip is
+/// VS16 (65039). `"\x41"` / `"\'"` / `` `\n` `` still parse as
 /// CHAR. IMAG is Complex `(0 + <float>i)`. STRING is `strconv.Unquote`
 /// (CHAR `'ab'` is Int 97; STRING `'ab'` is Unknown because Unquote rejects leftover).
 #[napi]
