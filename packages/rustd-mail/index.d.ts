@@ -74,7 +74,7 @@ export interface SmtpTlsConnectionState {
 export interface SmtpDialOptions {
   /** Auth hostname, matching Go `smtp.NewClient(conn, host)`. Defaults to the host in `address`. */
   host?: string;
-  /** Socket read/write timeout in ms. 0 waits forever (Go Dial). Default 30000. */
+  /** Connect plus socket read/write timeout in ms. 0 waits forever (Go Dial). Default 30000. */
   timeoutMs?: number;
   /** Passed to `startTls` when `sendMail` sees a STARTTLS offer. */
   tls?: SmtpTlsOptions;

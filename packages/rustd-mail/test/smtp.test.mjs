@@ -22,10 +22,27 @@ const sendMsg = 'From: test@example.com\r\nTo: other@example.com\r\nSubject: Sen
 const dotMsg = 'From: user@gmail.com\nTo: golang-nuts@googlegroups.com\nSubject: Hooray for Go\n\nLine 1\n.Leading dot line .\nGoodbye.';
 const lfMsg = 'From: a@b.com\nTo: c@d.com\n\nhello\n.world\nmixed\r\nline\n';
 
+let cachedGo;
 function goBin() {
-  const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
-  const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
-  return { command, prefix };
+  if (cachedGo) return cachedGo;
+  if (process.env.RUSTD_GO === 'path') {
+    cachedGo = { command: 'go', prefix: [] };
+    return cachedGo;
+  }
+  if (process.env.RUSTD_GO) {
+    cachedGo = { command: process.env.RUSTD_GO, prefix: [] };
+    return cachedGo;
+  }
+  const probe = spawnSync('mise', ['exec', '--', 'go', 'env', 'GOROOT'], {
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+  if (probe.status === 0 && probe.stdout.trim()) {
+    cachedGo = { command: join(probe.stdout.trim(), 'bin', 'go'), prefix: [] };
+    return cachedGo;
+  }
+  cachedGo = { command: 'mise', prefix: ['exec', '--', 'go'] };
+  return cachedGo;
 }
 
 function goSmtp(args = []) {
@@ -34,7 +51,7 @@ function goSmtp(args = []) {
     cwd: testdata,
     encoding: 'utf8',
     maxBuffer: 32 << 20,
-    timeout: 60000,
+    timeout: 120000,
     env: { ...process.env, GOWORK: 'off' },
   });
   if (result.error) throw result.error;
@@ -48,7 +65,7 @@ function goBuildClient() {
   const result = spawnSync(command, [...prefix, 'build', '-o', bin, '.'], {
     cwd: testdata,
     encoding: 'utf8',
-    timeout: 60000,
+    timeout: 180000,
     env: { ...process.env, GOWORK: 'off' },
   });
   if (result.error) throw result.error;
@@ -215,6 +232,35 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-short-response') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-malformed-continue') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-custom') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('testhost');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -227,7 +273,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 14, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 17, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -449,6 +495,31 @@ test('DATA overlong line throws and is not truncated', async () => {
     ));
     await client.abandon();
   });
+});
+
+test('hung banner respects timeoutMs and does not hang', async () => {
+  const { createServer } = await import('node:net');
+  const server = createServer((sock) => {
+    sock.setTimeout(8000);
+    sock.on('timeout', () => sock.destroy());
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const { port } = server.address();
+    const start = Date.now();
+    await assert.rejects(
+      () => SmtpClient.dial(`127.0.0.1:${port}`, { timeoutMs: 250 }),
+      (err) => err instanceof SmtpError && err.message === 'smtp: connection timed out',
+    );
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed >= 200, `elapsed ${elapsed} too fast`);
+    assert.ok(elapsed < 4000, `elapsed ${elapsed} too slow`);
+  } finally {
+    server.close();
+  }
 });
 
 test('linux-x64 .node is under 2MB', () => {

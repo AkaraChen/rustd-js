@@ -568,6 +568,64 @@ func main() {
 			},
 		},
 		{
+			id:     "client-short-response",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"not a status",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return c.Mail("a@b.com")
+			},
+		},
+		{
+			id:     "client-malformed-continue",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-localhost\ngarbage without code\n250 AUTH PLAIN",
+				"250 Sender ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("a@b.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-hello-custom",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 testhost",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("testhost"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",

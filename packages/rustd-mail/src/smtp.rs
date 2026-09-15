@@ -2,8 +2,8 @@ use napi::bindgen_prelude::*;
 use napi::Task;
 use napi_derive::napi;
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -119,6 +119,15 @@ fn smtp_err(code: i32, command: &str, message: &str, kind: &str) -> Error {
     Error::from_reason(format!("smtp|{code}|{command}|{message}|{kind}"))
 }
 
+fn io_err(command: &str, e: std::io::Error) -> Error {
+    match e.kind() {
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => {
+            smtp_err(0, command, "smtp: connection timed out", "io")
+        }
+        _ => smtp_err(0, command, &e.to_string(), "io"),
+    }
+}
+
 fn lock_session<T>(id: u32, f: impl FnOnce(&mut SmtpSession) -> Result<T>) -> Result<T> {
     let mut map = sessions().lock().unwrap_or_else(|e| e.into_inner());
     let session = map
@@ -141,7 +150,7 @@ impl SmtpSession {
                 self.stream.write_all(b"\r\n")?;
                 self.stream.flush()
             })
-            .map_err(|e| smtp_err(0, "", &e.to_string(), "io"))
+            .map_err(|e| io_err("", e))
     }
 
     fn read_line(&mut self) -> Result<String> {
@@ -161,7 +170,7 @@ impl SmtpSession {
             let n = self
                 .stream
                 .read(&mut tmp)
-                .map_err(|e| smtp_err(0, "", &e.to_string(), "io"))?;
+                .map_err(|e| io_err("", e))?;
             if n == 0 {
                 return Err(smtp_err(0, "", "EOF", "io"));
             }
@@ -177,7 +186,7 @@ impl SmtpSession {
         self.stream
             .write_all(&out)
             .and_then(|_| self.stream.flush())
-            .map_err(|e| smtp_err(0, "DATA", &e.to_string(), "io"))?;
+            .map_err(|e| io_err("DATA", e))?;
         self.in_data = false;
         Ok(())
     }
@@ -190,7 +199,7 @@ impl SmtpSession {
         let out = self.stuffer.write(data)?;
         self.stream
             .write_all(&out)
-            .map_err(|e| smtp_err(0, "DATA", &e.to_string(), "io"))
+            .map_err(|e| io_err("DATA", e))
     }
 }
 
@@ -264,8 +273,26 @@ fn read_response(session: &mut SmtpSession, expect_code: i32) -> Result<(i32, St
 }
 
 fn dial(addr: &str, timeout_ms: u32) -> Result<u32> {
-    let stream =
-        TcpStream::connect(addr).map_err(|e| smtp_err(0, "DIAL", &e.to_string(), "io"))?;
+    let stream = if timeout_ms == 0 {
+        TcpStream::connect(addr).map_err(|e| io_err("DIAL", e))?
+    } else {
+        let d = Duration::from_millis(timeout_ms as u64);
+        let mut last = None;
+        let mut connected = None;
+        for sa in addr.to_socket_addrs().map_err(|e| io_err("DIAL", e))? {
+            match TcpStream::connect_timeout(&sa, d) {
+                Ok(s) => {
+                    connected = Some(s);
+                    break;
+                }
+                Err(e) => last = Some(e),
+            }
+        }
+        connected.ok_or_else(|| match last {
+            Some(e) => io_err("DIAL", e),
+            None => smtp_err(0, "DIAL", "smtp: no addresses to dial", "io"),
+        })?
+    };
     if timeout_ms > 0 {
         let d = Duration::from_millis(timeout_ms as u64);
         let _ = stream.set_read_timeout(Some(d));
