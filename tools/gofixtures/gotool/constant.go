@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go/constant"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"math"
 	"strconv"
+	"unicode/utf8"
 )
 
 type ConstCase struct {
@@ -1434,4 +1436,124 @@ func verifyConstantImagLiteral(r io.Reader) {
 		}
 	}
 	fmt.Printf("Go verified %d gotool constant-imag-literal cases\n", len(packet.Cases))
+}
+
+type ConstStrLitCase struct {
+	ID         string `json:"id"`
+	Lit        string `json:"lit"`
+	Tok        string `json:"tok"`
+	TokNum     int    `json:"tokNum"`
+	Kind       string `json:"kind"`
+	Exact      string `json:"exact"`
+	ToString   string `json:"toString"`
+	ToStringOk bool   `json:"toStringOk"`
+	Utf8Valid  bool   `json:"utf8Valid"`
+	StringB64  string `json:"stringB64"`
+}
+
+type ConstStrLitPacket struct {
+	Schema  int               `json:"schema"`
+	Package string            `json:"package"`
+	Go      string            `json:"go"`
+	Slice   string            `json:"slice"`
+	Cases   []ConstStrLitCase `json:"cases"`
+}
+
+func evalStringLiteral(lit string) ConstStrLitCase {
+	c := ConstStrLitCase{Lit: lit, Tok: "STRING", TokNum: int(token.STRING)}
+	v := constant.MakeFromLiteral(lit, token.STRING, 0)
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	s, ok := stringValOK(v)
+	c.ToStringOk = ok
+	c.Utf8Valid = utf8.ValidString(s)
+	if v.Kind() == constant.String {
+		c.StringB64 = base64.StdEncoding.EncodeToString([]byte(s))
+		if c.Utf8Valid {
+			c.ToString = s
+		}
+	}
+	return c
+}
+
+// Official go/constant TestString STRING cases plus Unquote edges.
+// `'ab'` as STRING is Unknown (Unquote leftover); CHAR ignores the tail.
+func stringLiteralCorpus() []string {
+	xxx := ""
+	for i := 0; i < 68; i++ {
+		xxx += "x"
+	}
+	return []string{
+		`""`, `"foo"`, `"foo bar"`, `"hello world"`,
+		`"` + xxx + `xx"`,
+		`"hello\nworld"`, `"hello\tworld"`, `"hello\rworld"`,
+		`"\a"`, `"\b"`, `"\f"`, `"\n"`, `"\r"`, `"\t"`, `"\v"`,
+		`"\\"`, `"\""`, `"foo\"bar"`,
+		`"\x00"`, `"\x41"`, `"\x7f"`, `"\xff"`, `"\xFF"`, `"\x80"`,
+		`"\x41\x42"`, `"a\x41b"`,
+		`"\u0000"`, `"\u00e9"`, `"\u00a0"`, `"\u00ad"`, `"\u4e2d"`,
+		`"\U00000000"`, `"\U0001F600"`, `"\U0010FFFF"`,
+		`"\000"`, `"\101"`, `"\377"`, `"\012"`,
+		`"中"`, `"π"`, `"😀"`, `"hello 中"`, `"é"`,
+		`"foo` + "\n" + `bar"`,
+		`'a'`, `'\n'`, `'中'`, `'π'`, `''`, `'ab'`, `'\x41'`,
+		"``", "`hello`", "`hello\\n`", "`\"`", "`'a'`",
+		"`hello\nworld`", "`hello\rworld`", "`hello\r\nworld`",
+		`"`, `"a`, `a"`, `"hello'`, `'hello"`,
+		`"\x"`, `"\x4"`, `"\xGG"`, `"\u"`, `"\u12"`, `"\u00GG"`, `"\uD800"`, `"\uDFFF"`,
+		`"\U"`, `"\U1234567"`, `"\U00110000"`, `"\U0000D800"`,
+		`"\400"`, `"\8"`, `"\z"`, `"\'"`, `"\ "`,
+		`hello`, `1`, `'`, ``, `"foo"bar`, "`hello`world`",
+		`"\n `, `'ab'`, `"中x`,
+	}
+}
+
+func dumpConstantStringLiteral(w io.Writer) {
+	packet := ConstStrLitPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-string-literal",
+	}
+	for i, lit := range stringLiteralCorpus() {
+		c := evalStringLiteral(lit)
+		c.ID = fmt.Sprintf("go-lit-STRING-%d", i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantStringLiteral(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstStrLitPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-string-literal" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-string-literal packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		if c.Tok != "STRING" {
+			fail(fmt.Errorf("case %d id=%s: tok %q != STRING", i, c.ID, c.Tok))
+		}
+		if c.TokNum != int(token.STRING) {
+			fail(fmt.Errorf("case %d id=%s: tokNum %d != Go STRING %d", i, c.ID, c.TokNum, int(token.STRING)))
+		}
+		got := evalStringLiteral(c.Lit)
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.ToStringOk != c.ToStringOk || got.Utf8Valid != c.Utf8Valid || got.StringB64 != c.StringB64 || got.ToString != c.ToString {
+			fail(fmt.Errorf("mismatch case %d id=%s lit=%q: go kind=%s exact=%s toString=%q ok=%v utf8=%v b64=%s got kind=%s exact=%s toString=%q ok=%v utf8=%v b64=%s",
+				i, c.ID, c.Lit, got.Kind, got.Exact, got.ToString, got.ToStringOk, got.Utf8Valid, got.StringB64,
+				c.Kind, c.Exact, c.ToString, c.ToStringOk, c.Utf8Valid, c.StringB64))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-string-literal cases\n", len(packet.Cases))
 }

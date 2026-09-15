@@ -5,7 +5,7 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 17 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 18 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
@@ -17,11 +17,12 @@ Checkpoint 17 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 Float), Float (plus mixed Int/Float) `constBinaryOp` ADD/SUB/MUL/QUO vs
 Go `BinaryOp` (`match` to `big.Rat`, then `makeRat`), Float
 `constUnaryOp` ADD/SUB vs Go `UnaryOp` (identity / `big.Rat.Neg`; integer-valued
-Float stays Float), and `constMakeFromLiteral` for INT/FLOAT/CHAR/IMAG vs Go
+Float stays Float), and `constMakeFromLiteral` for INT/FLOAT/CHAR/IMAG/STRING vs Go
 `MakeFromLiteral` (underscores, 0x/0o/0b/legacy octal, hex floats, rune
-literals via `strconv.UnquoteChar`, imag prefix via `makeFloatFromLiteral`;
-invalid → Unknown; CHAR is an Int; IMAG is Complex `(0 + xi)`).
-`go/format` / `gofmt`, `MakeFromLiteral` STRING, Bool, Complex BinaryOp, and
+literals via `strconv.UnquoteChar`, imag prefix via `makeFloatFromLiteral`,
+string via `strconv.Unquote`; invalid → Unknown; CHAR is an Int; IMAG is
+Complex `(0 + xi)`; STRING is a String).
+`go/format` / `gofmt`, Bool, Complex BinaryOp, and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
 ```js
@@ -38,6 +39,7 @@ constMakeFromLiteral('0x10', TOKEN.INT, 0).toString(); // "16"
 constMakeFromLiteral('1.5', TOKEN.FLOAT, 0).toString(); // "3/2"
 constMakeFromLiteral("'a'", TOKEN.CHAR, 0).toString(); // "97"
 constMakeFromLiteral('1i', TOKEN.IMAG, 0).toString(); // "(0 + 1i)"
+constMakeFromLiteral('"foo"', TOKEN.STRING, 0).toString(); // '"foo"'
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
 constToInt(constMakeInt64(1n)); // [1n, true]
@@ -118,21 +120,26 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `constToInt` is Go `Int64Val`: `[value, true]` when the Int fits in int64;
   otherwise `[low64-with-sign, false]` (Go's `big.Int.Int64` wrapping).
   `constToString` is Go `StringVal` with panic mapped to `ok=false`: Int/Float
-  are `["", false]`; Unknown is `["", true]`. `constFloat64Val` is Go
+  are `["", false]`; String is `[unquoted, true]`; Unknown is `["", true]`.
+  Invalid UTF-8 StringVal bytes become U+FFFD in the JS string; identity is
+  `GoConstValue#toString` (`strconv.Quote`). `constFloat64Val` is Go
   `Float64Val` (IEEE bits + exact flag; Unknown is `[0, false]`).
   `GoConstValue#toString` is decimal for Int and `ExactString` (`n` or
   `n/d`) for Float from QUO, not Go's 512-bit `String()` approximation.
   QUO/REM by zero returns `Unknown` instead of panicking. `constCompare` is
   Go `Compare` for Int/Float (`match` to `big.Rat` then `Cmp`): mixed Int vs
   Float is allowed; `2/4` equals `1/2`. Unknown still throws. `constBitLen`
-  throws on non-Int. `constMakeFromLiteral` is INT/FLOAT/CHAR/IMAG (`prec` must be 0;
-  STRING and other tokens throw). Invalid literals are Unknown, matching
+  throws on non-Int. `constMakeFromLiteral` is INT/FLOAT/CHAR/IMAG/STRING
+  (`prec` must be 0; other tokens throw). Invalid literals are Unknown, matching
   Go. CHAR uses `strconv.UnquoteChar` on `lit[1:n-1]` and ignores leftover tail
-  (`'ab'` is Int 97). IMAG requires a trailing `i` and parses the prefix as a
+  (`'ab'` is Int 97). STRING uses `strconv.Unquote` (leftover is Unknown:
+  `'ab'` as STRING is Unknown; `''` is the empty String). IMAG requires a trailing
+  `i` and parses the prefix as a
   FLOAT (`08i` is Complex 8 because float `SetString` is decimal). Result is
   Complex with real Int 0; `constReal`/`constImag` match Go `Real`/`Imag`.
-  `GoConstValue#toString` for IMAG is Go `ExactString` (`(0 + 3/2i)`).
-  STRING, Bool, and Complex BinaryOp stay later. `1e9999i` (512-bit `floatVal`
+  `GoConstValue#toString` for IMAG is Go `ExactString` (`(0 + 3/2i)`);
+  for STRING it is Go `ExactString` (`strconv.Quote`).
+  Bool and Complex BinaryOp stay later. `1e9999i` (512-bit `floatVal`
   ExactString) is not in this checkpoint, same as FLOAT.
   Large-component rats that Go promotes to 512-bit
   `floatVal` (`BitLen >= 4096`) are not in this checkpoint.
@@ -140,9 +147,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **765,400 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **770,240 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 765400 Sep 15 05:45 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 770240 Sep 15 06:06 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```
