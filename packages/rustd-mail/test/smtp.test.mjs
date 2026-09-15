@@ -107,6 +107,10 @@ async function runTsCase(c, addr) {
     await sendMail(addr, null, 'a@b.com', ['one@b.com', 'two@b.com'], sendMsg);
     return;
   }
+  if (c.id === 'sendMail-starttls') {
+    await sendMail(addr, null, 'joe1@example.com', ['joe2@example.com'], 'Subject: test\n\nhowdy!', { tls: tlsClient });
+    return;
+  }
   if (c.id === 'client-starttls-auth') {
     const client = await SmtpClient.dial(addr);
     try {
@@ -512,6 +516,20 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-newclient-ehlo') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello();
+      if (!client.extension('aUtH') || client.extensionParams('aUtH') !== 'LOGIN PLAIN') {
+        throw new Error('Expected AUTH supported');
+      }
+      if (client.extension('DSN')) throw new Error('Shouldn\'t support DSN');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -524,7 +542,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 47, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 49, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
