@@ -39,7 +39,7 @@ function go(args = [], input) {
   });
 }
 
-test('unix default TypeByExtension / ExtensionsByType match Go (issue #9 §3)', () => {
+test('platform default TypeByExtension / ExtensionsByType match Go (issue #9 §3)', () => {
   const generated = go();
   assert.equal(generated.status, 0, generated.stderr);
   const fixture = JSON.parse(generated.stdout);

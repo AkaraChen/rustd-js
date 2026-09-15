@@ -4,6 +4,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
+#[cfg(windows)]
+#[path = "ext_windows.rs"]
+mod windows;
+
 const BUILTIN: &[(&str, &str)] = &[
     (".avif", "image/avif"),
     (".css", "text/css; charset=utf-8"),
@@ -71,14 +75,21 @@ fn ensure(tables: &mut Option<Tables>) -> &mut Tables {
         };
         let builtin = builtin_map();
         set_mime_types(&mut t, &builtin, &builtin);
-        init_unix(&mut t);
+        init_defaults(&mut t);
         *tables = Some(t);
     }
     tables.as_mut().unwrap()
 }
 
-fn init_unix(tables: &mut Tables) {
-    let _ = load_unix_defaults(tables);
+fn init_defaults(tables: &mut Tables) {
+    let _ = load_platform_defaults(tables);
+}
+
+fn load_platform_defaults(tables: &mut Tables) -> u32 {
+    #[cfg(windows)]
+    { windows::load_defaults(tables) }
+    #[cfg(not(windows))]
+    { load_unix_defaults(tables) }
 }
 
 fn load_unix_defaults(tables: &mut Tables) -> u32 {
@@ -220,7 +231,7 @@ pub fn load_system_mime_types(paths: Option<Vec<String>>) -> u32 {
             // mime.types can overwrite existing entries (unlike globs2). Report
             // changes to the resulting table, not lines re-read on a no-op reload.
             let before = tables.mime_types.clone();
-            load_unix_defaults(tables);
+            load_platform_defaults(tables);
             tables.mime_types.iter().filter(|(ext, typ)| before.get(*ext) != Some(*typ)).count() as u32
         }
         Some(list) => list.iter().map(|path| load_one_path(tables, path)).sum(),
