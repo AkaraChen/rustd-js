@@ -55,11 +55,29 @@ export interface SmtpAuth {
   next(fromServer: Uint8Array, more: boolean): Uint8Array | null;
 }
 
+export interface SmtpTlsOptions {
+  /** SNI / certificate hostname. Defaults to the dial `host`. */
+  serverName?: string;
+  /** Verify the server certificate. Default true (Go `tls.Config` default). */
+  rejectUnauthorized?: boolean;
+  /** Extra trusted CA PEMs, used by tests and private CAs. */
+  ca?: string | Buffer | Array<string | Buffer>;
+}
+
+export interface SmtpTlsConnectionState {
+  protocol: string;
+  authorized: boolean;
+  serverName: string;
+  cipher: { name: string; standardName: string; version: string } | null;
+}
+
 export interface SmtpDialOptions {
   /** Auth hostname, matching Go `smtp.NewClient(conn, host)`. Defaults to the host in `address`. */
   host?: string;
   /** Socket read/write timeout in ms. 0 waits forever (Go Dial). Default 30000. */
   timeoutMs?: number;
+  /** Passed to `startTls` when `sendMail` sees a STARTTLS offer. */
+  tls?: SmtpTlsOptions;
 }
 
 export class SmtpError extends Error {
@@ -94,8 +112,8 @@ export class SmtpClient {
   verify(addr: string): Promise<void>;
   extension(ext: string): boolean;
   extensionParams(ext: string): string;
-  startTls(): Promise<void>;
-  tlsConnectionState(): null;
+  startTls(config?: SmtpTlsOptions): Promise<void>;
+  tlsConnectionState(): SmtpTlsConnectionState | null;
   quit(): Promise<void>;
   close(): Promise<void>;
   abandon(): Promise<void>;
