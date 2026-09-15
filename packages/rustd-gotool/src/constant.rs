@@ -741,6 +741,29 @@ fn convert_to_complex(v: &GoConstValue) -> GoConstValue {
     }
 }
 
+/// Go `ToInt`. Int identity; integer-valued Float (`rat.IsInt`) → Int;
+/// Complex with imag 0 converts the real part; otherwise Unknown
+/// (including Bool/String and 512-bit `floatVal`, which this checkpoint
+/// does not construct). `constToInt` stays `Int64Val`.
+fn convert_to_int(v: &GoConstValue) -> GoConstValue {
+    match v.kind.as_str() {
+        "Int" => clone_value(v),
+        "Float" => match v.rat.as_ref() {
+            Some(r) if r.is_integer() => make_int(r.numer().clone()),
+            _ => make_unknown(),
+        },
+        "Complex" => {
+            let re = convert_to_float(v);
+            if re.kind == "Float" {
+                convert_to_int(&re)
+            } else {
+                make_unknown()
+            }
+        }
+        _ => make_unknown(),
+    }
+}
+
 /// Go `ToFloat`.
 #[napi]
 pub fn const_to_float(v: &GoConstValue) -> GoConstValue {
@@ -751,6 +774,12 @@ pub fn const_to_float(v: &GoConstValue) -> GoConstValue {
 #[napi]
 pub fn const_to_complex(v: &GoConstValue) -> GoConstValue {
     convert_to_complex(v)
+}
+
+/// Go `ToInt` (Value conversion). `constToInt` remains `Int64Val`.
+#[napi]
+pub fn const_to_int_value(v: &GoConstValue) -> GoConstValue {
+    convert_to_int(v)
 }
 
 /// Go `Real`. Numeric non-Complex returns `x`; Complex returns the stored re.
@@ -1667,8 +1696,14 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
 
 /// Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR/STRING. Invalid lit → Unknown.
 /// Other toks throw. `prec` must be 0 (Go panics otherwise). CHAR is an Int (rune).
-/// IMAG is Complex `(0 + <float>i)`. STRING is `strconv.Unquote` (CHAR `'ab'` is
-/// Int 97; STRING `'ab'` is Unknown because Unquote rejects leftover).
+/// CHAR strips first/last **bytes** then `UnquoteChar(..., '\'')`: ASCII-padded
+/// UTF-8 (` 中 `) keeps the rune; double pad (`  中  `) is Int 32 because the
+/// inner starts with space. Multibyte pad (NBSP/BOM/fullwidth) is U+FFFD
+/// because the pad rune is split. Grapheme clusters (ZWJ family / VS16 / RI)
+/// keep only the first rune; named/hex/octal leftover (`\\n` + UTF-8 /
+/// `\\x41` + UTF-8) is ignored. `"\x41"` / `"\'"` / `` `\n` `` still parse as
+/// CHAR. IMAG is Complex `(0 + <float>i)`. STRING is `strconv.Unquote`
+/// (CHAR `'ab'` is Int 97; STRING `'ab'` is Unknown because Unquote rejects leftover).
 #[napi]
 pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoConstValue> {
     if prec != 0 {

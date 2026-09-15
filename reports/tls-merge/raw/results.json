@@ -1,0 +1,58 @@
+[
+  {
+    "step": "install",
+    "command": "rm -rf node_modules && pnpm install --frozen-lockfile",
+    "exit_code": 0,
+    "elapsed_seconds": 4.529,
+    "log": "reports/tls-merge/raw/install.log"
+  },
+  {
+    "step": "mail-build",
+    "command": "CARGO_BUILD_JOBS=4 nice -n 10 pnpm --filter rustd-mail build",
+    "exit_code": 0,
+    "elapsed_seconds": 15.603,
+    "log": "reports/tls-merge/raw/mail-build.log"
+  },
+  {
+    "step": "mail-test",
+    "command": "CARGO_BUILD_JOBS=4 nice -n 10 pnpm --filter rustd-mail test",
+    "exit_code": 0,
+    "elapsed_seconds": 21.547,
+    "log": "reports/tls-merge/raw/mail-test.log"
+  },
+  {
+    "step": "typecheck",
+    "command": "pnpm typecheck",
+    "exit_code": 0,
+    "elapsed_seconds": 147.153,
+    "log": "reports/tls-merge/raw/typecheck.log"
+  },
+  {
+    "step": "rustd-gotool-build",
+    "command": "CARGO_BUILD_JOBS=4 nice -n 10 pnpm --filter rustd-gotool build",
+    "exit_code": 0,
+    "elapsed_seconds": 24.102,
+    "log": "reports/tls-merge/raw/rustd-gotool-build.log"
+  },
+  {
+    "step": "rustd-mime-build",
+    "command": "CARGO_BUILD_JOBS=4 nice -n 10 pnpm --filter rustd-mime build",
+    "exit_code": 0,
+    "elapsed_seconds": 24.133,
+    "log": "reports/tls-merge/raw/rustd-mime-build.log"
+  },
+  {
+    "step": "rustd-serial-build",
+    "command": "CARGO_BUILD_JOBS=4 nice -n 10 pnpm --filter rustd-serial build",
+    "exit_code": 0,
+    "elapsed_seconds": 23.741,
+    "log": "reports/tls-merge/raw/rustd-serial-build.log"
+  },
+  {
+    "step": "test",
+    "command": "pnpm test",
+    "exit_code": 0,
+    "elapsed_seconds": 218.462,
+    "log": "reports/tls-merge/raw/test.log"
+  }
+]

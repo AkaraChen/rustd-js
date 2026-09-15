@@ -50,6 +50,13 @@ await sendMail('127.0.0.1:2525', plainAuth({
   handshake fails. `sendMail` calls `startTls(opts.tls)` when the server
   advertises STARTTLS. Node omits SNI when the name is an IP (RFC 6066);
   certificate identity is still checked against that IP.
+- `dial(addr, { tls: { implicit: true, ca, serverName } })` TLS-wraps the
+  socket **before** the 220 banner. That is Go `tls.Dial` + `smtp.NewClient`
+  (`client.tls == true` immediately). rustd-net `fromConn` is out of plan.
+  `plainAuth` then allows a non-localhost host (for example `smtp.test.local`)
+  because the session is already TLS. `sendMail` uses this when
+  `opts.tls.implicit` is set and still will STARTTLS if the server later
+  advertises it.
 - `tlsConnectionState()` returns a small local object after a successful
   upgrade (`protocol`, `authorized`, `serverName`, `cipher`), not a
   `rustd-tls` type. It is `null` before STARTTLS.
@@ -59,8 +66,25 @@ await sendMail('127.0.0.1:2525', plainAuth({
   TLS-or-localhost rule as `plainAuth`.
 - DATA lines longer than 998 bytes throw (RFC 5321). Go's `DotWriter` does not
   enforce this.
-- Default dial timeout is 30s. Pass `{ timeoutMs: 0 }` for Go-like blocking.
+- Default dial timeout is 30s (connect + read/write). Pass `{ timeoutMs: 0 }`
+  for Go-like blocking. Expired waits throw `smtp: connection timed out`.
+- `sendMail` on MAIL/RCPT/DATA failure closes the TCP socket without `QUIT`,
+  matching Go `defer c.Close()`. `Auth` failure still sends `*` then `QUIT`.
 - No connection pool; one `SmtpClient` is one TCP connection.
+- Server response lines have no extra cap (Go `textproto.ReadLine` is
+  unlimited). `250-` then a non-code line is kept as RFC 959 continuation,
+  matching Go. DATA *client* lines over 998 bytes still throw.
+- `rcpt` accepts any 25x reply (Go `cmd(25, "RCPT TO:<%s>")`). `mail` /
+  `verify` still require exact 250.
+- `sendMail` with `from === ''` sends `MAIL FROM:<>` (Go null sender).
+- `Client.auth` still sends `AUTH` when EHLO did not advertise it. `sendMail`
+  refuses with `smtp: server doesn't support AUTH` in that case (Go
+  `SendMail`). After EHLO-fail / HELO-ok, Go `SendMail` skips AUTH because
+  `c.ext == nil`. We still refuse: issue #12 forbids silently dropping
+  credentials. PlainAuth 334 is `unexpected server challenge` then `*` /
+  `QUIT`, matching `auth.go`.
+- Non-220 banner on `dial` is a `SmtpError` (`421 ...`); no SMTP command is
+  written, matching Go `NewClient` `ReadResponse(220)`.
 
 ## Size
 

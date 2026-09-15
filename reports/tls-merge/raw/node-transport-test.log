@@ -1,0 +1,27 @@
+$ node --require /home/akrc/Developer/rustd-js-ci-clean/reports/tls-merge/force-node-transport.cjs --test test/smtp.test.mjs
+✔ Go regenerates committed smtp fixtures; TS client bytes match (3771.192288ms)
+✔ Go net/smtp against Node fake server matches committed clientHex (5126.82462ms)
+✔ plainAuth refuses non-localhost without TLS and does not send the password (53.882798ms)
+✔ AUTH LOGIN challenge/response and AUTH PLAIN localhost (97.298891ms)
+✔ STARTTLS handshake, re-EHLO, then AUTH; no plaintext password (172.51656ms)
+✔ startTls sets tlsConnectionState and serverInfo.tls (59.544085ms)
+✔ plainAuth start matches Go TestAuth / TestAuthPlain (1.569069ms)
+✔ Extension is case-insensitive like Go Client.Extension (55.834414ms)
+✔ HELO fallback does not parse FEATURE the way EHLO would (Go TestHello case 5) (52.268139ms)
+✔ CRAM-MD5 next() matches Go hmac-md5 vector (5.900288ms)
+✔ close() then command throws and does not write MAIL (5.761623ms)
+✔ DATA hangup after 354 throws and is not treated as success (14.910733ms)
+✔ DATA overlong line throws and is not truncated (10.310662ms)
+✔ hung banner respects timeoutMs and does not hang (274.707304ms)
+✔ sendMail with AUTH after HELO-only errors instead of Go silent skip (10.615549ms)
+✔ linux-x64 .node is under 2MB (3.726255ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18096.102442
+
+exit_code=0 elapsed_seconds=18.368

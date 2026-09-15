@@ -1276,6 +1276,75 @@ func charLiteralCorpus() []string {
 		`'\u'`, `'\u12'`, `'\u00GG'`, `'\uD800'`, `'\uDFFF'`,
 		`'\U'`, `'\U1234567'`, `'\U00110000'`, `'\U0000D800'`,
 		`'\400'`, `'\8'`, `'\9'`, `'\"'`, `'\z'`, `'\ '`, `'\'`,
+		// Go strips lit[1:n-1] without checking quotes. Noncharacters are valid runes.
+		`"a"`, "`a`", `'a'x`, `'''`, `''a'`, `aa`, `ab`, `x`,
+		`'\uFFFE'`, `'\uFFFF'`, `'\uFDD0'`, `'\uFEFF'`, `'\uFFFD'`,
+		`"aa"`, `' 'x`, `'\u000A'`, "'\n'", "'\t'", "'\x00'",
+		`a b`, `'a''`, `''''`,
+		// First/last BYTE, not rune. 2-byte UTF-8 unquoted → empty inner Unknown.
+		`中`, `π`, `😀`, `é`, `ω`, `ÿ`,
+		`"中"`, "`中`", `"π"`, "`π`",
+		`中a`, `a中`, `😀x`,
+		`'\U0000FFFE'`, `'\U0001FFFE'`,
+		`"'"`, `"a"x`, "`a`x", `"\n"`,
+		// Unclosed/unopened UTF-8 quotes: inner is a truncated sequence → U+FFFD.
+		`'中`, `中'`, `中中`,
+		// 3-byte unquoted € / ₩ → U+FFFD; quoted keeps the rune. 2-byte ¥ → Unknown.
+		`€`, `'€'`, `"€"`, "`€`", `¥`, `₩`,
+		`"😀"`, "`😀`",
+		" a ", `"\""`, `''a`, `éé`,
+		`'\u{41}'`, "'e\u0301'",
+		// ASCII first/last bytes around UTF-8: inner rune survives (contrast unquoted π/€/😀).
+		` 中 `, ` π `, ` € `, ` 😀 `, "\t中\t",
+		// Unclosed 2/4-byte → U+FFFD. ASCII unclosed "a / `a is Unknown.
+		`'😀`, `😀'`, `'¥`, `'π`, `"a`, "`a",
+		// STRING-style wrap still UnquoteChar(..., '\'').
+		`"\x41"`, `"\'"`, "`\\n`", "`\\x41`", `"\u4e2d"`, `"\\"`,
+		// Malformed: uppercase \X, unclosed hex/unicode, empty dq/bq.
+		`'\X41'`, `'\x41`, `'\u4e2d`, `""`, "``",
+		`'\u2028'`, `'\U0010FFFE'`,
+		`'€x`, `'😀x`,
+		"'\r'",
+		`"""`,
+		"e\u0301",
+		// Double ASCII pad: first/last space leaves a leading space → Int 32, not 中.
+		`  中  `, `   π   `,
+		// Asymmetric: two leading spaces truncate 中 to space leftover; two trailing → U+FFFD.
+		`  中`, `中  `,
+		// Single-byte punct/digit/CR/NUL pad keeps the inner rune (contrast double space).
+		`#中#`, `0中0`, "\r中\r", "\x00中\x00",
+		// Short octal Unknown (need 3 digits). Complete octal/hex/U leftover is kept.
+		`'\0'`, `'\00'`, `'\377a'`, `'\0000'`, `'\xAbcd'`, `'\U00000041F'`,
+		// Backslash + real newline Unknown. Unescaped BEL is Int 7.
+		"'\\\n'", "'\a'",
+		// Double-tab pad is TAB (9), not 中. Two combining marks still first rune.
+		"\t\t中\t\t", "'e\u0301\u0301'",
+		// Malformed: inner unescaped quote; incomplete hex.
+		"''中''", `'\x0g'`,
+		// Multibyte Unicode wrap/pad splits the pad rune (first/last BYTE) → U+FFFD.
+		// Contrast single-byte C0 pad (FF/VT) which keeps 中, same as `#中#`.
+		"\u00a0中\u00a0", "\u00a0a\u00a0", "\u3000中\u3000",
+		"\ufeffa\ufeff", "＇a＇", "＇＇", "\u0085中\u0085",
+		"\f中\f", "\v中\v",
+		// CRLF pad: strip CR/LF leaves a leading LF → Int 10, not 中.
+		"\r\n中\r\n",
+		// ASCII space around NBSP+中: inner starts with NBSP → Int 160.
+		" \u00a0中\u00a0 ",
+		// Quote mismatch still UnquoteChar(..., '\'').
+		"\"a'", "'a\"",
+		// Malformed: hex underscore, backslash+CR, 7-digit \U.
+		`'\x4_1'`, "'\\\r'", `'\U0010FFF'`,
+		// Named/hex/octal leftover: first UnquoteChar wins; UTF-8 tail ignored.
+		`'\nX'`, `'\n中'`, `'\t😀'`, `'\aX'`, `'\x41中'`, `'\101中'`, `'\\中'`,
+		`'\U0001F600x'`, `'\U0001F1FA\U0001F1F8'`,
+		// Grapheme cluster is not a rune: CHAR keeps the first rune only.
+		"'👨\u200D👩'", "'\u2600\uFE0F'", "'🇺🇸'", "'a\u20DD'",
+		// Unquoted ZWJ/VS/RI wrap-strip splits first/last BYTE → U+FFFD.
+		"👨\u200D👩", "\u2600\uFE0F", "🇺🇸",
+		"\u200b中\u200b", "\u200D中\u200D",
+		// Malformed: unclosed named escape, invalid octal/hex/unicode, backslash+TAB.
+		"'\n", `'\a`, `'\xGG'`, `'\8中'`, `'\u{1F600}'`, "'\\\t'", `'\x0'`, `'\u12G4'`,
+		`'\U0001F600`, `'\nX`, `'\x41中`,
 	}
 }
 
@@ -2539,6 +2608,8 @@ func evalConvert(form, xStr, yStr, sStr, convert string) (ConstConvCase, error) 
 		v = constant.ToFloat(src)
 	case "ToComplex":
 		v = constant.ToComplex(src)
+	case "ToInt":
+		v = constant.ToInt(src)
 	default:
 		return ConstConvCase{}, fmt.Errorf("unknown convert %q", convert)
 	}
@@ -2650,4 +2721,75 @@ func verifyConstantConvert(r io.Reader) {
 		}
 	}
 	fmt.Printf("Go verified %d gotool constant-tofloat-tocomplex cases\n", len(packet.Cases))
+}
+
+func toIntCorpus() []convSrc {
+	extra := []convSrc{
+		{"quo", "4", "2", "0"},
+		{"quo", "0", "1", "0"},
+		{"quo", "8", "2", "0"},
+		{"quo", "3", "1", "0"},
+		{"quo", "-4", "2", "0"},
+		{"quo", "9", "3", "0"},
+		{"quo", "1", "1", "0"},
+		{"quo", "7", "7", "0"},
+		{"quo", "-8", "2", "0"},
+		{"quo", "2", "1", "0"},
+	}
+	return append(convertCorpus(), extra...)
+}
+
+// ToInt vs Go. 512-bit floatVal (BitLen>=4096 Int ToFloat then ToInt)
+// stays deferred with the ToFloat checkpoint.
+func dumpConstantToInt(w io.Writer) {
+	packet := ConstConvPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-toint",
+	}
+	for i, src := range toIntCorpus() {
+		c, err := evalConvert(src.form, src.x, src.y, src.s, "ToInt")
+		if err != nil {
+			fail(err)
+		}
+		c.ID = fmt.Sprintf("go-conv-ToInt-%d", i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantToInt(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstConvPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-toint" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-toint packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		if c.Convert != "ToInt" {
+			fail(fmt.Errorf("case %d id=%s: convert %q != ToInt", i, c.ID, c.Convert))
+		}
+		got, err := evalConvert(c.Form, c.X, c.Y, c.S, c.Convert)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.OrigKind != c.OrigKind || got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ReKind != c.ReKind || got.ReExact != c.ReExact || got.ImKind != c.ImKind || got.ImExact != c.ImExact || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s convert=%s form=%s: go orig=%s kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v got orig=%s kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v",
+				i, c.ID, c.Convert, c.Form, got.OrigKind, got.Kind, got.Exact, got.Sign, got.ReKind, got.ReExact, got.ImKind, got.ImExact, got.F64Bits, got.F64Exact,
+				c.OrigKind, c.Kind, c.Exact, c.Sign, c.ReKind, c.ReExact, c.ImKind, c.ImExact, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-toint cases\n", len(packet.Cases))
 }

@@ -10,6 +10,7 @@ import {
   constMakeFromLiteral,
   constToFloat,
   constToComplex,
+  constToIntValue,
   constToInt,
   constToString,
   constBoolVal,
@@ -813,7 +814,7 @@ test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; n
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
   assert.equal(fixture.slice, 'constant-char-literal');
-  assert.ok(fixture.cases.length >= 40, `too few CHAR cases: ${fixture.cases.length}`);
+  assert.ok(fixture.cases.length >= 210, `too few CHAR cases: ${fixture.cases.length}`);
   const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
   assert.ok(unknown.length >= 3, `need malformed CHAR cases, got ${unknown.length}`);
   for (const c of fixture.cases) {
@@ -841,6 +842,129 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\\uD800'",
     "'\\400'",
     "'\\\"'",
+    '"a"',
+    '`a`',
+    "'a'x",
+    "'''",
+    'aa',
+    "'\\uFFFE'",
+    "'\\uFDD0'",
+    "'\n'",
+    "'\0'",
+    'a b',
+    "''''",
+    '中',
+    'π',
+    '😀',
+    'é',
+    '"中"',
+    '`中`',
+    '"\'"',
+    "'\\U0001FFFE'",
+    '"\\n"',
+    '"a"x',
+    "'中",
+    '€',
+    '¥',
+    ' a ',
+    '"😀"',
+    "'\\u{41}'",
+    "'e\u0301'",
+    '"\\""',
+    ' 中 ',
+    ' π ',
+    ' € ',
+    ' 😀 ',
+    '\t中\t',
+    "'😀",
+    "😀'",
+    "'¥",
+    "'π",
+    '"\\x41"',
+    '"\\\'"',
+    '`\\n`',
+    '`\\x41`',
+    '"\\u4e2d"',
+    '"\\\\"',
+    "'\\X41'",
+    "'\\x41",
+    "'\\u4e2d",
+    '"a',
+    '`a',
+    '""',
+    '``',
+    "'\\u2028'",
+    "'\\U0010FFFE'",
+    "'€x",
+    "'😀x",
+    "'\r'",
+    '"""',
+    'e\u0301',
+    '  中  ',
+    '   π   ',
+    '  中',
+    '中  ',
+    '#中#',
+    '0中0',
+    '\r中\r',
+    '\x00中\x00',
+    "'\\0'",
+    "'\\00'",
+    "'\\377a'",
+    "'\\0000'",
+    "'\\xAbcd'",
+    "'\\U00000041F'",
+    "'\\\n'",
+    "'\x07'",
+    '\t\t中\t\t',
+    "'e\u0301\u0301'",
+    "''中''",
+    "'\\x0g'",
+    '\u00a0中\u00a0',
+    '\u00a0a\u00a0',
+    '\u3000中\u3000',
+    '\ufeffa\ufeff',
+    '＇a＇',
+    '＇＇',
+    '\u0085中\u0085',
+    '\f中\f',
+    '\v中\v',
+    '\r\n中\r\n',
+    ' \u00a0中\u00a0 ',
+    '"a\'',
+    "'a\"",
+    "'\\x4_1'",
+    "'\\\r'",
+    "'\\U0010FFF'",
+    "'\\nX'",
+    "'\\n中'",
+    "'\\t😀'",
+    "'\\aX'",
+    "'\\x41中'",
+    "'\\101中'",
+    "'\\\\中'",
+    "'\\U0001F600x'",
+    "'\\U0001F1FA\\U0001F1F8'",
+    "'👨\u200D👩'",
+    "'\u2600\uFE0F'",
+    "'🇺🇸'",
+    "'a\u20DD'",
+    "👨\u200D👩",
+    "\u2600\uFE0F",
+    "🇺🇸",
+    "\u200b中\u200b",
+    "\u200D中\u200D",
+    "'\n",
+    "'\\a",
+    "'\\xGG'",
+    "'\\8中'",
+    "'\\u{1F600}'",
+    "'\\\t'",
+    "'\\x0'",
+    "'\\u12G4'",
+    "'\\U0001F600",
+    "'\\nX",
+    "'\\x41中",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -848,7 +972,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 9 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 132 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -874,6 +998,122 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(surrogate.kind, 'Unknown');
   const octal = constMakeFromLiteral("'\\400'", TOKEN.CHAR, 0);
   assert.equal(octal.kind, 'Unknown');
+  const stripped = constMakeFromLiteral('"a"', TOKEN.CHAR, 0);
+  assert.equal(stripped.toString(), '97');
+  const emptyInner = constMakeFromLiteral('aa', TOKEN.CHAR, 0);
+  assert.equal(emptyInner.kind, 'Unknown');
+  const triple = constMakeFromLiteral("'''", TOKEN.CHAR, 0);
+  assert.equal(triple.kind, 'Unknown');
+  const nonchar = constMakeFromLiteral("'\\uFFFE'", TOKEN.CHAR, 0);
+  assert.equal(nonchar.toString(), '65534');
+  const rawNl = constMakeFromLiteral("'\n'", TOKEN.CHAR, 0);
+  assert.equal(rawNl.toString(), '10');
+  const hanStrip = constMakeFromLiteral('中', TOKEN.CHAR, 0);
+  assert.equal(hanStrip.toString(), '65533');
+  const piStrip = constMakeFromLiteral('π', TOKEN.CHAR, 0);
+  assert.equal(piStrip.kind, 'Unknown');
+  const quotedHan = constMakeFromLiteral('"中"', TOKEN.CHAR, 0);
+  assert.equal(quotedHan.toString(), '20013');
+  const emojiStrip = constMakeFromLiteral('😀', TOKEN.CHAR, 0);
+  assert.equal(emojiStrip.toString(), '65533');
+  const dqQuote = constMakeFromLiteral('"\'"', TOKEN.CHAR, 0);
+  assert.equal(dqQuote.kind, 'Unknown');
+  const unclosedHan = constMakeFromLiteral("'中", TOKEN.CHAR, 0);
+  assert.equal(unclosedHan.toString(), '65533');
+  const euroStrip = constMakeFromLiteral('€', TOKEN.CHAR, 0);
+  assert.equal(euroStrip.toString(), '65533');
+  const yenStrip = constMakeFromLiteral('¥', TOKEN.CHAR, 0);
+  assert.equal(yenStrip.kind, 'Unknown');
+  const quotedEuro = constMakeFromLiteral("'€'", TOKEN.CHAR, 0);
+  assert.equal(quotedEuro.toString(), '8364');
+  const combining = constMakeFromLiteral("'e\u0301'", TOKEN.CHAR, 0);
+  assert.equal(combining.toString(), '101');
+  const spaceWrap = constMakeFromLiteral(' a ', TOKEN.CHAR, 0);
+  assert.equal(spaceWrap.toString(), '97');
+  const jsUnicode = constMakeFromLiteral("'\\u{41}'", TOKEN.CHAR, 0);
+  assert.equal(jsUnicode.kind, 'Unknown');
+  const quotedEmoji = constMakeFromLiteral('"😀"', TOKEN.CHAR, 0);
+  assert.equal(quotedEmoji.toString(), '128512');
+  const spaceHan = constMakeFromLiteral(' 中 ', TOKEN.CHAR, 0);
+  assert.equal(spaceHan.toString(), '20013');
+  const spacePi = constMakeFromLiteral(' π ', TOKEN.CHAR, 0);
+  assert.equal(spacePi.toString(), '960');
+  const spaceEuro = constMakeFromLiteral(' € ', TOKEN.CHAR, 0);
+  assert.equal(spaceEuro.toString(), '8364');
+  const dqHex = constMakeFromLiteral('"\\x41"', TOKEN.CHAR, 0);
+  assert.equal(dqHex.toString(), '65');
+  const dqSq = constMakeFromLiteral('"\\\'"', TOKEN.CHAR, 0);
+  assert.equal(dqSq.toString(), '39');
+  const bqN = constMakeFromLiteral('`\\n`', TOKEN.CHAR, 0);
+  assert.equal(bqN.toString(), '10');
+  const unclosedEmoji = constMakeFromLiteral("'😀", TOKEN.CHAR, 0);
+  assert.equal(unclosedEmoji.toString(), '65533');
+  const unclosedYen = constMakeFromLiteral("'¥", TOKEN.CHAR, 0);
+  assert.equal(unclosedYen.toString(), '65533');
+  const unclosedDq = constMakeFromLiteral('"a', TOKEN.CHAR, 0);
+  assert.equal(unclosedDq.kind, 'Unknown');
+  const unclosedBq = constMakeFromLiteral('`a', TOKEN.CHAR, 0);
+  assert.equal(unclosedBq.kind, 'Unknown');
+  const upperX = constMakeFromLiteral("'\\X41'", TOKEN.CHAR, 0);
+  assert.equal(upperX.kind, 'Unknown');
+  const emptyDq = constMakeFromLiteral('""', TOKEN.CHAR, 0);
+  assert.equal(emptyDq.kind, 'Unknown');
+  const lineSep = constMakeFromLiteral("'\\u2028'", TOKEN.CHAR, 0);
+  assert.equal(lineSep.toString(), '8232');
+  const maxNonchar = constMakeFromLiteral("'\\U0010FFFE'", TOKEN.CHAR, 0);
+  assert.equal(maxNonchar.toString(), '1114110');
+  const euroTail = constMakeFromLiteral("'€x", TOKEN.CHAR, 0);
+  assert.equal(euroTail.toString(), '8364');
+  const doublePad = constMakeFromLiteral('  中  ', TOKEN.CHAR, 0);
+  assert.equal(doublePad.toString(), '32');
+  const hashPad = constMakeFromLiteral('#中#', TOKEN.CHAR, 0);
+  assert.equal(hashPad.toString(), '20013');
+  const shortOct = constMakeFromLiteral("'\\0'", TOKEN.CHAR, 0);
+  assert.equal(shortOct.kind, 'Unknown');
+  const octalTail = constMakeFromLiteral("'\\377a'", TOKEN.CHAR, 0);
+  assert.equal(octalTail.toString(), '255');
+  const hexTail = constMakeFromLiteral("'\\xAbcd'", TOKEN.CHAR, 0);
+  assert.equal(hexTail.toString(), '171');
+  const uTail = constMakeFromLiteral("'\\U00000041F'", TOKEN.CHAR, 0);
+  assert.equal(uTail.toString(), '65');
+  const bsNl = constMakeFromLiteral("'\\\n'", TOKEN.CHAR, 0);
+  assert.equal(bsNl.kind, 'Unknown');
+  const bel = constMakeFromLiteral("'\x07'", TOKEN.CHAR, 0);
+  assert.equal(bel.toString(), '7');
+  const twoTab = constMakeFromLiteral('\t\t中\t\t', TOKEN.CHAR, 0);
+  assert.equal(twoTab.toString(), '9');
+  const trailSpace = constMakeFromLiteral('中  ', TOKEN.CHAR, 0);
+  assert.equal(trailSpace.toString(), '65533');
+  const quoteInner = constMakeFromLiteral("''中''", TOKEN.CHAR, 0);
+  assert.equal(quoteInner.kind, 'Unknown');
+  const nlLeftover = constMakeFromLiteral("'\\n中'", TOKEN.CHAR, 0);
+  assert.equal(nlLeftover.toString(), '10');
+  const hexHan = constMakeFromLiteral("'\\x41中'", TOKEN.CHAR, 0);
+  assert.equal(hexHan.toString(), '65');
+  const octHan = constMakeFromLiteral("'\\101中'", TOKEN.CHAR, 0);
+  assert.equal(octHan.toString(), '65');
+  const bsHan = constMakeFromLiteral("'\\\\中'", TOKEN.CHAR, 0);
+  assert.equal(bsHan.toString(), '92');
+  const zwjFam = constMakeFromLiteral("'👨\u200D👩'", TOKEN.CHAR, 0);
+  assert.equal(zwjFam.toString(), '128104');
+  const vsSun = constMakeFromLiteral("'\u2600\uFE0F'", TOKEN.CHAR, 0);
+  assert.equal(vsSun.toString(), '9728');
+  const flag = constMakeFromLiteral("'🇺🇸'", TOKEN.CHAR, 0);
+  assert.equal(flag.toString(), '127482');
+  const unquotedFlag = constMakeFromLiteral('🇺🇸', TOKEN.CHAR, 0);
+  assert.equal(unquotedFlag.toString(), '65533');
+  const zwspPad = constMakeFromLiteral('\u200b中\u200b', TOKEN.CHAR, 0);
+  assert.equal(zwspPad.toString(), '65533');
+  const unclosedNl = constMakeFromLiteral("'\n", TOKEN.CHAR, 0);
+  assert.equal(unclosedNl.kind, 'Unknown');
+  const badHex = constMakeFromLiteral("'\\xGG'", TOKEN.CHAR, 0);
+  assert.equal(badHex.kind, 'Unknown');
+  const badOct = constMakeFromLiteral("'\\8中'", TOKEN.CHAR, 0);
+  assert.equal(badOct.kind, 'Unknown');
+  const unclosedU = constMakeFromLiteral("'\\U0001F600", TOKEN.CHAR, 0);
+  assert.equal(unclosedU.kind, 'Unknown');
+  const unclosedNlX = constMakeFromLiteral("'\\nX", TOKEN.CHAR, 0);
+  assert.equal(unclosedNlX.toString(), '10');
 });
 
 function evaluateImagLit(c) {
@@ -1671,9 +1911,22 @@ function makeConvSrc(c) {
   }
 }
 
+function convertValue(src, convert) {
+  switch (convert) {
+    case 'ToFloat':
+      return constToFloat(src);
+    case 'ToComplex':
+      return constToComplex(src);
+    case 'ToInt':
+      return constToIntValue(src);
+    default:
+      throw new Error(`unknown convert ${convert}`);
+  }
+}
+
 function evaluateConv(c) {
   const src = makeConvSrc(c);
-  const r = c.convert === 'ToFloat' ? constToFloat(src) : constToComplex(src);
+  const r = convertValue(src, c.convert);
   const re = constReal(r);
   const im = constImag(r);
   const [f] = constFloat64Val(r);
@@ -1787,4 +2040,97 @@ test('constToFloat/constToComplex vs Go: Int→Float, 0i unwraps, 1i stays Unkno
   assert.equal(constToFloat(emptyChar).kind, 'Unknown');
   assert.throws(() => constToFloat(1), TypeError);
   assert.throws(() => constToComplex(1), TypeError);
+});
+
+test('Go 1.24 regenerates committed go/constant ToInt fixtures; native matches every case', () => {
+  const generated = go(['-constant-toint']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-toint-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go ToInt fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-toint');
+  assert.ok(fixture.cases.length >= 44, `too few ToInt cases: ${fixture.cases.length}`);
+  const ints = fixture.cases.filter((c) => c.kind === 'Int');
+  const unknownOut = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(ints.length >= 3, `need Int results, got ${ints.length}`);
+  assert.ok(unknownOut.length >= 3, `need Unknown results, got ${unknownOut.length}`);
+  const malformed = fixture.cases.filter((c) => ['1ii', 'i', 'xyz', `"\\z"`, `'ab'`, `''`].includes(c.x) || c.form === 'unknown');
+  assert.ok(malformed.length >= 3, `need malformed ToInt cases, got ${malformed.length}`);
+  const intValued = fixture.cases.filter((c) => c.form === 'quo' && c.kind === 'Int');
+  assert.ok(intValued.length >= 3, `need integer-valued Float ToInt, got ${intValued.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateConv(c);
+    assert.equal(got.origKind, c.origKind, `${c.id} origKind`);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.sign, c.sign, `${c.id} sign`);
+    assert.equal(got.reKind, c.reKind, `${c.id} reKind`);
+    assert.equal(got.reExact, c.reExact, `${c.id} reExact`);
+    assert.equal(got.imKind, c.imKind, `${c.id} imKind`);
+    assert.equal(got.imExact, c.imExact, `${c.id} imExact`);
+    assert.equal(got.f64Bits, c.f64Bits, `${c.id} f64Bits`);
+    assert.equal(got.f64Exact, c.f64Exact, `${c.id} f64Exact`);
+  }
+});
+
+test('JS ToInt extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { convert: 'ToInt', form: 'int', x: '5', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'quo', x: '5', y: '1', s: '0' },
+    { convert: 'ToInt', form: 'quo', x: '1', y: '3', s: '0' },
+    { convert: 'ToInt', form: 'char', x: `'π'`, y: '0', s: '0' },
+    { convert: 'ToInt', form: 'imag', x: '0i', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'string', x: '"', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'bool', x: 'false', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'sum', x: '-1', y: '0i', s: '0' },
+  ];
+  const cases = extras.map((c, i) => evaluateConv({ id: `js-toint-${i}`, ...c }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-toint', cases };
+  const verified = go(['-verify-constant-toint'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 8 gotool constant-toint cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-an-int';
+  const rejected = go(['-verify-constant-toint'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-toint'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-toint', cases: [],
+  })).status, 0);
+});
+
+test('constToIntValue vs Go: Int identity, 4/2 unwraps, 1/2 Unknown, 0i→0, Bool/String Unknown', () => {
+  const one = constMakeInt64(1n);
+  const half = constBinaryOp(TOKEN.QUO, one, constMakeInt64(2n));
+  const two = constBinaryOp(TOKEN.QUO, constMakeInt64(4n), constMakeInt64(2n));
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const zeroI = constMakeFromLiteral('0i', TOKEN.IMAG, 0);
+  const t = constMakeBool(true);
+  const s = constMakeFromLiteral('"a"', TOKEN.STRING, 0);
+  const ch = constMakeFromLiteral("'a'", TOKEN.CHAR, 0);
+  const leftover = constMakeFromLiteral("'ab'", TOKEN.CHAR, 0);
+  const unk = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
+  const emptyChar = constMakeFromLiteral("''", TOKEN.CHAR, 0);
+  assert.equal(constToIntValue(one).kind, 'Int');
+  assert.equal(constToIntValue(one).toString(), '1');
+  assert.equal(constToIntValue(half).kind, 'Unknown');
+  assert.equal(constToIntValue(two).kind, 'Int');
+  assert.equal(constToIntValue(two).toString(), '2');
+  assert.equal(constToIntValue(i).kind, 'Unknown');
+  assert.equal(constToIntValue(zeroI).kind, 'Int');
+  assert.equal(constToIntValue(zeroI).toString(), '0');
+  assert.equal(constToIntValue(t).kind, 'Unknown');
+  assert.equal(constToIntValue(s).kind, 'Unknown');
+  assert.equal(constToIntValue(ch).toString(), '97');
+  assert.equal(leftover.kind, 'Int');
+  assert.equal(constToIntValue(leftover).toString(), '97');
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(constToIntValue(unk).kind, 'Unknown');
+  assert.equal(emptyChar.kind, 'Unknown');
+  assert.equal(constToIntValue(emptyChar).kind, 'Unknown');
+  const [iv, ok] = constToInt(constToIntValue(one));
+  assert.equal(iv, 1n);
+  assert.equal(ok, true);
+  assert.throws(() => constToIntValue(1), TypeError);
 });

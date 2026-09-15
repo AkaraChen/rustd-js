@@ -1,0 +1,20 @@
+$ pnpm typecheck
+$ tsc --noEmit && node scripts/workspace.mjs typecheck
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+$ tsc --noEmit -p tsconfig.json
+
+exit_code=0 elapsed_seconds=147.153

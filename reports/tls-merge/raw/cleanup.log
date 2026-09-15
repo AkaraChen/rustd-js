@@ -1,0 +1,2 @@
+packages/rustd-containers/test/go-fixtures.json: generated suffixarray samples 246 -> 1032; restored merged index version
+packages/rustd-image/test/encode-bytes-compare.json: generatedAt 2026-09-14T16:32:33.278Z -> 2026-09-15T12:50:53.444Z; restored merged index version

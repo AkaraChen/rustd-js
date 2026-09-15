@@ -48,8 +48,12 @@ function drain(sock, state) {
     if (state.i >= replies.length) continue;
     const reply = replies[state.i++];
     sendReply(sock, reply);
+    if (state.hangupAfter && lastCode(reply) === state.hangupAfter) {
+      sock.destroy();
+      return;
+    }
     if (lastCode(reply) === '354') state.mode = 'data';
-    if (state.tlsOpt && lastCode(reply) === '220') {
+    if (state.tlsOpt && !state.implicitTls && lastCode(reply) === '220') {
       state.upgrading = true;
       sock.removeAllListeners('data');
       const tlsSock = new tls.TLSSocket(sock, {
@@ -73,10 +77,12 @@ function drain(sock, state) {
 }
 
 export function withFakeSmtp(script, fn) {
-  const { banner, replies, tls: tlsOpt } = script;
+  const { banner, replies, tls: tlsOpt, hangupAfter, implicitTls } = script;
   const state = {
     replies,
     tlsOpt,
+    hangupAfter,
+    implicitTls: !!implicitTls,
     chunks: [],
     buf: Buffer.alloc(0),
     mode: 'cmd',
@@ -90,12 +96,15 @@ export function withFakeSmtp(script, fn) {
     state.closed = resolve;
   });
   return new Promise((resolve, reject) => {
-    const server = net.createServer((sock) => {
+    const onConn = (sock) => {
       sock.setTimeout(8000);
       sock.on('timeout', () => sock.destroy());
       sendReply(sock, banner);
       attachParser(sock, state);
-    });
+    };
+    const server = implicitTls
+      ? tls.createServer({ cert: tlsOpt.cert, key: tlsOpt.key }, onConn)
+      : net.createServer(onConn);
     server.listen(0, '127.0.0.1', async () => {
       const { port } = server.address();
       try {

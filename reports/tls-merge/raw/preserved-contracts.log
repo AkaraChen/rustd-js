@@ -1,0 +1,9 @@
+$ git diff --exit-code 8c1b7c1a27acbfe7848ce844b64e1cf4b920ff0f -- .github/workflows/ci.yml
+exit_code=0
+$ git diff --exit-code 906214712a3506b047ac2e2a5db5e29dbc1e9739 -- packages/rustd-mail/test packages/rustd-mail/index.d.ts tools/gofixtures/smtp/main.go
+exit_code=0
+Committed SMTP fixture retains client-newclient-implicit-tls
+Committed SMTP fixture retains client-tls-connstate
+Committed SMTP fixture retains client-implicit-tls-auth
+Committed SMTP fixture retains client-implicit-tls-send
+git ls-files --unmerged: empty

@@ -344,6 +344,100 @@ type xmlMix struct {
 	B       string   `xml:"b"`
 }
 
+type xmlNSAttr struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url local,attr"`
+}
+
+type xmlNSElem struct {
+	XMLName xml.Name `xml:"root"`
+	Child   string   `xml:"url local"`
+}
+
+type xmlNSBoth struct {
+	XMLName xml.Name `xml:"http://e root"`
+	V       string   `xml:"url local,attr"`
+	Child   string   `xml:"http://c kid"`
+}
+
+type xmlNSMulti struct {
+	XMLName xml.Name `xml:"root"`
+	A       string   `xml:"http://example.com/ns a,attr"`
+	B       string   `xml:"http://example.com/ns b,attr"`
+	C       string   `xml:"http://other.com/x c,attr"`
+}
+
+type xmlNSLang struct {
+	XMLName xml.Name `xml:"root"`
+	Lang    string   `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
+}
+
+type xmlNSEmpty struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:" local,attr"`
+}
+
+type xmlNSOnlyURL struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url,attr"`
+}
+
+type xmlNSXmlName struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"http://example.com/xmlname x,attr"`
+}
+
+type xmlNSSame struct {
+	XMLName xml.Name `xml:"url root"`
+	V       string   `xml:"url local,attr"`
+}
+
+type xmlNSInner struct {
+	XMLName xml.Name `xml:"url inner"`
+	V       string   `xml:"url local,attr"`
+}
+
+type xmlNSNested struct {
+	XMLName xml.Name `xml:"root"`
+	Inner   xmlNSInner
+}
+
+type xmlNSOmit struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url local,attr,omitempty"`
+}
+
+type xmlNSPath struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url a>b"`
+}
+
+type xmlNSIndent struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url local,attr"`
+	C       string   `xml:"url kid"`
+}
+
+type xmlNSBadEmpty struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url ,attr"`
+}
+
+type xmlNSBadElem struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url "`
+}
+
+type xmlNSBadHTTP struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"http://x ,attr"`
+}
+
+type xmlNSBadPathAttr struct {
+	XMLName xml.Name `xml:"root"`
+	V       string   `xml:"url a>b,attr"`
+}
+
 func decodeCase(id, kind string, xmlBytes []byte, value any) XmlDecodeCase {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -358,6 +452,14 @@ func mustXML(v any) []byte {
 		fail(err)
 	}
 	return b
+}
+
+func marshalErr(v any) string {
+	_, err := xml.Marshal(v)
+	if err == nil {
+		fail(fmt.Errorf("expected marshal error for %T", v))
+	}
+	return err.Error()
 }
 
 func encodeCase(id, kind string, xmlBytes []byte, value any, errMsg, prefix, indent string) XmlEncodeCase {
@@ -382,6 +484,10 @@ func generateXmlEncodes() []XmlEncodeCase {
 		fail(err)
 	}
 	indentCdata, err := xml.MarshalIndent(xmlCdata{Body: "hi"}, "", "  ")
+	if err != nil {
+		fail(err)
+	}
+	indentNS, err := xml.MarshalIndent(xmlNSIndent{V: "x", C: "y"}, "", "  ")
 	if err != nil {
 		fail(err)
 	}
@@ -417,6 +523,26 @@ func generateXmlEncodes() []XmlEncodeCase {
 		encodeCase("cdata-triple", "cdata", mustXML(xmlCdata{Body: "<![CDATA[<![CDATA[Nested]]>]]>"}), map[string]any{"body": "<![CDATA[<![CDATA[Nested]]>]]>"}, "", "", ""),
 		encodeCase("cdata-indent", "cdata", indentCdata, map[string]any{"body": "hi"}, "", "", "  "),
 		encodeCase("cdata-mix", "cdatamix", mustXML(xmlCdataMix{A: "1", Body: "x<y", B: "2"}), map[string]any{"a": "1", "body": "x<y", "b": "2"}, "", "", ""),
+		encodeCase("ns-attr", "nsattr", mustXML(xmlNSAttr{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-attr-empty", "nsattr", mustXML(xmlNSAttr{V: ""}), map[string]any{"v": ""}, "", "", ""),
+		encodeCase("ns-attr-esc", "nsattr", mustXML(xmlNSAttr{V: `a<b&c"`}), map[string]any{"v": `a<b&c"`}, "", "", ""),
+		encodeCase("ns-elem", "nselem", mustXML(xmlNSElem{Child: "y"}), map[string]any{"child": "y"}, "", "", ""),
+		encodeCase("ns-both", "nsboth", mustXML(xmlNSBoth{V: "x", Child: "z"}), map[string]any{"v": "x", "child": "z"}, "", "", ""),
+		encodeCase("ns-multi", "nsmulti", mustXML(xmlNSMulti{A: "1", B: "2", C: "3"}), map[string]any{"a": "1", "b": "2", "c": "3"}, "", "", ""),
+		encodeCase("ns-xml", "nsxml", mustXML(xmlNSLang{Lang: "en"}), map[string]any{"lang": "en"}, "", "", ""),
+		encodeCase("ns-empty-space", "nsempty", mustXML(xmlNSEmpty{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-only-url", "nsonlyurl", mustXML(xmlNSOnlyURL{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-xmlname", "nsxmlname", mustXML(xmlNSXmlName{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-same", "nssame", mustXML(xmlNSSame{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-nested", "nsnested", mustXML(xmlNSNested{Inner: xmlNSInner{V: "q"}}), map[string]any{"inner": map[string]any{"v": "q"}}, "", "", ""),
+		encodeCase("ns-omit-empty", "nsomit", mustXML(xmlNSOmit{V: ""}), map[string]any{"v": ""}, "", "", ""),
+		encodeCase("ns-omit-val", "nsomit", mustXML(xmlNSOmit{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-path", "nspath", mustXML(xmlNSPath{V: "x"}), map[string]any{"v": "x"}, "", "", ""),
+		encodeCase("ns-indent", "nsindent", indentNS, map[string]any{"v": "x", "c": "y"}, "", "", "  "),
+		encodeCase("ns-bad-empty", "nsbadempty", nil, map[string]any{"v": "x"}, marshalErr(xmlNSBadEmpty{V: "x"}), "", ""),
+		encodeCase("ns-bad-elem", "nsbadelem", nil, map[string]any{"v": "x"}, marshalErr(xmlNSBadElem{V: "x"}), "", ""),
+		encodeCase("ns-bad-http", "nsbadhttp", nil, map[string]any{"v": "x"}, marshalErr(xmlNSBadHTTP{V: "x"}), "", ""),
+		encodeCase("ns-bad-path-attr", "nsbadpathattr", nil, map[string]any{"v": "x"}, marshalErr(xmlNSBadPathAttr{V: "x"}), "", ""),
 	}
 }
 
@@ -570,6 +696,52 @@ func verifyXml(packet XmlVerifyPacket) {
 			}
 		case "mix":
 			var v xmlMix
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "nsattr":
+			var v xmlNSAttr
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "nselem":
+			var v xmlNSElem
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if v.Child == "" {
+				fail(fmt.Errorf("%s: empty child", c.ID))
+			}
+		case "nsboth":
+			var v xmlNSBoth
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "nsmulti":
+			var v xmlNSMulti
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "nsxml":
+			var v xmlNSLang
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "nssame":
+			var v xmlNSSame
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+		case "nsnested":
+			var v xmlNSNested
+			if err := xml.Unmarshal(raw, &v); err != nil {
+				fail(fmt.Errorf("%s: %v", c.ID, err))
+			}
+			if v.Inner.V == "" {
+				fail(fmt.Errorf("%s: empty inner", c.ID))
+			}
+		case "nspath":
+			var v xmlNSPath
 			if err := xml.Unmarshal(raw, &v); err != nil {
 				fail(fmt.Errorf("%s: %v", c.ID, err))
 			}

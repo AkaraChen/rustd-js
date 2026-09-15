@@ -17,14 +17,17 @@ const parsed: MailAddress = new AddressParser().parse('a@b.com');
 header.setDate(date);
 const err: MailError = new MailError('mail: x', 'header');
 const kind: 'header' | 'address' | 'date' | 'syntax' = err.kind;
-const auth = plainAuth({ username: 'u', password: 'p', host: 'localhost' });
+const auth = plainAuth({ identity: 'foo', username: 'u', password: 'p', host: 'localhost' });
 const smtpErr: SmtpError = new SmtpError('535 no', { code: 535, command: 'AUTH', serverMessage: 'no' });
 const feat: FeatureNotBuiltError = new FeatureNotBuiltError('smtp: STARTTLS handshake not built', { command: 'STARTTLS' });
 void sendMail('127.0.0.1:25', auth, 'a@b.com', ['b@c.com'], 'Subject: x\r\n\r\nHi\r\n');
-void SmtpClient.dial('127.0.0.1:25').then(async (c) => {
+void SmtpClient.dial('127.0.0.1:25', { tls: { implicit: true, ca: Buffer.alloc(0), serverName: 'smtp.test.local' } }).then(async (c) => {
   await c.hello();
   await c.startTls({ serverName: '127.0.0.1' });
-  await c.mail('a@b.com');
+  await c.verify('alice@example.com');
+  await c.reset();
+  await c.noop();
+  await c.mail('用户@example.com');
   await c.rcpt('b@c.com');
   const w: SmtpDataWriter = await c.data();
   await w.write('x');
