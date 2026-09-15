@@ -61,6 +61,8 @@ await sendMail('127.0.0.1:2525', plainAuth({
   enforce this.
 - Default dial timeout is 30s (connect + read/write). Pass `{ timeoutMs: 0 }`
   for Go-like blocking. Expired waits throw `smtp: connection timed out`.
+- `sendMail` on MAIL/RCPT/DATA failure closes the TCP socket without `QUIT`,
+  matching Go `defer c.Close()`. `Auth` failure still sends `*` then `QUIT`.
 - No connection pool; one `SmtpClient` is one TCP connection.
 - Server response lines have no extra cap (Go `textproto.ReadLine` is
   unlimited). `250-` then a non-code line is kept as RFC 959 continuation,

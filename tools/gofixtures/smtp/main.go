@@ -68,6 +68,18 @@ func lastCode(reply string) string {
 	return ""
 }
 
+// emptyInitialAuth matches Go smtp.TestClientAuthTrimSpace: AUTH with a zero-length
+// initial response must not send a trailing space (issue 17794).
+type emptyInitialAuth struct{}
+
+func (emptyInitialAuth) Start(*smtp.ServerInfo) (string, []byte, error) {
+	return "FOOAUTH", nil, nil
+}
+
+func (emptyInitialAuth) Next([]byte, bool) ([]byte, error) {
+	return nil, fmt.Errorf("unexpected call")
+}
+
 func serverTLS() *tls.Config {
 	cert, err := tls.LoadX509KeyPair("cert.pem", "key.pem")
 	if err != nil {
@@ -626,12 +638,235 @@ func main() {
 			},
 		},
 		{
+			id:     "sendMail-mail-fail",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"550 no such user",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "sendMail-rcpt-fail",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"550 rejected",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"ok@b.com", "bad@b.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "sendMail-data-fail",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"554 not taking mail",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "client-smtputf8-unicode",
+			kind:   "client",
+			banner: "220 localhost",
+			replies: []string{
+				"250-localhost\n250-8BITMIME\n250 SMTPUTF8",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("用户@example.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("c@d.com"); err != nil {
+					return err
+				}
+				w, err := c.Data()
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(msgCRLF(sendMsg)); err != nil {
+					return err
+				}
+				if err := w.Close(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "sendMail-auth-plain-identity",
+			kind:   "sendMail",
+			banner: "220 localhost ESMTP",
+			replies: []string{
+				"250-localhost\n250 AUTH PLAIN LOGIN",
+				"235 Accepted",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, smtp.PlainAuth("foo", "bar", "baz", "127.0.0.1"), "a@b.com", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "client-auth-wrong-host",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return c.Auth(smtp.PlainAuth("", "user", "pass", "smtp.example.com"))
+			},
+		},
+		{
+			id:     "client-auth-empty-initial",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-localhost\n250 AUTH PLAIN",
+				"200 some more",
+				"501 aborted",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return c.Auth(emptyInitialAuth{})
+			},
+		},
+		{
+			id:     "client-helo-fail",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"502 EH?",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				herr := c.Hello("localhost")
+				qerr := c.Quit()
+				if herr == nil {
+					return fmt.Errorf("expected Hello to fail")
+				}
+				if qerr != nil {
+					return qerr
+				}
+				return herr
+			},
+		},
+		{
+			id:     "client-hello-after-mail",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("a@b.com"); err != nil {
+					return err
+				}
+				herr := c.Hello("x")
+				_ = c.Quit()
+				if herr == nil {
+					return fmt.Errorf("expected Hello after Mail to fail")
+				}
+				return herr
+			},
+		},
+		{
+			id:     "client-hello-inject",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return c.Hello("hostinjection>\n\rDATA\r\nInjected message body\r\n.\r\nQUIT\r\n")
+			},
+		},
+		{
+			id:     "client-vrfy-inject",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return c.Verify("user2@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n")
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
 			replies: nil,
 			fn: func(addr string) error {
 				return smtp.SendMail("127.0.0.1:1", nil, "a@b.com", []string{"b@c.com>\nDATA\n"}, []byte("x"))
+			},
+		},
+		{
+			id:      "sendMail-from-inject",
+			kind:    "validate",
+			banner:  "",
+			replies: nil,
+			fn: func(addr string) error {
+				return smtp.SendMail("127.0.0.1:1", nil, "a@b.com>\nDATA\n", []string{"c@d.com"}, []byte("x"))
 			},
 		},
 	}
