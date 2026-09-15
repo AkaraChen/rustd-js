@@ -1307,6 +1307,20 @@ func charLiteralCorpus() []string {
 		"'\r'",
 		`"""`,
 		"e\u0301",
+		// Double ASCII pad: first/last space leaves a leading space → Int 32, not 中.
+		`  中  `, `   π   `,
+		// Asymmetric: two leading spaces truncate 中 to space leftover; two trailing → U+FFFD.
+		`  中`, `中  `,
+		// Single-byte punct/digit/CR/NUL pad keeps the inner rune (contrast double space).
+		`#中#`, `0中0`, "\r中\r", "\x00中\x00",
+		// Short octal Unknown (need 3 digits). Complete octal/hex/U leftover is kept.
+		`'\0'`, `'\00'`, `'\377a'`, `'\0000'`, `'\xAbcd'`, `'\U00000041F'`,
+		// Backslash + real newline Unknown. Unescaped BEL is Int 7.
+		"'\\\n'", "'\a'",
+		// Double-tab pad is TAB (9), not 中. Two combining marks still first rune.
+		"\t\t中\t\t", "'e\u0301\u0301'",
+		// Malformed: inner unescaped quote; incomplete hex.
+		"''中''", `'\x0g'`,
 	}
 }
 

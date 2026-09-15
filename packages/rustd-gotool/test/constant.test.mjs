@@ -802,7 +802,7 @@ test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; n
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
   assert.equal(fixture.slice, 'constant-char-literal');
-  assert.ok(fixture.cases.length >= 140, `too few CHAR cases: ${fixture.cases.length}`);
+  assert.ok(fixture.cases.length >= 170, `too few CHAR cases: ${fixture.cases.length}`);
   const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
   assert.ok(unknown.length >= 3, `need malformed CHAR cases, got ${unknown.length}`);
   for (const c of fixture.cases) {
@@ -888,6 +888,26 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\r'",
     '"""',
     'e\u0301',
+    '  中  ',
+    '   π   ',
+    '  中',
+    '中  ',
+    '#中#',
+    '0中0',
+    '\r中\r',
+    '\x00中\x00',
+    "'\\0'",
+    "'\\00'",
+    "'\\377a'",
+    "'\\0000'",
+    "'\\xAbcd'",
+    "'\\U00000041F'",
+    "'\\\n'",
+    "'\x07'",
+    '\t\t中\t\t',
+    "'e\u0301\u0301'",
+    "''中''",
+    "'\\x0g'",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -895,7 +915,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 67 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 87 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -987,6 +1007,28 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(maxNonchar.toString(), '1114110');
   const euroTail = constMakeFromLiteral("'€x", TOKEN.CHAR, 0);
   assert.equal(euroTail.toString(), '8364');
+  const doublePad = constMakeFromLiteral('  中  ', TOKEN.CHAR, 0);
+  assert.equal(doublePad.toString(), '32');
+  const hashPad = constMakeFromLiteral('#中#', TOKEN.CHAR, 0);
+  assert.equal(hashPad.toString(), '20013');
+  const shortOct = constMakeFromLiteral("'\\0'", TOKEN.CHAR, 0);
+  assert.equal(shortOct.kind, 'Unknown');
+  const octalTail = constMakeFromLiteral("'\\377a'", TOKEN.CHAR, 0);
+  assert.equal(octalTail.toString(), '255');
+  const hexTail = constMakeFromLiteral("'\\xAbcd'", TOKEN.CHAR, 0);
+  assert.equal(hexTail.toString(), '171');
+  const uTail = constMakeFromLiteral("'\\U00000041F'", TOKEN.CHAR, 0);
+  assert.equal(uTail.toString(), '65');
+  const bsNl = constMakeFromLiteral("'\\\n'", TOKEN.CHAR, 0);
+  assert.equal(bsNl.kind, 'Unknown');
+  const bel = constMakeFromLiteral("'\x07'", TOKEN.CHAR, 0);
+  assert.equal(bel.toString(), '7');
+  const twoTab = constMakeFromLiteral('\t\t中\t\t', TOKEN.CHAR, 0);
+  assert.equal(twoTab.toString(), '9');
+  const trailSpace = constMakeFromLiteral('中  ', TOKEN.CHAR, 0);
+  assert.equal(trailSpace.toString(), '65533');
+  const quoteInner = constMakeFromLiteral("''中''", TOKEN.CHAR, 0);
+  assert.equal(quoteInner.kind, 'Unknown');
 });
 
 function evaluateImagLit(c) {
