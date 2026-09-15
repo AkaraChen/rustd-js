@@ -841,6 +841,16 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\0'",
     'a b',
     "''''",
+    '中',
+    'π',
+    '😀',
+    'é',
+    '"中"',
+    '`中`',
+    '"\'"',
+    "'\\U0001FFFE'",
+    '"\\n"',
+    '"a"x',
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -848,7 +858,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 20 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 30 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -884,6 +894,16 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(nonchar.toString(), '65534');
   const rawNl = constMakeFromLiteral("'\n'", TOKEN.CHAR, 0);
   assert.equal(rawNl.toString(), '10');
+  const hanStrip = constMakeFromLiteral('中', TOKEN.CHAR, 0);
+  assert.equal(hanStrip.toString(), '65533');
+  const piStrip = constMakeFromLiteral('π', TOKEN.CHAR, 0);
+  assert.equal(piStrip.kind, 'Unknown');
+  const quotedHan = constMakeFromLiteral('"中"', TOKEN.CHAR, 0);
+  assert.equal(quotedHan.toString(), '20013');
+  const emojiStrip = constMakeFromLiteral('😀', TOKEN.CHAR, 0);
+  assert.equal(emojiStrip.toString(), '65533');
+  const dqQuote = constMakeFromLiteral('"\'"', TOKEN.CHAR, 0);
+  assert.equal(dqQuote.kind, 'Unknown');
 });
 
 function evaluateImagLit(c) {
