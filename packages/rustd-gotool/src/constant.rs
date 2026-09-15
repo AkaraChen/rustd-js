@@ -448,17 +448,66 @@ fn vtoc_compare_parts(v: &GoConstValue) -> Result<(GoConstValue, GoConstValue)> 
     }
 }
 
+fn string_cmp_op(op: i32) -> bool {
+    matches!(
+        op,
+        token::EQL | token::NEQ | token::LSS | token::LEQ | token::GTR | token::GEQ
+    )
+}
+
+/// Go `cmpZero` on `bytes.Compare` / Go string `<` (byte-wise, not runes).
+fn cmp_zero(ord: std::cmp::Ordering, op: i32) -> Result<bool> {
+    let x = match ord {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    };
+    match op {
+        token::EQL => Ok(x == 0),
+        token::NEQ => Ok(x != 0),
+        token::LSS => Ok(x < 0),
+        token::LEQ => Ok(x <= 0),
+        token::GTR => Ok(x > 0),
+        token::GEQ => Ok(x >= 0),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp String op must be EQL, NEQ, LSS, LEQ, GTR, or GEQ",
+        )),
+    }
+}
+
 fn compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<bool> {
+    if x.kind == "String" || y.kind == "String" {
+        if !string_cmp_op(op) {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constCompareOp String op must be EQL, NEQ, LSS, LEQ, GTR, or GEQ",
+            ));
+        }
+        // Go `match` forces Unknown into both positions → Compare is false.
+        if x.kind == "Unknown" || y.kind == "Unknown" {
+            return Ok(false);
+        }
+        if x.kind == "String" && y.kind == "String" {
+            let xs = x.str_bytes.as_deref().unwrap_or(&[]);
+            let ys = y.str_bytes.as_deref().unwrap_or(&[]);
+            return cmp_zero(xs.cmp(ys), op);
+        }
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp mixed String",
+        ));
+    }
+    // Go `Compare`: `unknownVal` returns false for every op, including LSS.
+    // Two malformed STRING literals are both Unknown (the String branch above
+    // only runs when a String operand is present).
+    if x.kind == "Unknown" && y.kind == "Unknown" && string_cmp_op(op) {
+        return Ok(false);
+    }
     if op != token::EQL && op != token::NEQ {
         return Err(Error::new(
             Status::InvalidArg,
             "gotool: constCompareOp op must be EQL or NEQ",
-        ));
-    }
-    if x.kind == "String" || y.kind == "String" {
-        return Err(Error::new(
-            Status::InvalidArg,
-            "gotool: constCompareOp String stays later",
         ));
     }
     if x.kind == "Bool" || y.kind == "Bool" {
@@ -499,9 +548,11 @@ fn compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<bool> {
     ))
 }
 
-/// Go `MakeBool(Compare(x, op, y))` for EQL/NEQ.
+/// Go `MakeBool(Compare(x, op, y))`.
+/// Numeric/Complex: EQL/NEQ. String: EQL/NEQ/LSS/LEQ/GTR/GEQ (byte-wise).
 /// Complex uses component EQL after `match`/`vtoc`. Unknown vs non-Complex is false.
 /// Unknown vs Complex follows Go: `vtoc(unknown)` then component Compare (NEQ can be true).
+/// Unknown vs String is false. Mixed String vs Int/Bool/Complex throws.
 #[napi]
 pub fn const_compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<GoConstValue> {
     Ok(make_bool(compare_op(x, op, y)?))

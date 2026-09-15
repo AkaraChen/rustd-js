@@ -48,6 +48,7 @@ const [fval, fok]: [number, boolean] = constFloat64Val(cv);
 const icmp: number = constCompare(cv, constMakeInt64(0n));
 const fcmp: number = constCompare(constBinaryOp(TOKEN.QUO, cv, constMakeInt64(2n)), cv);
 const ceq: GoConstValue = constCompareOp(fromILit, TOKEN.EQL, fromILit);
+const slss: GoConstValue = constCompareOp(fromSLit, TOKEN.LSS, fromSLit);
 const isign: number = constSign(cv);
 const ireal: GoConstValue = constReal(fromILit);
 const iimag: GoConstValue = constImag(fromILit);
@@ -109,4 +110,4 @@ versionLang(1);
 const wrong: boolean = versionCompare('go1', 'go1.1');
 // @ts-expect-error CompareOp operands are GoConstValue
 constCompareOp(1n, TOKEN.EQL, fromILit);
-void [cv, fromLit, fromFLit, fromCLit, fromILit, fromSLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, ceq, isign, ireal, iimag, ibits, badd, fadd, cadd, cmul, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
+void [cv, fromLit, fromFLit, fromCLit, fromILit, fromSLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, ceq, slss, isign, ireal, iimag, ibits, badd, fadd, cadd, cmul, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];

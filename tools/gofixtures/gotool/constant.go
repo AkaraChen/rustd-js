@@ -2292,3 +2292,142 @@ func verifyConstantComplexCompare(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-complex-compare cases\n", len(packet.Cases))
 }
+
+type ConstStrCmpCase struct {
+	ID        string `json:"id"`
+	Op        string `json:"op"`
+	OpTok     int    `json:"opTok"`
+	LitX      string `json:"litX"`
+	LitY      string `json:"litY"`
+	KindX     string `json:"kindX"`
+	KindY     string `json:"kindY"`
+	Kind      string `json:"kind"`
+	Exact     string `json:"exact"`
+	BoolVal   bool   `json:"boolVal"`
+	BoolValOk bool   `json:"boolValOk"`
+}
+
+type ConstStrCmpPacket struct {
+	Schema  int               `json:"schema"`
+	Package string            `json:"package"`
+	Go      string            `json:"go"`
+	Slice   string            `json:"slice"`
+	Cases   []ConstStrCmpCase `json:"cases"`
+}
+
+func evalStringCompare(litX, litY string, op token.Token) (c ConstStrCmpCase, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	vx := constant.MakeFromLiteral(litX, token.STRING, 0)
+	vy := constant.MakeFromLiteral(litY, token.STRING, 0)
+	v := constant.MakeBool(constant.Compare(vx, op, vy))
+	c = ConstStrCmpCase{
+		OpTok: int(op),
+		LitX:  litX,
+		LitY:  litY,
+		KindX: vx.Kind().String(),
+		KindY: vy.Kind().String(),
+		Kind:  v.Kind().String(),
+		Exact: v.ExactString(),
+	}
+	c.BoolVal, c.BoolValOk = boolValOK(v)
+	return c, nil
+}
+
+func stringCompareOps() []struct {
+	name string
+	tok  token.Token
+} {
+	return []struct {
+		name string
+		tok  token.Token
+	}{
+		{"EQL", token.EQL},
+		{"NEQ", token.NEQ},
+		{"LSS", token.LSS},
+		{"LEQ", token.LEQ},
+		{"GTR", token.GTR},
+		{"GEQ", token.GEQ},
+	}
+}
+
+// Go Compare on String is byte-wise (Go string <) then MakeBool.
+// Includes empty, ASCII order, prefix, invalid UTF-8 \xff, rune 中, and
+// malformed STRING literals (Unknown; Compare is false for every op).
+func stringCompareCorpus() []string {
+	return []string{
+		`""`, `"a"`, `"b"`, `"aa"`, `"A"`,
+		`"\x00"`, `"\xff"`, `"中"`, `"\n"`, `"foo"`,
+		`"\z"`, `'ab'`, `"`,
+	}
+}
+
+func dumpConstantStringCompare(w io.Writer) {
+	packet := ConstStrCmpPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-string-compare",
+	}
+	corpus := stringCompareCorpus()
+	for _, op := range stringCompareOps() {
+		for i, a := range corpus {
+			for j, b := range corpus {
+				c, err := evalStringCompare(a, b, op.tok)
+				if err != nil {
+					fail(err)
+				}
+				c.ID = fmt.Sprintf("go-scmp-%s-%d-%d", op.name, i, j)
+				c.Op = op.name
+				packet.Cases = append(packet.Cases, c)
+			}
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantStringCompare(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstStrCmpPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-string-compare" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-string-compare packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{}
+	for _, op := range stringCompareOps() {
+		tokOf[op.name] = op.tok
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		got, err := evalStringCompare(c.LitX, c.LitY, op)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.KindX != c.KindX || got.KindY != c.KindY || got.Kind != c.Kind || got.Exact != c.Exact || got.BoolVal != c.BoolVal || got.BoolValOk != c.BoolValOk {
+			fail(fmt.Errorf("mismatch case %d id=%s op=%s litX=%q litY=%q: go kindX=%s kindY=%s kind=%s exact=%s boolVal=%v ok=%v got kindX=%s kindY=%s kind=%s exact=%s boolVal=%v ok=%v",
+				i, c.ID, c.Op, c.LitX, c.LitY, got.KindX, got.KindY, got.Kind, got.Exact, got.BoolVal, got.BoolValOk,
+				c.KindX, c.KindY, c.Kind, c.Exact, c.BoolVal, c.BoolValOk))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-string-compare cases\n", len(packet.Cases))
+}
