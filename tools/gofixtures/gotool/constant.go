@@ -1294,6 +1294,46 @@ func charLiteralCorpus() []string {
 		`"😀"`, "`😀`",
 		" a ", `"\""`, `''a`, `éé`,
 		`'\u{41}'`, "'e\u0301'",
+		// ASCII first/last bytes around UTF-8: inner rune survives (contrast unquoted π/€/😀).
+		` 中 `, ` π `, ` € `, ` 😀 `, "\t中\t",
+		// Unclosed 2/4-byte → U+FFFD. ASCII unclosed "a / `a is Unknown.
+		`'😀`, `😀'`, `'¥`, `'π`, `"a`, "`a",
+		// STRING-style wrap still UnquoteChar(..., '\'').
+		`"\x41"`, `"\'"`, "`\\n`", "`\\x41`", `"\u4e2d"`, `"\\"`,
+		// Malformed: uppercase \X, unclosed hex/unicode, empty dq/bq.
+		`'\X41'`, `'\x41`, `'\u4e2d`, `""`, "``",
+		`'\u2028'`, `'\U0010FFFE'`,
+		`'€x`, `'😀x`,
+		"'\r'",
+		`"""`,
+		"e\u0301",
+		// Double ASCII pad: first/last space leaves a leading space → Int 32, not 中.
+		`  中  `, `   π   `,
+		// Asymmetric: two leading spaces truncate 中 to space leftover; two trailing → U+FFFD.
+		`  中`, `中  `,
+		// Single-byte punct/digit/CR/NUL pad keeps the inner rune (contrast double space).
+		`#中#`, `0中0`, "\r中\r", "\x00中\x00",
+		// Short octal Unknown (need 3 digits). Complete octal/hex/U leftover is kept.
+		`'\0'`, `'\00'`, `'\377a'`, `'\0000'`, `'\xAbcd'`, `'\U00000041F'`,
+		// Backslash + real newline Unknown. Unescaped BEL is Int 7.
+		"'\\\n'", "'\a'",
+		// Double-tab pad is TAB (9), not 中. Two combining marks still first rune.
+		"\t\t中\t\t", "'e\u0301\u0301'",
+		// Malformed: inner unescaped quote; incomplete hex.
+		"''中''", `'\x0g'`,
+		// Multibyte Unicode wrap/pad splits the pad rune (first/last BYTE) → U+FFFD.
+		// Contrast single-byte C0 pad (FF/VT) which keeps 中, same as `#中#`.
+		"\u00a0中\u00a0", "\u00a0a\u00a0", "\u3000中\u3000",
+		"\ufeffa\ufeff", "＇a＇", "＇＇", "\u0085中\u0085",
+		"\f中\f", "\v中\v",
+		// CRLF pad: strip CR/LF leaves a leading LF → Int 10, not 中.
+		"\r\n中\r\n",
+		// ASCII space around NBSP+中: inner starts with NBSP → Int 160.
+		" \u00a0中\u00a0 ",
+		// Quote mismatch still UnquoteChar(..., '\'').
+		"\"a'", "'a\"",
+		// Malformed: hex underscore, backslash+CR, 7-digit \U.
+		`'\x4_1'`, "'\\\r'", `'\U0010FFF'`,
 	}
 }
 

@@ -191,10 +191,25 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   wrapping **bytes** (`"a"` and `` `a` `` are Int 97) and ignores leftover tail
   (`'ab'` / `'a'x` are Int 97). Unquoted 2-byte UTF-8 (`π` / `é` / `¥`) strips
   both bytes and is Unknown; unquoted 3+/4-byte (`中` / `€` / `😀`) leaves an
-  invalid UTF-8 inner byte and is Int 65533 (`U+FFFD`). Unclosed `'中` is also
-  U+FFFD. Quoted `"中"` / `"€"` / `` `😀` `` keep the rune. Combining
-  `'e\u0301'` takes only the first rune (Int 101). `aa` (empty inner), `'''`
-  (inner is `'`), and JS-style `'\u{41}'` are Unknown.
+  invalid UTF-8 inner byte and is Int 65533 (`U+FFFD`). ASCII-padded UTF-8
+  (` 中 ` / ` π ` / ` € ` / ` 😀 `) keeps the inner rune because the stripped
+  bytes are spaces. Double pad (`  中  ` / `\t\t中\t\t`) is Int 32 / 9 because
+  the inner starts with space/tab; two leading spaces (`  中`) truncate to
+  space leftover, two trailing (`中  `) is U+FFFD. Single-byte punct/digit/CR/NUL
+  pad (`#中#` / `0中0` / CR / NUL) keeps the rune. Multibyte Unicode pad
+  (NBSP / ideographic space / BOM / NEL / fullwidth `＇a＇`) is Int 65533
+  because the pad rune itself is split. Single-byte C0 pad (`\f中\f` /
+  `\v中\v`) still keeps 中; CRLF pad is Int 10 (inner starts with LF). ASCII
+  space around NBSP+中 is Int 160. Quote mismatch (`"a'` / `'a"`) is Int 97.
+  Short octal `'\0'` / `'\00'`
+  is Unknown; leftover after a complete escape (`'\377a'` / `'\xAbcd'` /
+  `'\U00000041F'`) is ignored. Backslash + real newline is Unknown; unescaped
+  BEL is Int 7. Unclosed `'中` / `'😀` / `'¥` is also U+FFFD; unclosed
+  ASCII `"a` / `` `a `` is Unknown. STRING-style `"\x41"` / `"\'"` / `` `\n` ``
+  still UnquoteChar with quote `'`. Combining `'e\u0301'` takes only the first
+  rune (Int 101). `aa` (empty inner), `'''` (inner is `'`), `''中''` (inner
+  starts with `'`), uppercase `'\X41'`, incomplete `'\x0g'` / `'\x4_1'` /
+  `'\U0010FFF'`, backslash+CR, and JS-style `'\u{41}'` are Unknown.
   Unicode noncharacters (`'\uFFFE'`) are valid runes. STRING uses `strconv.Unquote` (leftover is Unknown:
   `'ab'` as STRING is Unknown; `''` is the empty String). IMAG requires a trailing
   `i` and parses the prefix as a
