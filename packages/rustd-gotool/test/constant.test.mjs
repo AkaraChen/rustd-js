@@ -802,7 +802,7 @@ test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; n
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
   assert.equal(fixture.slice, 'constant-char-literal');
-  assert.ok(fixture.cases.length >= 185, `too few CHAR cases: ${fixture.cases.length}`);
+  assert.ok(fixture.cases.length >= 210, `too few CHAR cases: ${fixture.cases.length}`);
   const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
   assert.ok(unknown.length >= 3, `need malformed CHAR cases, got ${unknown.length}`);
   for (const c of fixture.cases) {
@@ -924,6 +924,35 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\\x4_1'",
     "'\\\r'",
     "'\\U0010FFF'",
+    "'\\nX'",
+    "'\\n中'",
+    "'\\t😀'",
+    "'\\aX'",
+    "'\\x41中'",
+    "'\\101中'",
+    "'\\\\中'",
+    "'\\U0001F600x'",
+    "'\\U0001F1FA\\U0001F1F8'",
+    "'👨\u200D👩'",
+    "'\u2600\uFE0F'",
+    "'🇺🇸'",
+    "'a\u20DD'",
+    "👨\u200D👩",
+    "\u2600\uFE0F",
+    "🇺🇸",
+    "\u200b中\u200b",
+    "\u200D中\u200D",
+    "'\n",
+    "'\\a",
+    "'\\xGG'",
+    "'\\8中'",
+    "'\\u{1F600}'",
+    "'\\\t'",
+    "'\\x0'",
+    "'\\u12G4'",
+    "'\\U0001F600",
+    "'\\nX",
+    "'\\x41中",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -931,7 +960,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 103 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 132 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -1045,6 +1074,34 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(trailSpace.toString(), '65533');
   const quoteInner = constMakeFromLiteral("''中''", TOKEN.CHAR, 0);
   assert.equal(quoteInner.kind, 'Unknown');
+  const nlLeftover = constMakeFromLiteral("'\\n中'", TOKEN.CHAR, 0);
+  assert.equal(nlLeftover.toString(), '10');
+  const hexHan = constMakeFromLiteral("'\\x41中'", TOKEN.CHAR, 0);
+  assert.equal(hexHan.toString(), '65');
+  const octHan = constMakeFromLiteral("'\\101中'", TOKEN.CHAR, 0);
+  assert.equal(octHan.toString(), '65');
+  const bsHan = constMakeFromLiteral("'\\\\中'", TOKEN.CHAR, 0);
+  assert.equal(bsHan.toString(), '92');
+  const zwjFam = constMakeFromLiteral("'👨\u200D👩'", TOKEN.CHAR, 0);
+  assert.equal(zwjFam.toString(), '128104');
+  const vsSun = constMakeFromLiteral("'\u2600\uFE0F'", TOKEN.CHAR, 0);
+  assert.equal(vsSun.toString(), '9728');
+  const flag = constMakeFromLiteral("'🇺🇸'", TOKEN.CHAR, 0);
+  assert.equal(flag.toString(), '127482');
+  const unquotedFlag = constMakeFromLiteral('🇺🇸', TOKEN.CHAR, 0);
+  assert.equal(unquotedFlag.toString(), '65533');
+  const zwspPad = constMakeFromLiteral('\u200b中\u200b', TOKEN.CHAR, 0);
+  assert.equal(zwspPad.toString(), '65533');
+  const unclosedNl = constMakeFromLiteral("'\n", TOKEN.CHAR, 0);
+  assert.equal(unclosedNl.kind, 'Unknown');
+  const badHex = constMakeFromLiteral("'\\xGG'", TOKEN.CHAR, 0);
+  assert.equal(badHex.kind, 'Unknown');
+  const badOct = constMakeFromLiteral("'\\8中'", TOKEN.CHAR, 0);
+  assert.equal(badOct.kind, 'Unknown');
+  const unclosedU = constMakeFromLiteral("'\\U0001F600", TOKEN.CHAR, 0);
+  assert.equal(unclosedU.kind, 'Unknown');
+  const unclosedNlX = constMakeFromLiteral("'\\nX", TOKEN.CHAR, 0);
+  assert.equal(unclosedNlX.toString(), '10');
 });
 
 function evaluateImagLit(c) {
