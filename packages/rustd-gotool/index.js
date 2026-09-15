@@ -62,6 +62,14 @@ function asConst(value, label) {
 function constMakeInt64(v) {
   return new GoConstValue(binding.constMakeInt64(asBigInt(v, 'v')));
 }
+function constMakeFromLiteral(lit, tok, prec) {
+  if (typeof prec !== 'number' || !Number.isInteger(prec) || prec !== 0) {
+    throw new TypeError('gotool: constMakeFromLiteral prec must be 0');
+  }
+  return new GoConstValue(
+    binding.constMakeFromLiteral(asString(lit, 'lit'), asNumber(tok, 'tok'), prec),
+  );
+}
 function constToInt(v) {
   const r = binding.constToInt(asConst(v, 'v')._n);
   return [r.value, r.ok];
@@ -370,6 +378,7 @@ module.exports.versionIsValid = versionIsValid;
 module.exports.versionLang = versionLang;
 module.exports.GoConstValue = GoConstValue;
 module.exports.constMakeInt64 = constMakeInt64;
+module.exports.constMakeFromLiteral = constMakeFromLiteral;
 module.exports.constToInt = constToInt;
 module.exports.constToString = constToString;
 module.exports.constFloat64Val = constFloat64Val;

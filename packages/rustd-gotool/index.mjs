@@ -5,6 +5,7 @@ export const {
   versionLang,
   GoConstValue,
   constMakeInt64,
+  constMakeFromLiteral,
   constToInt,
   constToString,
   constFloat64Val,

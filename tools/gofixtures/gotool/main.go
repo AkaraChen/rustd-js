@@ -118,7 +118,26 @@ func main() {
 	verifyConstantFBinFlag := flag.Bool("verify-constant-float-binop", false, "verify a constant-float-binop packet read from stdin")
 	constantFUnFlag := flag.Bool("constant-float-unary", false, "dump go/constant Float UnaryOp ADD/SUB fixtures")
 	verifyConstantFUnFlag := flag.Bool("verify-constant-float-unary", false, "verify a constant-float-unary packet read from stdin")
+	constantLitFlag := flag.Bool("constant-literal", false, "dump go/constant MakeFromLiteral Int/Float fixtures")
+	verifyConstantLitFlag := flag.Bool("verify-constant-literal", false, "verify a constant-int-float-literal packet read from stdin")
 	flag.Parse()
+	if *verifyConstantLitFlag {
+		verifyConstantLiteral(os.Stdin)
+		return
+	}
+	if *constantLitFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantLiteral(writer)
+		return
+	}
 	if *verifyConstantFUnFlag {
 		verifyConstantFloatUnary(os.Stdin)
 		return
