@@ -802,7 +802,7 @@ test('Go 1.24 regenerates committed go/constant MakeFromLiteral CHAR fixtures; n
   const fixture = JSON.parse(committed);
   assert.equal(fixture.package, 'gotool');
   assert.equal(fixture.slice, 'constant-char-literal');
-  assert.ok(fixture.cases.length >= 170, `too few CHAR cases: ${fixture.cases.length}`);
+  assert.ok(fixture.cases.length >= 185, `too few CHAR cases: ${fixture.cases.length}`);
   const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
   assert.ok(unknown.length >= 3, `need malformed CHAR cases, got ${unknown.length}`);
   for (const c of fixture.cases) {
@@ -908,6 +908,22 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'e\u0301\u0301'",
     "''中''",
     "'\\x0g'",
+    '\u00a0中\u00a0',
+    '\u00a0a\u00a0',
+    '\u3000中\u3000',
+    '\ufeffa\ufeff',
+    '＇a＇',
+    '＇＇',
+    '\u0085中\u0085',
+    '\f中\f',
+    '\v中\v',
+    '\r\n中\r\n',
+    ' \u00a0中\u00a0 ',
+    '"a\'',
+    "'a\"",
+    "'\\x4_1'",
+    "'\\\r'",
+    "'\\U0010FFF'",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -915,7 +931,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 87 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 103 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
