@@ -4,6 +4,7 @@ import {
   versionLang,
   GoConstValue,
   constMakeInt64,
+  constMakeBool,
   constMakeFromLiteral,
   constToInt,
   constToString,
@@ -49,6 +50,7 @@ const icmp: number = constCompare(cv, constMakeInt64(0n));
 const fcmp: number = constCompare(constBinaryOp(TOKEN.QUO, cv, constMakeInt64(2n)), cv);
 const ceq: GoConstValue = constCompareOp(fromILit, TOKEN.EQL, fromILit);
 const slss: GoConstValue = constCompareOp(fromSLit, TOKEN.LSS, fromSLit);
+const beq: GoConstValue = constCompareOp(constMakeBool(true), TOKEN.EQL, constMakeBool(false));
 const isign: number = constSign(cv);
 const ireal: GoConstValue = constReal(fromILit);
 const iimag: GoConstValue = constImag(fromILit);

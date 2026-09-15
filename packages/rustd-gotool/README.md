@@ -5,7 +5,7 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 23 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 24 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
@@ -24,14 +24,16 @@ string via `strconv.Unquote`; invalid → Unknown; CHAR is an Int; IMAG is
 Complex `(0 + xi)`; STRING is a String), Bool `constMakeBool` /
 `constBoolVal` / `constUnaryOp` NOT / `constBinaryOp` LAND/LOR vs Go
 `MakeBool` / `BoolVal` / `UnaryOp` NOT / `BinaryOp` LAND/LOR (Unknown
-propagates; `Compare` EQL/NEQ is dumped as `MakeBool(Compare(...))`),
+propagates),
 and Complex `constBinaryOp` ADD/SUB/MUL/QUO vs Go `BinaryOp` (`vtoc` then
 the component formula; mixed Int/Float; `1i*1i` stays Complex `(-1 + 0i)`),
 plus Complex `constUnaryOp` ADD/SUB vs Go `UnaryOp` (ADD is identity; SUB is
 `makeComplex(-re, -im)`), Complex `constCompareOp` EQL/NEQ vs Go
 `MakeBool(Compare)` (component EQL after `match`/`vtoc`; Unknown vs Complex
-can be NEQ true), and String `constCompareOp` EQL/NEQ/LSS/LEQ/GTR/GEQ vs Go
-`MakeBool(Compare)` (byte-wise Go string `<`; Unknown vs String is false).
+can be NEQ true), String `constCompareOp` EQL/NEQ/LSS/LEQ/GTR/GEQ vs Go
+`MakeBool(Compare)` (byte-wise Go string `<`; Unknown vs String is false),
+and Bool `constCompareOp` EQL/NEQ vs Go `MakeBool(Compare)` (Unknown vs Bool
+is false; mixed Bool vs Int/Float/Complex throw).
 `go/format` / `gofmt` and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
@@ -57,6 +59,7 @@ constBinaryOp(TOKEN.MUL, constMakeFromLiteral('1i', TOKEN.IMAG, 0), constMakeFro
 constUnaryOp(TOKEN.SUB, constMakeFromLiteral('1i', TOKEN.IMAG, 0), 0).toString(); // "(0 + -1i)"
 constCompareOp(constMakeFromLiteral('1i', TOKEN.IMAG, 0), TOKEN.EQL, constMakeFromLiteral('1i', TOKEN.IMAG, 0)).toString(); // "true"
 constCompareOp(constMakeFromLiteral('"a"', TOKEN.STRING, 0), TOKEN.LSS, constMakeFromLiteral('"b"', TOKEN.STRING, 0)).toString(); // "true"
+constCompareOp(constMakeBool(true), TOKEN.EQL, constMakeBool(false)).toString(); // "false"
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
 constToInt(constMakeInt64(1n)); // [1n, true]
@@ -143,18 +146,19 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   NOT on a non-Bool throws (Go panics). `constMakeBool` takes a JS boolean.
   `constBoolVal` is Go `BoolVal`: Bool is `[b, true]`; Unknown is `[false, true]`;
   other kinds panic in Go → `[false, false]`. `GoConstValue#toString` for Bool is
-  `"true"`/`"false"`. `constCompare` stays numeric-only (EQL/NEQ Bool results
-  are `MakeBool(Compare)` in the Go dump). `constCompareOp` is Go
-  `MakeBool(Compare(x, op, y))` for EQL/NEQ on Int/Float/Complex/Unknown
+  `"true"`/`"false"`. `constCompare` stays numeric-only. `constCompareOp` is Go
+  `MakeBool(Compare(x, op, y))` for EQL/NEQ on Int/Float/Complex/Bool/Unknown
   and EQL/NEQ/LSS/LEQ/GTR/GEQ on String.
   Complex uses component EQL after `match`/`vtoc` (numeric → imag Int 0;
   Unknown → `complexVal{unknown, 0}`, so Unknown vs Complex NEQ can be true).
   Unknown vs Unknown or vs non-Complex is false for both EQL and NEQ.
   String compare is Go's byte-wise string `<` on Unquote bytes (`"a" < "\xff"`).
-  Unknown vs String is false for every op. Mixed String vs Int/Bool/Complex
+  Unknown vs String or Bool is false for every op. Mixed String vs Int/Bool/Complex
   throw (Go `match` would duplicate String vs Int so EQL is always true; Bool
-  panics; Complex `vtoc`-wraps). Complex LSS/LEQ/GTR/GEQ and Bool operands throw
-  (Go panics on Complex ordering; Bool Compare stays in the Bool dump). `constSign` throws on Bool/String
+  panics; Complex `vtoc`-wraps). Mixed Bool vs Int/Float/Complex throw (Go
+  `match` would duplicate the Bool so `true == 1` is true; vs Complex `vtoc`-wraps).
+  Complex LSS/LEQ/GTR/GEQ and Bool vs Bool LSS throw
+  (Go panics on Complex ordering and Bool LSS). `constSign` throws on Bool/String
   (Go panics: not numeric).
   `constShift` is Int SHL/SHR; `s` must be a non-negative bigint in
   `0..1000000` (JS mapping of Go's unbounded `uint` to avoid native OOM).
@@ -190,9 +194,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **787,792 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **787,936 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 787792 Sep 15 08:05 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 787936 Sep 15 08:30 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```
