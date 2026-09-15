@@ -782,9 +782,9 @@ test('constMakeFromLiteral: 0x10 is Int 16; 1.5 is Float 3/2; invalid is Unknown
   assert.equal(constMakeFromLiteral('1e-1000000000', TOKEN.FLOAT, 0).toString(), '0');
   assert.throws(() => constMakeFromLiteral('1', TOKEN.INT, 1), /prec must be 0/);
   assert.throws(() => constMakeFromLiteral('1', TOKEN.INT, 0.5), TypeError);
-  assert.throws(() => constMakeFromLiteral('1', TOKEN.STRING, 0), /INT, FLOAT, CHAR, or IMAG/);
+  assert.equal(constMakeFromLiteral('1', TOKEN.STRING, 0).kind, 'Unknown');
   assert.equal(constMakeFromLiteral('1', TOKEN.IMAG, 0).kind, 'Unknown');
-  assert.throws(() => constMakeFromLiteral('1', TOKEN.ADD, 0), /INT, FLOAT, CHAR, or IMAG/);
+  assert.throws(() => constMakeFromLiteral('1', TOKEN.ADD, 0), /INT, FLOAT, CHAR, IMAG, or STRING/);
   assert.throws(() => constMakeFromLiteral(1, TOKEN.INT, 0), TypeError);
 });
 
@@ -955,6 +955,104 @@ test('constMakeFromLiteral IMAG: Complex (0 + xi), no-i Unknown, leftover Unknow
   assert.equal(noI.kind, 'Unknown');
   const leftover = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
   assert.equal(leftover.kind, 'Unknown');
+});
+
+function evaluateStrLit(c) {
+  const r = constMakeFromLiteral(c.lit, TOKEN.STRING, 0);
+  const [toString, toStringOk] = constToString(r);
+  const utf8Valid = r.kind !== 'String' || Buffer.from(toString, 'utf8').toString('utf8') === toString;
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    toString: utf8Valid ? toString : '',
+    toStringOk,
+    utf8Valid: r.kind !== 'String' || utf8Valid,
+    stringB64: r.kind === 'String' && utf8Valid ? Buffer.from(toString, 'utf8').toString('base64') : '',
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant MakeFromLiteral STRING fixtures; native matches every case', () => {
+  const generated = go(['-constant-string-literal']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-string-literal-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go MakeFromLiteral STRING fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-string-literal');
+  assert.ok(fixture.cases.length >= 40, `too few STRING cases: ${fixture.cases.length}`);
+  const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(unknown.length >= 3, `need malformed STRING cases, got ${unknown.length}`);
+  const strings = fixture.cases.filter((c) => c.kind === 'String');
+  assert.ok(strings.length >= 3, `need String cases, got ${strings.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateStrLit(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.exact, c.exact, `${c.id} exact lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.toStringOk, c.toStringOk, `${c.id} toStringOk lit=${JSON.stringify(c.lit)}`);
+    assert.equal(got.tokNum, TOKEN.STRING, `${c.id} tokNum`);
+    if (c.utf8Valid) {
+      assert.equal(got.toString, c.toString, `${c.id} toString lit=${JSON.stringify(c.lit)}`);
+      assert.equal(got.stringB64, c.stringB64, `${c.id} stringB64 lit=${JSON.stringify(c.lit)}`);
+    }
+  }
+});
+
+test('JS MakeFromLiteral STRING extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    '""',
+    '"foo"',
+    '"hello\\n"',
+    '"\\x41"',
+    '"中"',
+    "'a'",
+    "''",
+    "'ab'",
+    '`raw\\n`',
+    '"\\z"',
+  ];
+  const cases = extras.map((lit, i) => evaluateStrLit({
+    id: `js-str-${i}`, tok: 'STRING', tokNum: TOKEN.STRING, lit,
+  }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-string-literal', cases };
+  const verified = go(['-verify-constant-string-literal'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 10 gotool constant-string-literal cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-a-string';
+  const rejected = go(['-verify-constant-string-literal'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-string-literal'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-string-literal', cases: [],
+  })).status, 0);
+});
+
+test('constMakeFromLiteral STRING: Unquote, raw CR strip, leftover Unknown', () => {
+  const foo = constMakeFromLiteral('"foo"', TOKEN.STRING, 0);
+  assert.equal(foo.kind, 'String');
+  assert.equal(foo.toString(), '"foo"');
+  assert.deepEqual(constToString(foo), ['foo', true]);
+  const empty = constMakeFromLiteral('""', TOKEN.STRING, 0);
+  assert.equal(empty.toString(), '""');
+  assert.deepEqual(constToString(empty), ['', true]);
+  const rune = constMakeFromLiteral("'a'", TOKEN.STRING, 0);
+  assert.equal(rune.kind, 'String');
+  assert.deepEqual(constToString(rune), ['a', true]);
+  const extra = constMakeFromLiteral("'ab'", TOKEN.STRING, 0);
+  assert.equal(extra.kind, 'Unknown');
+  const emptyChar = constMakeFromLiteral("''", TOKEN.STRING, 0);
+  assert.equal(emptyChar.kind, 'String');
+  assert.deepEqual(constToString(emptyChar), ['', true]);
+  const raw = constMakeFromLiteral('`hello\\n`', TOKEN.STRING, 0);
+  assert.deepEqual(constToString(raw), ['hello\\n', true]);
+  const cr = constMakeFromLiteral('`hello\rworld`', TOKEN.STRING, 0);
+  assert.deepEqual(constToString(cr), ['helloworld', true]);
+  const unclosed = constMakeFromLiteral('"foo', TOKEN.STRING, 0);
+  assert.equal(unclosed.kind, 'Unknown');
+  const hex = constMakeFromLiteral('"\\xff"', TOKEN.STRING, 0);
+  assert.equal(hex.kind, 'String');
+  assert.equal(hex.toString(), '"\\xff"');
 });
 
 test('constMakeInt64 rejects non-bigint and values outside int64', () => {

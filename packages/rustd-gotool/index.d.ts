@@ -11,10 +11,10 @@ export class GoConstValue {
   toString(): string;
 }
 export function constMakeInt64(v: bigint): GoConstValue;
-/** Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR. Invalid lit → Unknown. CHAR is Int. IMAG is Complex. `prec` must be 0. */
+/** Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR/STRING. Invalid lit → Unknown. CHAR is Int. IMAG is Complex. STRING is Unquote. `prec` must be 0. */
 export function constMakeFromLiteral(lit: string, tok: number, prec: number): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
-/** Go `StringVal`. Int/Float/Complex would panic → `["", false]`; Unknown → `["", true]`. */
+/** Go `StringVal`. String → unquoted text; Int/Float/Complex would panic → `["", false]`; Unknown → `["", true]`. */
 export function constToString(v: GoConstValue): [string, boolean];
 /** Go `Float64Val` for Int/Float/Unknown. Bits match IEEE-754; Unknown is `[0, false]`. Complex panics in Go → `[0, false]`. */
 export function constFloat64Val(v: GoConstValue): [number, boolean];

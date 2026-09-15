@@ -8,12 +8,14 @@ use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 /// Opaque `go/constant.Value` (issue #28). Int is arbitrary-precision.
 /// QUO of Ints is a Float (`big.Rat`); QUO/REM by zero is Unknown.
 /// MakeFromLiteral IMAG is Complex with real Int 0 and imag Float (`im_rat`).
+/// MakeFromLiteral STRING is Go `strconv.Unquote` bytes (`str_bytes`).
 #[napi]
 pub struct GoConstValue {
     kind: String,
     int: Option<num_bigint::BigInt>,
     rat: Option<BigRational>,
     im_rat: Option<BigRational>,
+    str_bytes: Option<Vec<u8>>,
 }
 
 #[napi]
@@ -47,6 +49,7 @@ fn make_int(n: num_bigint::BigInt) -> GoConstValue {
         int: Some(n),
         rat: None,
         im_rat: None,
+        str_bytes: None,
     }
 }
 
@@ -56,6 +59,7 @@ fn make_float(r: BigRational) -> GoConstValue {
         int: None,
         rat: Some(r),
         im_rat: None,
+        str_bytes: None,
     }
 }
 
@@ -65,6 +69,7 @@ fn make_unknown() -> GoConstValue {
         int: None,
         rat: None,
         im_rat: None,
+        str_bytes: None,
     }
 }
 
@@ -74,6 +79,17 @@ fn make_complex_from_imag(im: BigRational) -> GoConstValue {
         int: None,
         rat: None,
         im_rat: Some(im),
+        str_bytes: None,
+    }
+}
+
+fn make_string(s: Vec<u8>) -> GoConstValue {
+    GoConstValue {
+        kind: "String".into(),
+        int: None,
+        rat: None,
+        im_rat: None,
+        str_bytes: Some(s),
     }
 }
 
@@ -83,6 +99,7 @@ fn clone_value(v: &GoConstValue) -> GoConstValue {
         int: v.int.clone(),
         rat: v.rat.clone(),
         im_rat: v.im_rat.clone(),
+        str_bytes: v.str_bytes.clone(),
     }
 }
 
@@ -261,17 +278,18 @@ pub struct ConstFloat64ValResult {
     pub ok: bool,
 }
 
-/// Go `StringVal`: `["", true]` for Unknown; Int/Float would panic → `["", false]`.
+/// Go `StringVal`: String is the unquoted bytes as UTF-8 (invalid → U+FFFD);
+/// Unknown is `["", true]`; Int/Float/Complex would panic → `["", false]`.
 #[napi]
 pub fn const_to_string(v: &GoConstValue) -> ConstToStringResult {
-    match v.kind.as_str() {
-        "Unknown" => ConstToStringResult {
+    match (v.kind.as_str(), v.str_bytes.as_ref()) {
+        ("Unknown", _) => ConstToStringResult {
             value: String::new(),
             ok: true,
         },
-        "String" => ConstToStringResult {
-            value: String::new(),
-            ok: false,
+        ("String", Some(b)) => ConstToStringResult {
+            value: String::from_utf8_lossy(b).into_owned(),
+            ok: true,
         },
         _ => ConstToStringResult {
             value: String::new(),
@@ -373,13 +391,21 @@ pub fn const_bit_len(v: &GoConstValue) -> Result<i32> {
 }
 
 /// Int: decimal. Float: `ExactString` (`n` or `n/d`).
-/// Complex IMAG: Go `ExactString` `"(0 + <imag>i)"`. Unknown: `"unknown"`.
+/// Complex IMAG: Go `ExactString` `"(0 + <imag>i)"`.
+/// String: Go `ExactString` (`strconv.Quote`). Unknown: `"unknown"`.
 #[napi]
 pub fn const_string(v: &GoConstValue) -> String {
-    match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref(), v.im_rat.as_ref()) {
-        ("Int", Some(n), _, _) => n.to_string(),
-        ("Float", _, Some(r), _) => rat_exact_string(r),
-        ("Complex", _, _, Some(im)) => format!("(0 + {}i)", rat_exact_string(im)),
+    match (
+        v.kind.as_str(),
+        v.int.as_ref(),
+        v.rat.as_ref(),
+        v.im_rat.as_ref(),
+        v.str_bytes.as_ref(),
+    ) {
+        ("Int", Some(n), _, _, _) => n.to_string(),
+        ("Float", _, Some(r), _, _) => rat_exact_string(r),
+        ("Complex", _, _, Some(im), _) => format!("(0 + {}i)", rat_exact_string(im)),
+        ("String", _, _, _, Some(b)) => quote_go(b),
         _ => "unknown".into(),
     }
 }
@@ -896,21 +922,21 @@ fn decode_rune_prefix(s: &[u8]) -> (u32, usize) {
     }
 }
 
-/// Go `strconv.UnquoteChar(s, '\'')` value; leftover tail is ignored (MakeFromLiteral).
-fn unquote_char(s: &[u8]) -> Option<i32> {
+/// Go `strconv.UnquoteChar` with `quote`. Returns (value, consumed, multibyte).
+fn unquote_char(s: &[u8], quote: u8) -> Option<(i32, usize, bool)> {
     if s.is_empty() {
         return None;
     }
     let c = s[0];
-    if c == b'\'' {
+    if c == quote && (quote == b'\'' || quote == b'"') {
         return None;
     }
     if c >= 0x80 {
-        let (r, _) = decode_rune_prefix(s);
-        return Some(r as i32);
+        let (r, size) = decode_rune_prefix(s);
+        return Some((r as i32, size, true));
     }
     if c != b'\\' {
-        return Some(i32::from(c));
+        return Some((i32::from(c), 1, false));
     }
     if s.len() <= 1 {
         return None;
@@ -918,16 +944,20 @@ fn unquote_char(s: &[u8]) -> Option<i32> {
     let esc = s[1];
     let rest = &s[2..];
     match esc {
-        b'a' => Some(0x07),
-        b'b' => Some(0x08),
-        b'f' => Some(0x0c),
-        b'n' => Some(0x0a),
-        b'r' => Some(0x0d),
-        b't' => Some(0x09),
-        b'v' => Some(0x0b),
-        b'\\' => Some(i32::from(b'\\')),
-        b'\'' => Some(i32::from(b'\'')),
-        b'"' => None,
+        b'a' => Some((0x07, 2, false)),
+        b'b' => Some((0x08, 2, false)),
+        b'f' => Some((0x0c, 2, false)),
+        b'n' => Some((0x0a, 2, false)),
+        b'r' => Some((0x0d, 2, false)),
+        b't' => Some((0x09, 2, false)),
+        b'v' => Some((0x0b, 2, false)),
+        b'\\' => Some((i32::from(b'\\'), 2, false)),
+        b'\'' | b'"' => {
+            if esc != quote {
+                return None;
+            }
+            Some((i32::from(esc), 2, false))
+        }
         b'x' | b'u' | b'U' => {
             let n = match esc {
                 b'x' => 2,
@@ -942,9 +972,9 @@ fn unquote_char(s: &[u8]) -> Option<i32> {
                 v = (v << 4) | unhex(rest[j])?;
             }
             if esc == b'x' {
-                Some(v as i32)
+                Some((v as i32, 2 + n, false))
             } else if valid_rune(v) {
-                Some(v as i32)
+                Some((v as i32, 2 + n, true))
             } else {
                 None
             }
@@ -964,7 +994,7 @@ fn unquote_char(s: &[u8]) -> Option<i32> {
             if v > 255 {
                 return None;
             }
-            Some(v as i32)
+            Some((v as i32, 4, false))
         }
         _ => None,
     }
@@ -975,7 +1005,163 @@ fn parse_char_literal(lit: &str) -> Option<i32> {
     if n < 2 {
         return None;
     }
-    unquote_char(&lit.as_bytes()[1..n - 1])
+    unquote_char(&lit.as_bytes()[1..n - 1], b'\'').map(|(code, _, _)| code)
+}
+
+/// Go `strconv.Unquote`. Rem leftover after the first quoted prefix is Unknown.
+fn unquote(lit: &str) -> Option<Vec<u8>> {
+    let inb = lit.as_bytes();
+    if inb.len() < 2 {
+        return None;
+    }
+    let quote = inb[0];
+    let rel = inb[1..].iter().position(|&b| b == quote)?;
+    let end = rel + 2;
+    match quote {
+        b'`' => {
+            if end != inb.len() {
+                return None;
+            }
+            Some(inb[1..end - 1].iter().copied().filter(|&b| b != b'\r').collect())
+        }
+        b'"' | b'\'' => {
+            let prefix = &inb[..end];
+            if !prefix.contains(&b'\\') && !prefix.contains(&b'\n') {
+                let inner = &inb[1..end - 1];
+                let valid = if quote == b'"' {
+                    std::str::from_utf8(inner).is_ok()
+                } else {
+                    let (r, n) = decode_rune_prefix(inner);
+                    n == inner.len() && (r != 0xFFFD || n != 1)
+                };
+                if valid {
+                    if end != inb.len() {
+                        return None;
+                    }
+                    return Some(inner.to_vec());
+                }
+            }
+            let mut cur = &inb[1..];
+            let mut buf = Vec::new();
+            while !cur.is_empty() && cur[0] != quote {
+                if cur[0] == b'\n' {
+                    return None;
+                }
+                let (r, n, multibyte) = unquote_char(cur, quote)?;
+                cur = &cur[n..];
+                if (r as u32) < 0x80 || !multibyte {
+                    buf.push(r as u8);
+                } else {
+                    let ch = char::from_u32(r as u32)?;
+                    let mut tmp = [0u8; 4];
+                    buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
+                }
+                if quote == b'\'' {
+                    break;
+                }
+            }
+            if cur.is_empty() || cur[0] != quote {
+                return None;
+            }
+            cur = &cur[1..];
+            if !cur.is_empty() {
+                return None;
+            }
+            Some(buf)
+        }
+        _ => None,
+    }
+}
+
+fn is_noncharacter(r: u32) -> bool {
+    (0xFDD0..=0xFDEF).contains(&r) || r & 0xFFFE == 0xFFFE
+}
+
+fn is_print_go(r: u32) -> bool {
+    if r <= 0xFF {
+        (0x20..=0x7E).contains(&r) || ((0xA1..=0xFF).contains(&r) && r != 0xAD)
+    } else if is_noncharacter(r) {
+        false
+    } else {
+        // Corpus excludes unescaped Cf/Cc unicode (U+200B etc.).
+        char::from_u32(r).is_some()
+    }
+}
+
+/// Go `strconv.Quote` for `ExactString`. Latin-1 `IsPrint` matches Go; r>0xFF
+/// treated as printable (this checkpoint's STRING corpus is all printable there).
+fn quote_go(s: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut buf = Vec::with_capacity(s.len() + 2);
+    buf.push(b'"');
+    let mut i = 0;
+    while i < s.len() {
+        let mut r = u32::from(s[i]);
+        let mut width = 1;
+        if r >= 0x80 {
+            let (rr, w) = decode_rune_prefix(&s[i..]);
+            r = rr;
+            width = w;
+        }
+        if width == 1 && r == 0xFFFD {
+            buf.extend_from_slice(b"\\x");
+            buf.push(HEX[(s[i] >> 4) as usize]);
+            buf.push(HEX[(s[i] & 0x0f) as usize]);
+            i += 1;
+            continue;
+        }
+        if r == u32::from(b'"') || r == u32::from(b'\\') {
+            buf.push(b'\\');
+            buf.push(r as u8);
+            i += width;
+            continue;
+        }
+        if is_print_go(r) {
+            if r < 0x80 {
+                buf.push(r as u8);
+            } else if let Some(ch) = char::from_u32(r) {
+                let mut tmp = [0u8; 4];
+                buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
+            } else {
+                buf.extend_from_slice(b"\\uFFFD");
+            }
+            i += width;
+            continue;
+        }
+        match r {
+            0x07 => buf.extend_from_slice(b"\\a"),
+            0x08 => buf.extend_from_slice(b"\\b"),
+            0x0c => buf.extend_from_slice(b"\\f"),
+            0x0a => buf.extend_from_slice(b"\\n"),
+            0x0d => buf.extend_from_slice(b"\\r"),
+            0x09 => buf.extend_from_slice(b"\\t"),
+            0x0b => buf.extend_from_slice(b"\\v"),
+            r if r < 0x20 || r == 0x7f => {
+                buf.extend_from_slice(b"\\x");
+                buf.push(HEX[(r >> 4) as usize]);
+                buf.push(HEX[(r & 0x0f) as usize]);
+            }
+            r if r < 0x10000 => {
+                buf.extend_from_slice(b"\\u");
+                for sft in [12, 8, 4, 0] {
+                    buf.push(HEX[((r >> sft) & 0x0f) as usize]);
+                }
+            }
+            r => {
+                buf.extend_from_slice(b"\\U");
+                for sft in [28, 24, 20, 16, 12, 8, 4, 0] {
+                    buf.push(HEX[((r >> sft) & 0x0f) as usize]);
+                }
+            }
+        }
+        i += width;
+    }
+    buf.push(b'"');
+    String::from_utf8(buf).expect("quote_go ascii/utf8")
+}
+
+fn parse_string_literal(lit: &str) -> Option<Vec<u8>> {
+    unquote(lit)
 }
 
 fn parse_imag_literal(lit: &str) -> Option<GoConstValue> {
@@ -1029,9 +1215,10 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
     apply_exp2_exp5(mant, neg, exp2, exp5)
 }
 
-/// Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR. Invalid lit → Unknown. Other toks throw.
-/// `prec` must be 0 (Go panics otherwise). CHAR is an Int (rune code).
-/// IMAG is Complex `(0 + <float>i)` via `makeFloatFromLiteral` on the prefix.
+/// Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR/STRING. Invalid lit → Unknown.
+/// Other toks throw. `prec` must be 0 (Go panics otherwise). CHAR is an Int (rune).
+/// IMAG is Complex `(0 + <float>i)`. STRING is `strconv.Unquote` (CHAR `'ab'` is
+/// Int 97; STRING `'ab'` is Unknown because Unquote rejects leftover).
 #[napi]
 pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoConstValue> {
     if prec != 0 {
@@ -1049,9 +1236,12 @@ pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoCon
         token::CHAR => Ok(parse_char_literal(&lit)
             .map(|code| make_int(num_bigint::BigInt::from(code)))
             .unwrap_or_else(make_unknown)),
+        token::STRING => Ok(parse_string_literal(&lit)
+            .map(make_string)
+            .unwrap_or_else(make_unknown)),
         _ => Err(Error::new(
             Status::InvalidArg,
-            "gotool: constMakeFromLiteral tok must be INT, FLOAT, CHAR, or IMAG",
+            "gotool: constMakeFromLiteral tok must be INT, FLOAT, CHAR, IMAG, or STRING",
         )),
     }
 }
