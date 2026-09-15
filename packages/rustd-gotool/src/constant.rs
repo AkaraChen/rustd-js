@@ -700,6 +700,53 @@ fn to_complex(v: &GoConstValue) -> Result<GoConstValue> {
     }
 }
 
+/// Go `ToFloat`. Int → `ratVal` (`n/1`); Float identity; Complex with imag 0
+/// converts the real part; otherwise Unknown (including Bool/String).
+/// `BitLen >= 4096` Ints become 512-bit `floatVal` in Go; we still emit a
+/// `ratVal` so Kind/Float64Val match (+Inf) but ExactString stays decimal.
+fn convert_to_float(v: &GoConstValue) -> GoConstValue {
+    match v.kind.as_str() {
+        "Int" => match v.int.as_ref() {
+            Some(n) => make_float(BigRational::from_integer(n.clone())),
+            None => make_unknown(),
+        },
+        "Float" => clone_value(v),
+        "Complex" => match imag_part(v) {
+            Ok(im) => match const_sign(&im) {
+                Ok(0) => real_part(v)
+                    .map(|re| convert_to_float(&re))
+                    .unwrap_or_else(|_| make_unknown()),
+                Ok(_) => make_unknown(),
+                Err(_) => make_unknown(),
+            },
+            Err(_) => make_unknown(),
+        },
+        _ => make_unknown(),
+    }
+}
+
+/// Go `ToComplex`. Int/Float → `vtoc` (imag Int 0); Complex identity;
+/// Bool/String/Unknown → Unknown.
+fn convert_to_complex(v: &GoConstValue) -> GoConstValue {
+    match v.kind.as_str() {
+        "Int" | "Float" => make_complex(clone_value(v), make_int(num_bigint::BigInt::from(0))),
+        "Complex" => clone_value(v),
+        _ => make_unknown(),
+    }
+}
+
+/// Go `ToFloat`.
+#[napi]
+pub fn const_to_float(v: &GoConstValue) -> GoConstValue {
+    convert_to_float(v)
+}
+
+/// Go `ToComplex`.
+#[napi]
+pub fn const_to_complex(v: &GoConstValue) -> GoConstValue {
+    convert_to_complex(v)
+}
+
 /// Go `Real`. Numeric non-Complex returns `x`; Complex returns the stored re.
 #[napi]
 pub fn const_real(v: &GoConstValue) -> Result<GoConstValue> {

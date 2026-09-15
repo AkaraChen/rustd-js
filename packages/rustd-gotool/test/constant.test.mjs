@@ -8,6 +8,8 @@ import {
   constMakeInt64,
   constMakeBool,
   constMakeFromLiteral,
+  constToFloat,
+  constToComplex,
   constToInt,
   constToString,
   constBoolVal,
@@ -1630,4 +1632,147 @@ test('constCompareOp String EQL/NEQ/order vs Go; mixed/ADD throw; constCompare s
   assert.throws(() => constCompareOp(a, TOKEN.EQL, i), /mixed String/);
   assert.throws(() => constCompareOp(a, TOKEN.EQL, t), /mixed String/);
   assert.throws(() => constCompare(a, b), /Int or Float/);
+});
+
+function makeConvSrc(c) {
+  switch (c.form) {
+    case 'int':
+      return constMakeInt64(BigInt(c.x));
+    case 'quo':
+      return constBinaryOp(TOKEN.QUO, constMakeInt64(BigInt(c.x)), constMakeInt64(BigInt(c.y)));
+    case 'shift':
+      return constShift(TOKEN.SHL, constMakeInt64(BigInt(c.x)), BigInt(c.s));
+    case 'imag':
+      return constMakeFromLiteral(c.x, TOKEN.IMAG, 0);
+    case 'sum':
+      return constBinaryOp(TOKEN.ADD, constMakeInt64(BigInt(c.x)), constMakeFromLiteral(c.y, TOKEN.IMAG, 0));
+    case 'bool':
+      return constMakeBool(c.x === 'true');
+    case 'string':
+      return constMakeFromLiteral(c.x, TOKEN.STRING, 0);
+    case 'char':
+      return constMakeFromLiteral(c.x, TOKEN.CHAR, 0);
+    case 'unknown':
+      return constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+    default:
+      throw new Error(`unknown convert form ${c.form}`);
+  }
+}
+
+function evaluateConv(c) {
+  const src = makeConvSrc(c);
+  const r = c.convert === 'ToFloat' ? constToFloat(src) : constToComplex(src);
+  const re = constReal(r);
+  const im = constImag(r);
+  const [f] = constFloat64Val(r);
+  return {
+    ...c,
+    origKind: src.kind,
+    kind: r.kind,
+    exact: r.toString(),
+    sign: constSign(r),
+    reKind: re.kind,
+    reExact: re.toString(),
+    imKind: im.kind,
+    imExact: im.toString(),
+    f64Bits: r.kind === 'Complex' ? '0' : f64BitsHex(f),
+    f64Exact: r.kind === 'Complex' ? false : constFloat64Val(r)[1],
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant ToFloat/ToComplex fixtures; native matches every case', () => {
+  const generated = go(['-constant-tofloat-tocomplex']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-tofloat-tocomplex-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go ToFloat/ToComplex fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-tofloat-tocomplex');
+  assert.ok(fixture.cases.length >= 68, `too few convert cases: ${fixture.cases.length}`);
+  const toFloat = fixture.cases.filter((c) => c.convert === 'ToFloat');
+  const toComplex = fixture.cases.filter((c) => c.convert === 'ToComplex');
+  assert.ok(toFloat.length >= 34, `need ToFloat cases, got ${toFloat.length}`);
+  assert.ok(toComplex.length >= 34, `need ToComplex cases, got ${toComplex.length}`);
+  const malformed = fixture.cases.filter((c) => ['1ii', 'i', 'xyz', `"\\z"`, `'ab'`, `''`].includes(c.x) || c.form === 'unknown');
+  assert.ok(malformed.length >= 6, `need malformed convert cases, got ${malformed.length}`);
+  const unknownOut = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(unknownOut.length >= 3, `need Unknown results, got ${unknownOut.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateConv(c);
+    assert.equal(got.origKind, c.origKind, `${c.id} origKind`);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.sign, c.sign, `${c.id} sign`);
+    assert.equal(got.reKind, c.reKind, `${c.id} reKind`);
+    assert.equal(got.reExact, c.reExact, `${c.id} reExact`);
+    assert.equal(got.imKind, c.imKind, `${c.id} imKind`);
+    assert.equal(got.imExact, c.imExact, `${c.id} imExact`);
+    assert.equal(got.f64Bits, c.f64Bits, `${c.id} f64Bits`);
+    assert.equal(got.f64Exact, c.f64Exact, `${c.id} f64Exact`);
+  }
+});
+
+test('JS ToFloat/ToComplex extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { convert: 'ToFloat', form: 'int', x: '3', y: '0', s: '0' },
+    { convert: 'ToComplex', form: 'quo', x: '3', y: '2', s: '0' },
+    { convert: 'ToFloat', form: 'imag', x: '2i', y: '0', s: '0' },
+    { convert: 'ToFloat', form: 'imag', x: '0i', y: '0', s: '0' },
+    { convert: 'ToComplex', form: 'char', x: `'π'`, y: '0', s: '0' },
+    { convert: 'ToFloat', form: 'string', x: '"', y: '0', s: '0' },
+    { convert: 'ToComplex', form: 'bool', x: 'true', y: '0', s: '0' },
+    { convert: 'ToFloat', form: 'sum', x: '-1', y: '1i', s: '0' },
+  ];
+  const cases = extras.map((c, i) => evaluateConv({ id: `js-conv-${i}`, ...c }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-tofloat-tocomplex', cases };
+  const verified = go(['-verify-constant-tofloat-tocomplex'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 8 gotool constant-tofloat-tocomplex cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-a-float';
+  const rejected = go(['-verify-constant-tofloat-tocomplex'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-tofloat-tocomplex'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-tofloat-tocomplex', cases: [],
+  })).status, 0);
+});
+
+test('constToFloat/constToComplex vs Go: Int→Float, 0i unwraps, 1i stays Unknown, Bool/String Unknown', () => {
+  const one = constMakeInt64(1n);
+  const half = constBinaryOp(TOKEN.QUO, one, constMakeInt64(2n));
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const zeroI = constMakeFromLiteral('0i', TOKEN.IMAG, 0);
+  const t = constMakeBool(true);
+  const s = constMakeFromLiteral('"a"', TOKEN.STRING, 0);
+  const ch = constMakeFromLiteral("'a'", TOKEN.CHAR, 0);
+  const leftover = constMakeFromLiteral("'ab'", TOKEN.CHAR, 0);
+  const unk = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
+  const emptyChar = constMakeFromLiteral("''", TOKEN.CHAR, 0);
+  assert.equal(constToFloat(one).kind, 'Float');
+  assert.equal(constToFloat(one).toString(), '1');
+  assert.equal(constToComplex(one).toString(), '(1 + 0i)');
+  assert.equal(constImag(constToComplex(one)).kind, 'Int');
+  assert.equal(constToFloat(half).toString(), '1/2');
+  assert.equal(constToComplex(half).toString(), '(1/2 + 0i)');
+  assert.equal(constToFloat(i).kind, 'Unknown');
+  assert.equal(constToComplex(i).toString(), '(0 + 1i)');
+  assert.equal(constToFloat(zeroI).kind, 'Float');
+  assert.equal(constToFloat(zeroI).toString(), '0');
+  assert.equal(constToComplex(zeroI).toString(), '(0 + 0i)');
+  assert.equal(constToFloat(t).kind, 'Unknown');
+  assert.equal(constToComplex(t).kind, 'Unknown');
+  assert.equal(constToFloat(s).kind, 'Unknown');
+  assert.equal(constToComplex(s).kind, 'Unknown');
+  assert.equal(constToFloat(ch).toString(), '97');
+  assert.equal(constToComplex(ch).toString(), '(97 + 0i)');
+  assert.equal(leftover.kind, 'Int');
+  assert.equal(constToFloat(leftover).toString(), '97');
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(constToFloat(unk).kind, 'Unknown');
+  assert.equal(constToComplex(unk).kind, 'Unknown');
+  assert.equal(emptyChar.kind, 'Unknown');
+  assert.equal(constToFloat(emptyChar).kind, 'Unknown');
+  assert.throws(() => constToFloat(1), TypeError);
+  assert.throws(() => constToComplex(1), TypeError);
 });

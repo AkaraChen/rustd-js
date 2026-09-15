@@ -15,6 +15,10 @@ export function constMakeInt64(v: bigint): GoConstValue;
 export function constMakeBool(v: boolean): GoConstValue;
 /** Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR/STRING. Invalid lit → Unknown. CHAR is Int. IMAG is Complex. STRING is Unquote. `prec` must be 0. */
 export function constMakeFromLiteral(lit: string, tok: number, prec: number): GoConstValue;
+/** Go `ToFloat`. Int → Float `n/1`; Float identity; Complex with imag 0 converts re; else Unknown. */
+export function constToFloat(v: GoConstValue): GoConstValue;
+/** Go `ToComplex`. Int/Float → Complex with imag Int 0; Complex identity; Bool/String/Unknown → Unknown. */
+export function constToComplex(v: GoConstValue): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
 /** Go `BoolVal`. Bool → `[b, true]`; Unknown → `[false, true]`; other kinds panic in Go → `[false, false]`. */
 export function constBoolVal(v: GoConstValue): [boolean, boolean];
