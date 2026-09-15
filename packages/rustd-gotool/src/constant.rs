@@ -9,6 +9,7 @@ use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 /// QUO of Ints is a Float (`big.Rat`); QUO/REM by zero is Unknown.
 /// MakeFromLiteral IMAG is Complex with real Int 0 and imag Float (`im_rat`).
 /// MakeFromLiteral STRING is Go `strconv.Unquote` bytes (`str_bytes`).
+/// Bool is `MakeBool` / `BoolVal` (`bool_val`).
 #[napi]
 pub struct GoConstValue {
     kind: String,
@@ -16,6 +17,7 @@ pub struct GoConstValue {
     rat: Option<BigRational>,
     im_rat: Option<BigRational>,
     str_bytes: Option<Vec<u8>>,
+    bool_val: Option<bool>,
 }
 
 #[napi]
@@ -50,6 +52,7 @@ fn make_int(n: num_bigint::BigInt) -> GoConstValue {
         rat: None,
         im_rat: None,
         str_bytes: None,
+        bool_val: None,
     }
 }
 
@@ -60,6 +63,7 @@ fn make_float(r: BigRational) -> GoConstValue {
         rat: Some(r),
         im_rat: None,
         str_bytes: None,
+        bool_val: None,
     }
 }
 
@@ -70,6 +74,7 @@ fn make_unknown() -> GoConstValue {
         rat: None,
         im_rat: None,
         str_bytes: None,
+        bool_val: None,
     }
 }
 
@@ -80,6 +85,7 @@ fn make_complex_from_imag(im: BigRational) -> GoConstValue {
         rat: None,
         im_rat: Some(im),
         str_bytes: None,
+        bool_val: None,
     }
 }
 
@@ -90,6 +96,18 @@ fn make_string(s: Vec<u8>) -> GoConstValue {
         rat: None,
         im_rat: None,
         str_bytes: Some(s),
+        bool_val: None,
+    }
+}
+
+fn make_bool(b: bool) -> GoConstValue {
+    GoConstValue {
+        kind: "Bool".into(),
+        int: None,
+        rat: None,
+        im_rat: None,
+        str_bytes: None,
+        bool_val: Some(b),
     }
 }
 
@@ -100,6 +118,7 @@ fn clone_value(v: &GoConstValue) -> GoConstValue {
         rat: v.rat.clone(),
         im_rat: v.im_rat.clone(),
         str_bytes: v.str_bytes.clone(),
+        bool_val: v.bool_val,
     }
 }
 
@@ -266,6 +285,37 @@ pub fn const_make_int64(v: BigInt) -> Result<GoConstValue> {
     Ok(make_int(num_bigint::BigInt::from(i64_from_js_bigint(&v)?)))
 }
 
+/// Go `MakeBool`.
+#[napi]
+pub fn const_make_bool(v: bool) -> GoConstValue {
+    make_bool(v)
+}
+
+#[napi(object)]
+pub struct ConstBoolValResult {
+    pub value: bool,
+    pub ok: bool,
+}
+
+/// Go `BoolVal`. Bool is exact; Unknown is `(false, true)`; other kinds panic in Go → `ok=false`.
+#[napi]
+pub fn const_bool_val(v: &GoConstValue) -> ConstBoolValResult {
+    match (v.kind.as_str(), v.bool_val) {
+        ("Bool", Some(b)) => ConstBoolValResult {
+            value: b,
+            ok: true,
+        },
+        ("Unknown", _) => ConstBoolValResult {
+            value: false,
+            ok: true,
+        },
+        _ => ConstBoolValResult {
+            value: false,
+            ok: false,
+        },
+    }
+}
+
 #[napi(object)]
 pub struct ConstToStringResult {
     pub value: String,
@@ -366,15 +416,20 @@ pub fn const_compare(x: &GoConstValue, y: &GoConstValue) -> Result<i32> {
     })
 }
 
+/// Go `Sign`. Unknown is 1. Bool/String panic in Go → throw.
 #[napi]
-pub fn const_sign(v: &GoConstValue) -> i32 {
+pub fn const_sign(v: &GoConstValue) -> Result<i32> {
     match (v.kind.as_str(), v.int.as_ref(), v.rat.as_ref(), v.im_rat.as_ref()) {
-        ("Int", Some(n), _, _) => sign_i32(n.sign()),
-        ("Float", _, Some(r), _) => sign_i32(r.numer().sign()),
+        ("Int", Some(n), _, _) => Ok(sign_i32(n.sign())),
+        ("Float", _, Some(r), _) => Ok(sign_i32(r.numer().sign())),
         // Go `Sign(complexVal)` is `Sign(re) | Sign(im)`; IMAG re is 0.
-        ("Complex", _, _, Some(im)) => sign_i32(im.numer().sign()),
+        ("Complex", _, _, Some(im)) => Ok(sign_i32(im.numer().sign())),
         // go/constant.Sign(unknownVal) returns 1.
-        _ => 1,
+        ("Unknown", _, _, _) => Ok(1),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constSign requires a numeric or Unknown value",
+        )),
     }
 }
 
@@ -392,7 +447,8 @@ pub fn const_bit_len(v: &GoConstValue) -> Result<i32> {
 
 /// Int: decimal. Float: `ExactString` (`n` or `n/d`).
 /// Complex IMAG: Go `ExactString` `"(0 + <imag>i)"`.
-/// String: Go `ExactString` (`strconv.Quote`). Unknown: `"unknown"`.
+/// String: Go `ExactString` (`strconv.Quote`). Bool: `"true"`/`"false"`.
+/// Unknown: `"unknown"`.
 #[napi]
 pub fn const_string(v: &GoConstValue) -> String {
     match (
@@ -401,11 +457,14 @@ pub fn const_string(v: &GoConstValue) -> String {
         v.rat.as_ref(),
         v.im_rat.as_ref(),
         v.str_bytes.as_ref(),
+        v.bool_val,
     ) {
-        ("Int", Some(n), _, _, _) => n.to_string(),
-        ("Float", _, Some(r), _, _) => rat_exact_string(r),
-        ("Complex", _, _, Some(im), _) => format!("(0 + {}i)", rat_exact_string(im)),
-        ("String", _, _, _, Some(b)) => quote_go(b),
+        ("Int", Some(n), _, _, _, _) => n.to_string(),
+        ("Float", _, Some(r), _, _, _) => rat_exact_string(r),
+        ("Complex", _, _, Some(im), _, _) => format!("(0 + {}i)", rat_exact_string(im)),
+        ("String", _, _, _, Some(b), _) => quote_go(b),
+        ("Bool", _, _, _, _, Some(true)) => "true".into(),
+        ("Bool", _, _, _, _, Some(false)) => "false".into(),
         _ => "unknown".into(),
     }
 }
@@ -469,11 +528,29 @@ fn rat_binop(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue
 
 /// Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
 /// Float (and mixed Int/Float) ADD/SUB/MUL/QUO via `big.Rat` (`match` then `makeRat`).
-/// QUO of Ints is Float. QUO/REM by zero → Unknown.
+/// Bool LAND/LOR. QUO of Ints is Float. QUO/REM by zero → Unknown.
 #[napi]
 pub fn const_binary_op(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<GoConstValue> {
     if x.kind == "Unknown" || y.kind == "Unknown" {
         return Ok(make_unknown());
+    }
+    if x.kind == "Bool" || y.kind == "Bool" {
+        if x.kind != "Bool" || y.kind != "Bool" {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constBinaryOp LAND/LOR require Bool",
+            ));
+        }
+        let xb = x.bool_val.unwrap_or(false);
+        let yb = y.bool_val.unwrap_or(false);
+        return match op {
+            token::LAND => Ok(make_bool(xb && yb)),
+            token::LOR => Ok(make_bool(xb || yb)),
+            _ => Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constBinaryOp Bool ops must be LAND or LOR",
+            )),
+        };
     }
     if !is_num_kind(x) {
         return Err(Error::new(
@@ -553,18 +630,27 @@ fn as_shift_count(s: &BigInt) -> Result<u32> {
 }
 
 /// Int ADD/SUB/XOR. Float ADD/SUB via `big.Rat` (identity / `Neg`). XOR requires Int.
-/// `prec` is Go's XOR width in bits; 0 means unlimited (two's complement).
+/// Bool NOT. `prec` is Go's XOR width in bits; 0 means unlimited (two's complement).
 #[napi]
 pub fn const_unary_op(op: i32, y: &GoConstValue, prec: i64) -> Result<GoConstValue> {
     let prec = as_prec(prec)?;
-    if !matches!(op, token::ADD | token::SUB | token::XOR) {
+    if !matches!(op, token::ADD | token::SUB | token::XOR | token::NOT) {
         return Err(Error::new(
             Status::InvalidArg,
-            "gotool: constUnaryOp op must be ADD, SUB, or XOR",
+            "gotool: constUnaryOp op must be ADD, SUB, XOR, or NOT",
         ));
     }
     if y.kind == "Unknown" {
         return Ok(make_unknown());
+    }
+    if op == token::NOT {
+        return match (y.kind.as_str(), y.bool_val) {
+            ("Bool", Some(b)) => Ok(make_bool(!b)),
+            _ => Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constUnaryOp NOT requires Bool",
+            )),
+        };
     }
     if is_int_kind(y) {
         let yi = as_int(y, "y")?;

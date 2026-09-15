@@ -62,6 +62,12 @@ function asConst(value, label) {
 function constMakeInt64(v) {
   return new GoConstValue(binding.constMakeInt64(asBigInt(v, 'v')));
 }
+function constMakeBool(v) {
+  if (typeof v !== 'boolean') {
+    throw new TypeError('gotool: constMakeBool v must be a boolean');
+  }
+  return new GoConstValue(binding.constMakeBool(v));
+}
 function constMakeFromLiteral(lit, tok, prec) {
   if (typeof prec !== 'number' || !Number.isInteger(prec) || prec !== 0) {
     throw new TypeError('gotool: constMakeFromLiteral prec must be 0');
@@ -72,6 +78,10 @@ function constMakeFromLiteral(lit, tok, prec) {
 }
 function constToInt(v) {
   const r = binding.constToInt(asConst(v, 'v')._n);
+  return [r.value, r.ok];
+}
+function constBoolVal(v) {
+  const r = binding.constBoolVal(asConst(v, 'v')._n);
   return [r.value, r.ok];
 }
 function constToString(v) {
@@ -384,8 +394,10 @@ module.exports.versionIsValid = versionIsValid;
 module.exports.versionLang = versionLang;
 module.exports.GoConstValue = GoConstValue;
 module.exports.constMakeInt64 = constMakeInt64;
+module.exports.constMakeBool = constMakeBool;
 module.exports.constMakeFromLiteral = constMakeFromLiteral;
 module.exports.constToInt = constToInt;
+module.exports.constBoolVal = constBoolVal;
 module.exports.constToString = constToString;
 module.exports.constFloat64Val = constFloat64Val;
 module.exports.constCompare = constCompare;

@@ -5,7 +5,7 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 18 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 19 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
@@ -17,19 +17,22 @@ Checkpoint 18 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 Float), Float (plus mixed Int/Float) `constBinaryOp` ADD/SUB/MUL/QUO vs
 Go `BinaryOp` (`match` to `big.Rat`, then `makeRat`), Float
 `constUnaryOp` ADD/SUB vs Go `UnaryOp` (identity / `big.Rat.Neg`; integer-valued
-Float stays Float), and `constMakeFromLiteral` for INT/FLOAT/CHAR/IMAG/STRING vs Go
+Float stays Float), `constMakeFromLiteral` for INT/FLOAT/CHAR/IMAG/STRING vs Go
 `MakeFromLiteral` (underscores, 0x/0o/0b/legacy octal, hex floats, rune
 literals via `strconv.UnquoteChar`, imag prefix via `makeFloatFromLiteral`,
 string via `strconv.Unquote`; invalid → Unknown; CHAR is an Int; IMAG is
-Complex `(0 + xi)`; STRING is a String).
-`go/format` / `gofmt`, Bool, Complex BinaryOp, and
+Complex `(0 + xi)`; STRING is a String), and Bool `constMakeBool` /
+`constBoolVal` / `constUnaryOp` NOT / `constBinaryOp` LAND/LOR vs Go
+`MakeBool` / `BoolVal` / `UnaryOp` NOT / `BinaryOp` LAND/LOR (Unknown
+propagates; `Compare` EQL/NEQ is dumped as `MakeBool(Compare(...))`).
+`go/format` / `gofmt`, Complex BinaryOp, and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
 ```js
 import {
   versionLang, FileSet, Scanner, TOKEN, SCAN_MODE,
   PARSE_MODE, parseFile, astFprint,
-  constMakeInt64, constMakeFromLiteral, constCompare, constToInt, constToString, constFloat64Val,
+  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constToInt, constToString, constFloat64Val, constBoolVal,
   constBinaryOp, constUnaryOp, constShift, TOKEN,
 } from 'rustd-gotool';
 
@@ -40,6 +43,9 @@ constMakeFromLiteral('1.5', TOKEN.FLOAT, 0).toString(); // "3/2"
 constMakeFromLiteral("'a'", TOKEN.CHAR, 0).toString(); // "97"
 constMakeFromLiteral('1i', TOKEN.IMAG, 0).toString(); // "(0 + 1i)"
 constMakeFromLiteral('"foo"', TOKEN.STRING, 0).toString(); // '"foo"'
+constMakeBool(true).toString(); // "true"
+constBoolVal(constUnaryOp(TOKEN.NOT, constMakeBool(true), 0)); // [false, true]
+constBinaryOp(TOKEN.LAND, constMakeBool(true), constMakeBool(false)).toString(); // "false"
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
 constToInt(constMakeInt64(1n)); // [1n, true]
@@ -104,22 +110,30 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 - `GoConstValue` is an opaque handle (Go's `constant.Value` is an interface).
   `constMakeInt64` still requires a JS `bigint` that fits in Go `int64`.
   `constBinaryOp` is Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT, plus Float
-  (and mixed Int/Float) ADD/SUB/MUL/QUO.
+  (and mixed Int/Float) ADD/SUB/MUL/QUO, plus Bool LAND/LOR.
   ADD/SUB/MUL/REM/AND/OR/XOR/AND_NOT of two Ints stay `Int` (arbitrary precision).
   Mixed Int+Float and Float+Float ADD/SUB/MUL/QUO stay `Float` even when the
   rat is an integer (`1/2+1/2` is Float `"1"`, matching Go `makeRat`).
   `token.QUO` matches Go: the result is `Float` (`big.Rat`); integer division
   is Go's `QUO_ASSIGN` and is not exported here.
   REM/AND/OR/XOR/AND_NOT on a Float throw (Go panics).
-  `constUnaryOp` is Int ADD/SUB/XOR plus Float ADD/SUB. XOR `prec` matches Go:
+  Bool LAND/LOR with an Unknown operand is Unknown. Mixed Bool+Int LAND/LOR
+  throw (Go `match` would silently duplicate the Bool operand; we reject).
+  `constUnaryOp` is Int ADD/SUB/XOR plus Float ADD/SUB plus Bool NOT. XOR `prec` matches Go:
   `0` is unlimited two's complement; `prec > 0` keeps the low `prec` bits.
   Float ADD is identity; Float SUB is `big.Rat.Neg`. Integer-valued Float stays
   Float (`+(1/2+1/2)` is Float `"1"`). XOR on Float throws (Go panics).
+  NOT on a non-Bool throws (Go panics). `constMakeBool` takes a JS boolean.
+  `constBoolVal` is Go `BoolVal`: Bool is `[b, true]`; Unknown is `[false, true]`;
+  other kinds panic in Go → `[false, false]`. `GoConstValue#toString` for Bool is
+  `"true"`/`"false"`. `constCompare` stays numeric-only (EQL/NEQ Bool results
+  are `MakeBool(Compare)` in the Go dump). `constSign` throws on Bool/String
+  (Go panics: not numeric).
   `constShift` is Int SHL/SHR; `s` must be a non-negative bigint in
   `0..1000000` (JS mapping of Go's unbounded `uint` to avoid native OOM).
   `constToInt` is Go `Int64Val`: `[value, true]` when the Int fits in int64;
   otherwise `[low64-with-sign, false]` (Go's `big.Int.Int64` wrapping).
-  `constToString` is Go `StringVal` with panic mapped to `ok=false`: Int/Float
+  `constToString` is Go `StringVal` with panic mapped to `ok=false`: Int/Float/Bool
   are `["", false]`; String is `[unquoted, true]`; Unknown is `["", true]`.
   Invalid UTF-8 StringVal bytes become U+FFFD in the JS string; identity is
   `GoConstValue#toString` (`strconv.Quote`). `constFloat64Val` is Go
@@ -138,8 +152,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   FLOAT (`08i` is Complex 8 because float `SetString` is decimal). Result is
   Complex with real Int 0; `constReal`/`constImag` match Go `Real`/`Imag`.
   `GoConstValue#toString` for IMAG is Go `ExactString` (`(0 + 3/2i)`);
-  for STRING it is Go `ExactString` (`strconv.Quote`).
-  Bool and Complex BinaryOp stay later. `1e9999i` (512-bit `floatVal`
+  for STRING it is Go `ExactString` (`strconv.Quote`);
+  for Bool it is `"true"`/`"false"`.
+  Complex BinaryOp stays later. `1e9999i` (512-bit `floatVal`
   ExactString) is not in this checkpoint, same as FLOAT.
   Large-component rats that Go promotes to 512-bit
   `floatVal` (`BitLen >= 4096`) are not in this checkpoint.
@@ -147,9 +162,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **770,240 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **773,216 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 770240 Sep 15 06:06 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 773216 Sep 15 06:22 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```
