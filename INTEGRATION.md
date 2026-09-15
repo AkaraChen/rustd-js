@@ -57,7 +57,7 @@ Local stand-in for `main`: `grok-integrator-main` (the `main` branch is locked b
 | rustd-regexsyntax | `pkg/rustd-regexsyntax-grok-bulk-7` @ `04dc9c5` | merged (`919d5bd`); generate:check committed Go unicode tables. `c3dafb5` **is** an ancestor. Verified at pre-rebase `11eeeb6` (same regexsyntax files; rebase onto `5b9e220`) |
 | rustd-regexsyntax | `pkg/rustd-regexsyntax-grok-bulk-7` @ `c3dafb5` | merged (`dfbe5ac`); 10k mixed parse throughput vs Go in README. Ancestor of `04dc9c5` |
 | rustd-mail | `pkg/rustd-mail-grok-bulk-worker` @ `2852022` replayed as `29b2932` | merged (`5b75514`); rustd-mail 0.1.0 net/mail parse. Original `2852022` is **not** an ancestor (lockfile regenerated). |
-| rustd-mail | `pkg/rustd-mail-smtp` @ `49f4635` | pending — net/smtp SmtpClient/sendMail/plainAuth. merge-tree CLEAN vs `9493de5`; **not verified this round**. |
+| rustd-mail | `pkg/rustd-mail-smtp` @ `49f4635` replayed as `93df4fe` | merged (`219c085`); net/smtp SmtpClient/sendMail/plainAuth. merge-tree CLEAN; original `49f4635` is **not** an ancestor (rebased onto `57b9b97`). |
 | rustd-testing | `pkg/rustd-testing-grok-bulk-6` | rejected-by-owner (issue #20, 2026-09-14) |
 | rustd-std | `pkg/rustd-std-*` | rejected-by-owner (issue #29, 2026-09-14); no current unmerged branch |
 | rustd-debugfmt | `pkg/rustd-debugfmt-grok-bulk-5` @ `8ff791e` | rejected-by-owner (issue #18; owner cut 2026-09-15: largest binary, niche). New tip `8ff791e` (pack smoke) still skip |
@@ -2312,5 +2312,56 @@ Suggested next: verify+merge `pkg/rustd-mail-smtp` @ `49f4635` (CLEAN). Then got
 - Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
 - `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
 - `CI=false` on `--filter` builds. Lockfile drift discarded, not committed.
+- Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
+- Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
+
+## Round 2026-09-15T05:54:54+02:00
+
+Agent: `cursor-integrator`  
+`origin/main` before: `57b9b97`  
+`origin/main` after: `219c085` (mail smtp)
+
+Operator prompt still said `origin/main` was `c61eea7` with mail/mathx unmerged. Git+LoopX disagreed again: mathx `5afe53b` and mail parse `5b75514` already on main. Selected LoopX todo `todo_156c2b0859c8` was verify+merge `pkg/rustd-mail-smtp` @ `49f4635`. Followed LoopX.
+
+### Merged (verified green, `--no-ff`, pushed)
+
+| 分支 | 包 | 验证 | merge sha |
+|---|---|---|---|
+| `pkg/rustd-mail-smtp` @ `49f4635` rebased as `93df4fe` (`verify/mail`) | rustd-mail net/smtp SmtpClient/sendMail/plainAuth | rebase CLEAN onto `57b9b97`; `CI=false` build + **9/9** tests pass; tsc clean; linux-x64 `.node` 455680 (strip no-op) ≤2MB | `219c085` |
+
+### Rejected / skipped
+
+- `pkg/rustd-mail-grok-bulk-worker` @ `2852022` — **superseded**. Already on main via replayed `29b2932` / `5b75514`. `git log origin/main..` is one old parallel commit; not re-merged.
+- `pkg/rustd-mathx-grok-bulk-10` — already an ancestor of `origin/main` (`5afe53b`). LoopX rebase todo `todo_05d96a89e255` already **done** (2026-09-15T05:29:30+02:00). No new commits; not re-completed.
+- `pkg/rustd-gotool-grok-bulk-4` @ `d5febbc` — **superseded**. `git log origin/main..` is not empty (parallel BinaryOp/UnaryOp/MakeFromLiteral), but those landed via `4a72622`/`4c64c3e`/`24a98cb`. Do not merge the old parallel history.
+- `pkg/rustd-image-grok-bulk-2` @ `d9c447c` — **superseded** by `pkg/rustd-image-grok-bulk-8` (`60b0675`).
+- `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20).
+- `pkg/rustd-debugfmt-grok-bulk-5` — `rejected-by-owner` (issue #18).
+- `pkg/rustd-std-*` — `rejected-by-owner` (issue #29). No unmerged `origin/pkg/rustd-std-*`.
+- `pkg/rustd-gotool-misc` @ `fb91a86` — **not merged**. Prior round merge-tree CONFLICT in README / index.d.ts / constant.rs / tests / gofixtures (not lockfile-only). Worker must rebase CHAR onto current `origin/main`.
+- `pkg/rustd-mime-grok-bulk-3` @ `abd37bb` / `pkg/rustd-serial-grok-bulk-7` @ `624b270` / leftover `pkg/rustd-mail-smtp` @ `49f4635` — original tips after rebase; skip (already merged as replayed SHAs).
+
+### Not processed / remaining unmerged `origin/pkg/*`
+
+1. `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — skip; superseded
+2. `pkg/rustd-testing-grok-bulk-6` — skip; rejected-by-owner
+3. `pkg/rustd-debugfmt-grok-bulk-5` — skip; rejected-by-owner
+4. `pkg/rustd-mail-grok-bulk-worker` (`2852022`) — skip; superseded
+5. `pkg/rustd-gotool-grok-bulk-4` (`d5febbc`) — skip; superseded
+6. `pkg/rustd-mime-grok-bulk-3` (`abd37bb`) — leftover original tip; skip
+7. `pkg/rustd-serial-grok-bulk-7` (`624b270`) — leftover original tip; skip
+8. `pkg/rustd-mail-smtp` (`49f4635`) — leftover original tip after rebase; skip (merged as `93df4fe`)
+9. `pkg/rustd-gotool-misc` @ `fb91a86` — not merged; worker rebase required
+
+Suggested next: wait for `pkg/rustd-gotool-misc` CHAR rebase onto `origin/main`, then verify+merge. No other CLEAN first-time/incremental pkg branch this round.
+
+### Notes
+
+- Decision (todo note): operator snapshot at `c61eea7` is still stale; LoopX selected todo is the merge source of truth. Reason: mail parse + mathx already on main; remaining integrator slice was smtp `49f4635`.
+- Decision: do not re-complete `todo_05d96a89e255` (mathx rebase). Reason: already `status=done` with evidence `git:5afe53b`; mathx branch has zero commits not in `origin/main`.
+- Decision: do not merge `pkg/rustd-gotool-misc` while non-lockfile files conflict. Reason: integrator protocol aborts non-lockfile conflicts; CHAR must be replayed onto current main.
+- Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
+- `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
+- `CI=false` on `--filter` builds. Lockfile unchanged this round (no regen).
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
 - Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
