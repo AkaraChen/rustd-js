@@ -12,34 +12,36 @@ test('JS-generated bit results are accepted by Go math/bits', () => {
   const xs32 = [0, 1, 0x80000000, 0xffffffff];
   const xs64 = [0n, 1n, 1n << 63n, (1n << 64n) - 1n];
   const ks = [-1, 0, 1, 7, 63, 64];
-  const lines = ['package main', 'import ("fmt"; "math/bits"; "os")', 'func main() {'];
+  // Keep oracle operands at runtime, as in bits_oracle.go; ARM64 Go 1.24
+  // miscompiles direct constant Reverse8 comparisons. Assertions stay exact.
+  const lines = ['package main', 'import ("fmt"; "math/bits"; "os")', '//go:noinline', 'func opaque[T any](x T) T { return x }', 'func main() {'];
   for (const x of xs8) {
-    lines.push(`if bits.LeadingZeros8(${x}) != ${bits.leadingZeros8(x)} { os.Exit(1) }`);
-    lines.push(`if bits.Reverse8(${x}) != ${bits.reverse8(x)} { os.Exit(1) }`);
-    for (const k of ks) lines.push(`if bits.RotateLeft8(${x}, ${k}) != ${bits.rotateLeft8(x, k)} { os.Exit(1) }`);
+    lines.push(`if bits.LeadingZeros8(opaque(uint8(${x}))) != ${bits.leadingZeros8(x)} { os.Exit(1) }`);
+    lines.push(`if bits.Reverse8(opaque(uint8(${x}))) != ${bits.reverse8(x)} { os.Exit(1) }`);
+    for (const k of ks) lines.push(`if bits.RotateLeft8(opaque(uint8(${x})), ${k}) != ${bits.rotateLeft8(x, k)} { os.Exit(1) }`);
   }
   for (const x of xs16) {
-    lines.push(`if bits.Len16(${x}) != ${bits.len16(x)} { os.Exit(1) }`);
-    lines.push(`if bits.ReverseBytes16(${x}) != ${bits.reverseBytes16(x)} { os.Exit(1) }`);
+    lines.push(`if bits.Len16(opaque(uint16(${x}))) != ${bits.len16(x)} { os.Exit(1) }`);
+    lines.push(`if bits.ReverseBytes16(opaque(uint16(${x}))) != ${bits.reverseBytes16(x)} { os.Exit(1) }`);
   }
   for (const x of xs32) {
-    lines.push(`if bits.OnesCount32(${x}) != ${bits.onesCount32(x)} { os.Exit(1) }`);
+    lines.push(`if bits.OnesCount32(opaque(uint32(${x}))) != ${bits.onesCount32(x)} { os.Exit(1) }`);
     const r = bits.reverse32(x);
-    lines.push(`if bits.Reverse32(${x}) != ${r} { os.Exit(1) }`);
+    lines.push(`if bits.Reverse32(opaque(uint32(${x}))) != ${r} { os.Exit(1) }`);
   }
   for (const x of xs64) {
-    lines.push(`if bits.LeadingZeros64(uint64(${x})) != ${bits.leadingZeros64(x)} { os.Exit(1) }`);
-    lines.push(`if bits.Reverse64(uint64(${x})) != uint64(${bits.reverse64(x)}) { os.Exit(1) }`);
+    lines.push(`if bits.LeadingZeros64(opaque(uint64(${x}))) != ${bits.leadingZeros64(x)} { os.Exit(1) }`);
+    lines.push(`if bits.Reverse64(opaque(uint64(${x}))) != uint64(${bits.reverse64(x)}) { os.Exit(1) }`);
     for (const k of ks) {
-      lines.push(`if bits.RotateLeft64(uint64(${x}), ${k}) != uint64(${bits.rotateLeft64(x, k)}) { os.Exit(1) }`);
+      lines.push(`if bits.RotateLeft64(opaque(uint64(${x})), ${k}) != uint64(${bits.rotateLeft64(x, k)}) { os.Exit(1) }`);
     }
   }
   const a = bits.add64((1n << 64n) - 1n, 1n, 1n);
-  lines.push(`{ s, c := bits.Add64(^uint64(0), 1, 1); if s != uint64(${a.sum}) || c != uint64(${a.carryOut}) { os.Exit(1) } }`);
+  lines.push(`{ s, c := bits.Add64(opaque(^uint64(0)), 1, 1); if s != uint64(${a.sum}) || c != uint64(${a.carryOut}) { os.Exit(1) } }`);
   const m = bits.mul64(0xffffffffffffffffn, 0xffffffffffffffffn);
-  lines.push(`{ h, l := bits.Mul64(^uint64(0), ^uint64(0)); if h != uint64(${m.hi}) || l != uint64(${m.lo}) { os.Exit(1) } }`);
+  lines.push(`{ h, l := bits.Mul64(opaque(^uint64(0)), ^uint64(0)); if h != uint64(${m.hi}) || l != uint64(${m.lo}) { os.Exit(1) } }`);
   const d = bits.div64(0n, 100n, 7n);
-  lines.push(`{ q, r := bits.Div64(0, 100, 7); if q != uint64(${d.quo}) || r != uint64(${d.rem}) { os.Exit(1) } }`);
+  lines.push(`{ q, r := bits.Div64(opaque(uint64(0)), 100, 7); if q != uint64(${d.quo}) || r != uint64(${d.rem}) { os.Exit(1) } }`);
   lines.push('fmt.Print("Go verified JS math/bits cases") }');
   const temp = mkdtempSync(join(tmpdir(), 'rustd-mathx-'));
   try {
