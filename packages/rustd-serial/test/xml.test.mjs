@@ -99,6 +99,113 @@ const decodeSchemas = {
       { name: 'b', kind: 'element', type: 'string' },
     ],
   },
+  nsattr: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'url local,attr', type: 'string' }],
+  },
+  nselem: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'child', kind: 'element', tag: 'url local', type: 'string' }],
+  },
+  nsboth: {
+    name: 'root',
+    tag: 'http://e root',
+    kind: 'element',
+    children: [
+      { name: 'v', kind: 'attr', tag: 'url local,attr', type: 'string' },
+      { name: 'child', kind: 'element', tag: 'http://c kid', type: 'string' },
+    ],
+  },
+  nsmulti: {
+    name: 'root',
+    kind: 'element',
+    children: [
+      { name: 'a', kind: 'attr', tag: 'http://example.com/ns a,attr', type: 'string' },
+      { name: 'b', kind: 'attr', tag: 'http://example.com/ns b,attr', type: 'string' },
+      { name: 'c', kind: 'attr', tag: 'http://other.com/x c,attr', type: 'string' },
+    ],
+  },
+  nsxml: {
+    name: 'root',
+    kind: 'element',
+    children: [{
+      name: 'lang',
+      kind: 'attr',
+      tag: 'http://www.w3.org/XML/1998/namespace lang,attr',
+      type: 'string',
+    }],
+  },
+  nsempty: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: ' local,attr', type: 'string' }],
+  },
+  nsonlyurl: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'url,attr', type: 'string' }],
+  },
+  nsxmlname: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'http://example.com/xmlname x,attr', type: 'string' }],
+  },
+  nssame: {
+    name: 'root',
+    tag: 'url root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'url local,attr', type: 'string' }],
+  },
+  nsnested: {
+    name: 'root',
+    kind: 'element',
+    children: [{
+      name: 'inner',
+      kind: 'element',
+      tag: 'url inner',
+      children: [{ name: 'v', kind: 'attr', tag: 'url local,attr', type: 'string' }],
+    }],
+  },
+  nsomit: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'url local,attr,omitempty', type: 'string' }],
+  },
+  nspath: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'element', tag: 'url a>b', type: 'string' }],
+  },
+  nsindent: {
+    name: 'root',
+    kind: 'element',
+    children: [
+      { name: 'v', kind: 'attr', tag: 'url local,attr', type: 'string' },
+      { name: 'c', kind: 'element', tag: 'url kid', type: 'string' },
+    ],
+  },
+  nsbadempty: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'url ,attr', type: 'string' }],
+  },
+  nsbadelem: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'element', tag: 'url ', type: 'string' }],
+  },
+  nsbadhttp: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'http://x ,attr', type: 'string' }],
+  },
+  nsbadpathattr: {
+    name: 'root',
+    kind: 'element',
+    children: [{ name: 'v', kind: 'attr', tag: 'url a>b,attr', type: 'string' }],
+  },
 };
 
 function go(args = [], input) {
@@ -221,12 +328,16 @@ test('Go regenerates committed XML fixtures; native tokens/escape/marshal match'
     assert.deepEqual(viaDecoder, got, `${c.id} XmlDecoder.decode`);
   }
 
-  assert.ok((packet.encodes ?? []).length >= 12, `encodes ${packet.encodes?.length}`);
+  assert.ok((packet.encodes ?? []).length >= 30, `encodes ${packet.encodes?.length}`);
   for (const c of packet.encodes) {
     const schema = decodeSchemas[c.kind];
     assert.ok(schema, `${c.id} schema ${c.kind}`);
     if (c.error) {
       assert.throws(() => xmlMarshal(c.value, schema), (err) => {
+        if (c.error.includes('namespace without name')) {
+          assert.match(err.message, /xml: namespace without name/, `${c.id} ${err.message}`);
+          return true;
+        }
         assert.equal(err.message, c.error, `${c.id} error`);
         return true;
       }, c.id);
@@ -257,12 +368,18 @@ test('JS-generated XML verifies against Go', () => {
     { id: 'js-mix', kind: 'mix', xmlHex: hex(xmlMarshal({ a: '1', msg: 'c', inner: '<z/>', b: '2' }, decodeSchemas.mix)) },
     { id: 'js-cdata', kind: 'cdata', xmlHex: hex(xmlMarshal({ body: '1<2&3>' }, decodeSchemas.cdata)) },
     { id: 'js-cdatamix', kind: 'cdatamix', xmlHex: hex(xmlMarshal({ a: '1', body: 'x<y', b: '2' }, decodeSchemas.cdatamix)) },
+    { id: 'js-nsattr', kind: 'nsattr', xmlHex: hex(xmlMarshal({ v: 'x' }, decodeSchemas.nsattr)) },
+    { id: 'js-nselem', kind: 'nselem', xmlHex: hex(xmlMarshal({ child: 'y' }, decodeSchemas.nselem)) },
+    { id: 'js-nsmulti', kind: 'nsmulti', xmlHex: hex(xmlMarshal({ a: '1', b: '2', c: '3' }, decodeSchemas.nsmulti)) },
+    { id: 'js-nsxml', kind: 'nsxml', xmlHex: hex(xmlMarshal({ lang: 'en' }, decodeSchemas.nsxml)) },
+    { id: 'js-nssame', kind: 'nssame', xmlHex: hex(xmlMarshal({ v: 'x' }, decodeSchemas.nssame)) },
+    { id: 'js-nsnested', kind: 'nsnested', xmlHex: hex(xmlMarshal({ inner: { v: 'q' } }, decodeSchemas.nsnested)) },
   ];
   const verified = go(['-pkg', 'serial-xml', '-verify'], JSON.stringify({
     schema: 1, package: 'serial-xml', people, decodes,
   }));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 14 serial-xml encode cases/);
+  assert.match(verified.stdout, /Go verified 20 serial-xml encode cases/);
 });
 
 test('xmllint parses native marshal output', () => {
