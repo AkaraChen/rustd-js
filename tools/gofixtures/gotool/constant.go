@@ -1294,6 +1294,19 @@ func charLiteralCorpus() []string {
 		`"😀"`, "`😀`",
 		" a ", `"\""`, `''a`, `éé`,
 		`'\u{41}'`, "'e\u0301'",
+		// ASCII first/last bytes around UTF-8: inner rune survives (contrast unquoted π/€/😀).
+		` 中 `, ` π `, ` € `, ` 😀 `, "\t中\t",
+		// Unclosed 2/4-byte → U+FFFD. ASCII unclosed "a / `a is Unknown.
+		`'😀`, `😀'`, `'¥`, `'π`, `"a`, "`a",
+		// STRING-style wrap still UnquoteChar(..., '\'').
+		`"\x41"`, `"\'"`, "`\\n`", "`\\x41`", `"\u4e2d"`, `"\\"`,
+		// Malformed: uppercase \X, unclosed hex/unicode, empty dq/bq.
+		`'\X41'`, `'\x41`, `'\u4e2d`, `""`, "``",
+		`'\u2028'`, `'\U0010FFFE'`,
+		`'€x`, `'😀x`,
+		"'\r'",
+		`"""`,
+		"e\u0301",
 	}
 }
 
