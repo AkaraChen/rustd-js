@@ -20,13 +20,14 @@ import (
 )
 
 type Case struct {
-	ID        string   `json:"id"`
-	Kind      string   `json:"kind"`
-	Banner    string   `json:"banner"`
-	Replies   []string `json:"replies"`
-	ClientHex string   `json:"clientHex"`
-	TLS       bool     `json:"tls,omitempty"`
-	Error     string   `json:"error,omitempty"`
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Banner      string   `json:"banner"`
+	Replies     []string `json:"replies"`
+	ClientHex   string   `json:"clientHex"`
+	TLS         bool     `json:"tls,omitempty"`
+	ImplicitTLS bool     `json:"implicitTls,omitempty"`
+	Error       string   `json:"error,omitempty"`
 }
 
 type Packet struct {
@@ -89,6 +90,10 @@ func serverTLS() *tls.Config {
 }
 
 func clientTLS() *tls.Config {
+	return clientTLSName("127.0.0.1")
+}
+
+func clientTLSName(serverName string) *tls.Config {
 	pem, err := os.ReadFile("cert.pem")
 	if err != nil {
 		panic(err)
@@ -97,7 +102,7 @@ func clientTLS() *tls.Config {
 	if !pool.AppendCertsFromPEM(pem) {
 		panic("no cert")
 	}
-	return &tls.Config{ServerName: "127.0.0.1", RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return &tls.Config{ServerName: serverName, RootCAs: pool, MinVersion: tls.VersionTLS12}
 }
 
 func serveScript(conn net.Conn, raw net.Conn, rec *bytes.Buffer, banner string, replies []string, useTLS bool) {
@@ -148,8 +153,14 @@ func serveScript(conn net.Conn, raw net.Conn, rec *bytes.Buffer, banner string, 
 	io.Copy(io.Discard, br)
 }
 
-func runCase(banner string, replies []string, useTLS bool, fn func(addr string) error) (client []byte, clientErr error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+func runCase(banner string, replies []string, useTLS, implicitTLS bool, fn func(addr string) error) (client []byte, clientErr error) {
+	var ln net.Listener
+	var err error
+	if implicitTLS {
+		ln, err = tls.Listen("tcp", "127.0.0.1:0", serverTLS())
+	} else {
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +174,8 @@ func runCase(banner string, replies []string, useTLS bool, fn func(addr string) 
 		}
 		buf := &bytes.Buffer{}
 		rc := &recConn{Conn: conn, buf: buf}
-		serveScript(rc, conn, buf, banner, replies, useTLS)
+		// Implicit TLS already decrypted the banner path; do not STARTTLS-upgrade.
+		serveScript(rc, conn, buf, banner, replies, useTLS && !implicitTLS)
 		rc.Close()
 		done <- buf.Bytes()
 	}()
@@ -197,12 +209,13 @@ func main() {
 	lfMsg := "From: a@b.com\nTo: c@d.com\n\nhello\n.world\nmixed\r\nline\n"
 
 	specs := []struct {
-		id      string
-		kind    string
-		banner  string
-		replies []string
-		tls     bool
-		fn      func(addr string) error
+		id          string
+		kind        string
+		banner      string
+		replies     []string
+		tls         bool
+		implicitTLS bool
+		fn          func(addr string) error
 	}{
 		{
 			id:     "sendMail-ehlo-fail",
@@ -1286,6 +1299,91 @@ func main() {
 			},
 		},
 		{
+			id:     "client-newclient-implicit-tls",
+			kind:   "client",
+			banner: "220 SIGNS",
+			replies: []string{
+				"250 localhost",
+				"221 Goodbye",
+			},
+			tls:         true,
+			implicitTLS: true,
+			fn: func(addr string) error {
+				// TestNewClientWithTLS: tls.Dial + NewClient sets client.tls.
+				conn, err := tls.Dial("tcp", addr, clientTLS())
+				if err != nil {
+					return err
+				}
+				c, err := smtp.NewClient(conn, "127.0.0.1")
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if _, ok := c.TLSConnectionState(); !ok {
+					return fmt.Errorf("expected TLS connection state")
+				}
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-implicit-tls-auth",
+			kind:   "client",
+			banner: "220 SIGNS",
+			replies: []string{
+				"250-localhost\n250 AUTH PLAIN LOGIN",
+				"235 Accepted",
+				"221 Goodbye",
+			},
+			tls:         true,
+			implicitTLS: true,
+			fn: func(addr string) error {
+				conn, err := tls.Dial("tcp", addr, clientTLSName("smtp.test.local"))
+				if err != nil {
+					return err
+				}
+				c, err := smtp.NewClient(conn, "smtp.test.local")
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Auth(smtp.PlainAuth("", "user", "pass", "smtp.test.local")); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-tls-connstate",
+			kind:   "client",
+			banner: "220 127.0.0.1 ESMTP service ready",
+			replies: []string{
+				"250-127.0.0.1 ESMTP offers a warm hug of welcome\n250-STARTTLS\n250 Ok",
+				"220 Go ahead",
+				"250 Ok",
+				"221 127.0.0.1 Service closing transmission channel",
+			},
+			tls: true,
+			fn: func(addr string) error {
+				// TestTLSConnState: Dial + StartTLS + TLSConnectionState + Quit.
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.StartTLS(clientTLS()); err != nil {
+					return err
+				}
+				st, ok := c.TLSConnectionState()
+				if !ok || st.Version == 0 || !st.HandshakeComplete {
+					return fmt.Errorf("bad TLS connection state")
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
@@ -1330,15 +1428,16 @@ func main() {
 		if spec.kind == "validate" {
 			err = spec.fn("")
 		} else {
-			client, err = runCase(spec.banner, spec.replies, spec.tls, spec.fn)
+			client, err = runCase(spec.banner, spec.replies, spec.tls, spec.implicitTLS, spec.fn)
 		}
 		c := Case{
-			ID:        spec.id,
-			Kind:      spec.kind,
-			Banner:    spec.banner,
-			Replies:   spec.replies,
-			ClientHex: hex.EncodeToString(client),
-			TLS:       spec.tls,
+			ID:          spec.id,
+			Kind:        spec.kind,
+			Banner:      spec.banner,
+			Replies:     spec.replies,
+			ClientHex:   hex.EncodeToString(client),
+			TLS:         spec.tls,
+			ImplicitTLS: spec.implicitTLS,
 		}
 		if err != nil {
 			c.Error = err.Error()

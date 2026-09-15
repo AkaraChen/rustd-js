@@ -50,6 +50,13 @@ await sendMail('127.0.0.1:2525', plainAuth({
   handshake fails. `sendMail` calls `startTls(opts.tls)` when the server
   advertises STARTTLS. Node omits SNI when the name is an IP (RFC 6066);
   certificate identity is still checked against that IP.
+- `dial(addr, { tls: { implicit: true, ca, serverName } })` TLS-wraps the
+  socket **before** the 220 banner. That is Go `tls.Dial` + `smtp.NewClient`
+  (`client.tls == true` immediately). rustd-net `fromConn` is out of plan.
+  `plainAuth` then allows a non-localhost host (for example `smtp.test.local`)
+  because the session is already TLS. `sendMail` uses this when
+  `opts.tls.implicit` is set and still will STARTTLS if the server later
+  advertises it.
 - `tlsConnectionState()` returns a small local object after a successful
   upgrade (`protocol`, `authorized`, `serverName`, `cipher`), not a
   `rustd-tls` type. It is `null` before STARTTLS.
