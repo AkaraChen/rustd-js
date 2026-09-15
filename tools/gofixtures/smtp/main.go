@@ -626,12 +626,98 @@ func main() {
 			},
 		},
 		{
+			id:     "sendMail-mail-fail",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"550 no such user",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "sendMail-rcpt-fail",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"550 rejected",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"ok@b.com", "bad@b.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "sendMail-data-fail",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"554 not taking mail",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "client-smtputf8-unicode",
+			kind:   "client",
+			banner: "220 localhost",
+			replies: []string{
+				"250-localhost\n250-8BITMIME\n250 SMTPUTF8",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("用户@example.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("c@d.com"); err != nil {
+					return err
+				}
+				w, err := c.Data()
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(msgCRLF(sendMsg)); err != nil {
+					return err
+				}
+				if err := w.Close(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
 			replies: nil,
 			fn: func(addr string) error {
 				return smtp.SendMail("127.0.0.1:1", nil, "a@b.com", []string{"b@c.com>\nDATA\n"}, []byte("x"))
+			},
+		},
+		{
+			id:      "sendMail-from-inject",
+			kind:    "validate",
+			banner:  "",
+			replies: nil,
+			fn: func(addr string) error {
+				return smtp.SendMail("127.0.0.1:1", nil, "a@b.com>\nDATA\n", []string{"c@d.com"}, []byte("x"))
 			},
 		},
 	}

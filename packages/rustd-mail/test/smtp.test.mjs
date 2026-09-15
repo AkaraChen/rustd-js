@@ -261,6 +261,32 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'sendMail-mail-fail') {
+    await sendMail(addr, null, 'a@b.com', ['c@d.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'sendMail-rcpt-fail') {
+    await sendMail(addr, null, 'a@b.com', ['ok@b.com', 'bad@b.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'sendMail-data-fail') {
+    await sendMail(addr, null, 'a@b.com', ['c@d.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'client-smtputf8-unicode') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('用户@example.com');
+      await client.rcpt('c@d.com');
+      const w = await client.data();
+      await w.write(sendMsg);
+      await w.close();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -273,12 +299,15 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 17, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 23, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
+      const run = c.id === 'sendMail-from-inject'
+        ? () => sendMail('127.0.0.1:1', null, 'a@b.com>\nDATA\n', ['c@d.com'], 'x')
+        : () => sendMail('127.0.0.1:1', null, 'a@b.com', ['b@c.com>\nDATA\n'], 'x');
       await assert.rejects(
-        () => sendMail('127.0.0.1:1', null, 'a@b.com', ['b@c.com>\nDATA\n'], 'x'),
+        run,
         (err) => err instanceof SmtpError && err.message === c.error,
       );
       continue;

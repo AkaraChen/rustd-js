@@ -27,7 +27,7 @@ void SmtpClient.dial('127.0.0.1:25').then(async (c) => {
   await c.verify('alice@example.com');
   await c.reset();
   await c.noop();
-  await c.mail('a@b.com');
+  await c.mail('用户@example.com');
   await c.rcpt('b@c.com');
   const w: SmtpDataWriter = await c.data();
   await w.write('x');
