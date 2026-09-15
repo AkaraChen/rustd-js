@@ -287,6 +287,74 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'sendMail-auth-plain-identity') {
+    await sendMail(addr, plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: '127.0.0.1' }), 'a@b.com', ['c@d.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'client-auth-wrong-host') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: 'smtp.example.com' }));
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-auth-empty-initial') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth({
+        start() { return { proto: 'FOOAUTH', initial: new Uint8Array(0) }; },
+        next() { throw new Error('unexpected call'); },
+      });
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-helo-fail') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('localhost');
+    } catch (err) {
+      await client.quit().catch(() => {});
+      throw err;
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-after-mail') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.hello('x');
+    } catch (err) {
+      await client.quit().catch(() => {});
+      throw err;
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-inject') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('hostinjection>\n\rDATA\r\nInjected message body\r\n.\r\nQUIT\r\n');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-vrfy-inject') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.verify('user2@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n');
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -299,7 +367,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 23, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 30, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -458,6 +526,47 @@ test('startTls sets tlsConnectionState and serverInfo.tls', async () => {
     assert.equal(typeof st.protocol, 'string');
     assert.ok(st.protocol.startsWith('TLSv1.'));
     assert.equal(st.authorized, true);
+    await client.quit();
+  });
+});
+
+test('plainAuth start matches Go TestAuth / TestAuthPlain', () => {
+  const emptyId = plainAuth({ identity: '', username: 'user', password: 'pass', host: 'testserver' });
+  const started = emptyId.start({ name: 'testserver', tls: true, auth: [] });
+  assert.equal(started.proto, 'PLAIN');
+  assert.equal(Buffer.from(started.initial).toString('binary'), '\0user\0pass');
+  assert.equal(emptyId.next(new Uint8Array(), false), null);
+
+  const withId = plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: 'testserver' });
+  const ident = withId.start({ name: 'testserver', tls: true, auth: [] });
+  assert.equal(Buffer.from(ident.initial).toString('binary'), 'foo\0bar\0baz');
+
+  const local = plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: 'localhost' });
+  local.start({ name: 'localhost', tls: false, auth: [] });
+
+  assert.throws(
+    () => plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: 'servername' })
+      .start({ name: 'servername', tls: false, auth: ['PLAIN'] }),
+    (err) => err instanceof SmtpError && err.message === 'unencrypted connection',
+  );
+  assert.throws(
+    () => plainAuth({ identity: 'foo', username: 'bar', password: 'baz', host: 'servername' })
+      .start({ name: 'attacker', tls: true, auth: [] }),
+    (err) => err instanceof SmtpError && err.message === 'wrong host name',
+  );
+});
+
+test('Extension is case-insensitive like Go Client.Extension', async () => {
+  await withFakeSmtp({
+    banner: '220 hello world',
+    replies: ['250-mx.google.com at your service\n250 AUTH LOGIN PLAIN', '221 Goodbye'],
+  }, async (addr) => {
+    const client = await SmtpClient.dial(addr);
+    await client.hello();
+    assert.equal(client.extension('aUtH'), true);
+    assert.equal(client.extensionParams('aUtH'), 'LOGIN PLAIN');
+    assert.equal(client.extension('DSN'), false);
+    assert.equal(client.extensionParams('DSN'), '');
     await client.quit();
   });
 });
