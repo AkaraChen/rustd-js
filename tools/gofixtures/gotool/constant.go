@@ -1276,6 +1276,11 @@ func charLiteralCorpus() []string {
 		`'\u'`, `'\u12'`, `'\u00GG'`, `'\uD800'`, `'\uDFFF'`,
 		`'\U'`, `'\U1234567'`, `'\U00110000'`, `'\U0000D800'`,
 		`'\400'`, `'\8'`, `'\9'`, `'\"'`, `'\z'`, `'\ '`, `'\'`,
+		// Go strips lit[1:n-1] without checking quotes. Noncharacters are valid runes.
+		`"a"`, "`a`", `'a'x`, `'''`, `''a'`, `aa`, `ab`, `x`,
+		`'\uFFFE'`, `'\uFFFF'`, `'\uFDD0'`, `'\uFEFF'`, `'\uFFFD'`,
+		`"aa"`, `' 'x`, `'\u000A'`, "'\n'", "'\t'", "'\x00'",
+		`a b`, `'a''`, `''''`,
 	}
 }
 

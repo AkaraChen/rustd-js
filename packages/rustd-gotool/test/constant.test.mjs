@@ -830,6 +830,17 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\\uD800'",
     "'\\400'",
     "'\\\"'",
+    '"a"',
+    '`a`',
+    "'a'x",
+    "'''",
+    'aa',
+    "'\\uFFFE'",
+    "'\\uFDD0'",
+    "'\n'",
+    "'\0'",
+    'a b',
+    "''''",
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -837,7 +848,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 9 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 20 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -863,6 +874,16 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(surrogate.kind, 'Unknown');
   const octal = constMakeFromLiteral("'\\400'", TOKEN.CHAR, 0);
   assert.equal(octal.kind, 'Unknown');
+  const stripped = constMakeFromLiteral('"a"', TOKEN.CHAR, 0);
+  assert.equal(stripped.toString(), '97');
+  const emptyInner = constMakeFromLiteral('aa', TOKEN.CHAR, 0);
+  assert.equal(emptyInner.kind, 'Unknown');
+  const triple = constMakeFromLiteral("'''", TOKEN.CHAR, 0);
+  assert.equal(triple.kind, 'Unknown');
+  const nonchar = constMakeFromLiteral("'\\uFFFE'", TOKEN.CHAR, 0);
+  assert.equal(nonchar.toString(), '65534');
+  const rawNl = constMakeFromLiteral("'\n'", TOKEN.CHAR, 0);
+  assert.equal(rawNl.toString(), '10');
 });
 
 function evaluateImagLit(c) {
