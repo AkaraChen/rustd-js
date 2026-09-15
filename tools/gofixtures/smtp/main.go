@@ -1051,6 +1051,133 @@ func main() {
 			},
 		},
 		{
+			id:     "client-hello-auth",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"235 Accepted",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Auth(smtp.PlainAuth("", "user", "pass", "127.0.0.1"))
+			},
+		},
+		{
+			id:     "client-hello-rset",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 Reset ok",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Reset()
+			},
+		},
+		{
+			id:     "client-hello-noop",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 ok",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Noop()
+			},
+		},
+		{
+			id:     "client-hello-quit",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-helo-mail",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250 mx.google.com at your service",
+				"250 Sender OK",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("user@gmail.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-newclient-helo",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if ok, _ := c.Extension("DSN"); ok {
+					return fmt.Errorf("Shouldn't support DSN")
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:     "client-mail-inject",
 			kind:   "client",
 			banner: "220 hello world",

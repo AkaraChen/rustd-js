@@ -451,6 +451,67 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-hello-auth') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-rset') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.reset();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-noop') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.noop();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-hello-quit') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-helo-mail') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('user@gmail.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-newclient-helo') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello();
+      if (client.extension('DSN')) throw new Error('Shouldn\'t support DSN');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -463,7 +524,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 41, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 47, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -665,6 +726,19 @@ test('Extension is case-insensitive like Go Client.Extension', async () => {
     assert.equal(client.extensionParams('aUtH'), 'LOGIN PLAIN');
     assert.equal(client.extension('DSN'), false);
     assert.equal(client.extensionParams('DSN'), '');
+    await client.quit();
+  });
+});
+
+test('HELO fallback does not parse FEATURE the way EHLO would (Go TestHello case 5)', async () => {
+  await withFakeSmtp({
+    banner: '220 hello world',
+    replies: ['502 EH?', '250-mx.google.com at your service\n250 FEATURE', '221 Goodbye'],
+  }, async (addr) => {
+    const client = await SmtpClient.dial(addr);
+    await client.hello('customhost');
+    assert.equal(client.extension('feature'), false);
+    assert.equal(client.extensionParams('feature'), '');
     await client.quit();
   });
 });
