@@ -56,6 +56,7 @@ const cadd: GoConstValue = constBinaryOp(TOKEN.ADD, fromILit, cv);
 const cmul: GoConstValue = constBinaryOp(TOKEN.MUL, fromILit, fromILit);
 const uxor: GoConstValue = constUnaryOp(TOKEN.XOR, cv, 8);
 const fneg: GoConstValue = constUnaryOp(TOKEN.SUB, constBinaryOp(TOKEN.QUO, cv, constMakeInt64(2n)), 0);
+const cneg: GoConstValue = constUnaryOp(TOKEN.SUB, fromILit, 0);
 const sshl: GoConstValue = constShift(TOKEN.SHL, cv, 1n);
 const bstr: string = badd.toString();
 const cmp: number = versionCompare('go1.21', 'go1.21.0');

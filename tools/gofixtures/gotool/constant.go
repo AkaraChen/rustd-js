@@ -1955,3 +1955,169 @@ func verifyConstantComplexBin(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-complex-binop cases\n", len(packet.Cases))
 }
+
+type ConstCUnCase struct {
+	ID      string `json:"id"`
+	Op      string `json:"op"`
+	OpTok   int    `json:"opTok"`
+	FormY   string `json:"formY"`
+	YX      string `json:"yx"`
+	YY      string `json:"yy"`
+	Kind    string `json:"kind"`
+	Exact   string `json:"exact"`
+	Sign    int    `json:"sign"`
+	ReKind  string `json:"reKind"`
+	ReExact string `json:"reExact"`
+	ImKind  string `json:"imKind"`
+	ImExact string `json:"imExact"`
+}
+
+type ConstCUnPacket struct {
+	Schema  int            `json:"schema"`
+	Package string         `json:"package"`
+	Go      string         `json:"go"`
+	Slice   string         `json:"slice"`
+	Cases   []ConstCUnCase `json:"cases"`
+}
+
+func makeCplxUnary(s cplxSrc) (constant.Value, error) {
+	switch s.form {
+	case "imag", "unknown":
+		return makeCplx(s)
+	case "sum":
+		n, err := strconv.ParseInt(s.x, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		im, err := makeCplx(cplxSrc{"imag", s.y, "0"})
+		if err != nil {
+			return nil, err
+		}
+		return constant.BinaryOp(constant.MakeInt64(n), token.ADD, im), nil
+	default:
+		return nil, fmt.Errorf("unknown complex unary src form %q", s.form)
+	}
+}
+
+func evalComplexUnary(a cplxSrc, op token.Token) (ConstCUnCase, error) {
+	vy, err := makeCplxUnary(a)
+	if err != nil {
+		return ConstCUnCase{}, err
+	}
+	v := constant.UnaryOp(op, vy, 0)
+	re := constant.Real(v)
+	im := constant.Imag(v)
+	return ConstCUnCase{
+		OpTok:   int(op),
+		FormY:   a.form,
+		YX:      a.x,
+		YY:      a.y,
+		Kind:    v.Kind().String(),
+		Exact:   v.ExactString(),
+		Sign:    constant.Sign(v),
+		ReKind:  re.Kind().String(),
+		ReExact: re.ExactString(),
+		ImKind:  im.Kind().String(),
+		ImExact: im.ExactString(),
+	}, nil
+}
+
+func complexUnaryOps() []struct {
+	name string
+	tok  token.Token
+} {
+	return []struct {
+		name string
+		tok  token.Token
+	}{
+		{"ADD", token.ADD},
+		{"SUB", token.SUB},
+	}
+}
+
+// Official go/constant UnaryOp complexVal: ADD is identity, SUB negates re/im.
+// imag/unknown from the BinaryOp corpus; malformed IMAG; mixed re+im via int+imag.
+func complexUnaryCorpus() []cplxSrc {
+	var out []cplxSrc
+	for _, s := range complexBinCorpus() {
+		if s.form == "imag" || s.form == "unknown" {
+			out = append(out, s)
+		}
+	}
+	out = append(out,
+		cplxSrc{"imag", "1ii", "0"},
+		cplxSrc{"imag", "i", "0"},
+		cplxSrc{"imag", "xyz", "0"},
+		cplxSrc{"imag", "08i", "0"},
+		cplxSrc{"sum", "1", "1i"},
+		cplxSrc{"sum", "-1", "1i"},
+		cplxSrc{"sum", "3", "-2.5i"},
+		cplxSrc{"sum", "0", "0i"},
+	)
+	return out
+}
+
+func dumpConstantComplexUnary(w io.Writer) {
+	packet := ConstCUnPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-complex-unary",
+	}
+	corpus := complexUnaryCorpus()
+	for _, op := range complexUnaryOps() {
+		for i, a := range corpus {
+			c, err := evalComplexUnary(a, op.tok)
+			if err != nil {
+				fail(err)
+			}
+			c.ID = fmt.Sprintf("go-cun-%s-%d", op.name, i)
+			c.Op = op.name
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantComplexUnary(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstCUnPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-complex-unary" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-complex-unary packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{}
+	for _, op := range complexUnaryOps() {
+		tokOf[op.name] = op.tok
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		got, err := evalComplexUnary(cplxSrc{c.FormY, c.YX, c.YY}, op)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ReKind != c.ReKind || got.ReExact != c.ReExact || got.ImKind != c.ImKind || got.ImExact != c.ImExact {
+			fail(fmt.Errorf("mismatch case %d id=%s op=%s: go kind=%s exact=%s sign=%d re=%s/%s im=%s/%s got kind=%s exact=%s sign=%d re=%s/%s im=%s/%s",
+				i, c.ID, c.Op, got.Kind, got.Exact, got.Sign, got.ReKind, got.ReExact, got.ImKind, got.ImExact,
+				c.Kind, c.Exact, c.Sign, c.ReKind, c.ReExact, c.ImKind, c.ImExact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-complex-unary cases\n", len(packet.Cases))
+}
