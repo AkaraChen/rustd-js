@@ -492,6 +492,52 @@ func main() {
 			},
 		},
 		{
+			id:     "sendMail-starttls",
+			kind:   "sendMail",
+			banner: "220 127.0.0.1 ESMTP service ready",
+			replies: []string{
+				"250-127.0.0.1 ESMTP offers a warm hug of welcome\n250-STARTTLS\n250 Ok",
+				"220 Go ahead",
+				"250 Ok",
+				"250 Ok",
+				"250 Ok",
+				"354 send the mail data, end with .",
+				"250 Ok",
+				"221 127.0.0.1 Service closing transmission channel",
+			},
+			tls: true,
+			fn: func(addr string) error {
+				// TestTLSClient uses SendMail, which auto-STARTTLS then MAIL/RCPT/DATA.
+				// Dial+StartTLS with the fixture CA matches that wire (SendMail cannot
+				// take a custom RootCAs from outside net/smtp).
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.StartTLS(clientTLS()); err != nil {
+					return err
+				}
+				if err := c.Mail("joe1@example.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("joe2@example.com"); err != nil {
+					return err
+				}
+				w, err := c.Data()
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write([]byte("Subject: test\n\nhowdy!")); err != nil {
+					return err
+				}
+				if err := w.Close(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:     "client-auth-cram-md5",
 			kind:   "client",
 			banner: "220 localhost",
@@ -966,6 +1012,277 @@ func main() {
 					return err
 				}
 				return c.StartTLS(nil)
+			},
+		},
+		{
+			id:     "client-mail-auth-required",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"530 Authentication required",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				err = c.Mail("user@gmail.com")
+				_ = c.Quit()
+				return err
+			},
+		},
+		{
+			id:     "client-vrfy-252",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"252 Send some mail, I'll try my best",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				err = c.Verify("user1@gmail.com")
+				_ = c.Quit()
+				return err
+			},
+		},
+		{
+			id:     "client-hello-vrfy",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 User is valid",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Verify("test@example.com")
+			},
+		},
+		{
+			id:     "client-hello-mail",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 Sender ok",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Mail("test@example.com")
+			},
+		},
+		{
+			id:     "client-hello-auth",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"235 Accepted",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Auth(smtp.PlainAuth("", "user", "pass", "127.0.0.1"))
+			},
+		},
+		{
+			id:     "client-hello-rset",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 Reset ok",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Reset()
+			},
+		},
+		{
+			id:     "client-hello-noop",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 ok",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Noop()
+			},
+		},
+		{
+			id:     "client-hello-quit",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-helo-mail",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250 mx.google.com at your service",
+				"250 Sender OK",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("user@gmail.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-newclient-helo",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if ok, _ := c.Extension("DSN"); ok {
+					return fmt.Errorf("Shouldn't support DSN")
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-newclient-ehlo",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				ok, args := c.Extension("aUtH")
+				if !ok || args != "LOGIN PLAIN" {
+					return fmt.Errorf("Expected AUTH supported")
+				}
+				if ok, _ := c.Extension("DSN"); ok {
+					return fmt.Errorf("Shouldn't support DSN")
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-mail-inject",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 mx.google.com at your service",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				return c.Mail("user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n")
+			},
+		},
+		{
+			id:     "client-rcpt-inject",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 mx.google.com at your service",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				return c.Rcpt("golang-nuts@googlegroups.com>\r\nDATA\r\nInjected message body\r\n.\r\nQUIT\r\n")
 			},
 		},
 		{
