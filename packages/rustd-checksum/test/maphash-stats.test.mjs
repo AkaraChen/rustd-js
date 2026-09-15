@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { maphashBytes, maphashSeed } from '../index.mjs';
 
 function popcount64(n) {
@@ -24,7 +25,7 @@ test('same seed and input are stable across 100 in-process runs and a child proc
   const first = maphashBytes(seed, data);
   for (let i = 0; i < 100; i++) assert.equal(maphashBytes(seed, data), first);
   const child = spawnSync(process.execPath, ['-e', `
-    const { maphashBytes } = require(${JSON.stringify(new URL('../index.js', import.meta.url).pathname)});
+    const { maphashBytes } = require(${JSON.stringify(fileURLToPath(new URL('../index.js', import.meta.url)))});
     process.stdout.write(String(maphashBytes(${seed}n, Buffer.from('maphash-stability'))));
   `], { encoding: 'utf8' });
   assert.equal(child.status, 0, child.stderr);
@@ -47,8 +48,9 @@ test('avalanche: flipping 1 input bit flips about 32 of 64 output bits', () => {
   assert.ok(mean >= 28 && mean <= 36, `avalanche mean ${mean}`);
 });
 
-test('chi-square distribution of short strings mod 8/64/1024 has p > 0.01', () => {
+test('chi-square distribution of short strings mod 8/64/1024 has p > 0.01', (t) => {
   const seed = maphashSeed();
+  t.diagnostic(`maphash distribution seed=0x${seed.toString(16)}`);
   const n = 1_000_000;
   for (const mod of [8, 64, 1024]) {
     const counts = new Float64Array(mod);

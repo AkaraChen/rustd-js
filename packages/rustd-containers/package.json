@@ -21,7 +21,7 @@
   },
   "scripts": {
     "build": "napi build --platform --release --no-js --dts .generated.d.ts",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "napi": {

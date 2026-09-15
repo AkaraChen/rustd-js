@@ -92,7 +92,9 @@ test('linux-x64 .node is stripped and <= 2MB', () => {
 });
 
 test('npm pack loads CJS and ESM from a clean directory without shipping .node in the main tarball', () => {
-  const npmCli = join(process.execPath, '../../lib/node_modules/npm/bin/npm-cli.js');
+  const npmCli = process.env.RUSTD_NPM_CLI ?? (process.platform === 'win32'
+    ? join(process.execPath, '../node_modules/npm/bin/npm-cli.js')
+    : join(process.execPath, '../../lib/node_modules/npm/bin/npm-cli.js'));
   assert.ok(existsSync(npmCli), npmCli);
   const binary = readdirSync(pkgDir).find((name) => name.startsWith('rustd-archive.') && name.endsWith('.node'));
   assert.ok(binary, 'missing native binary');

@@ -1,3 +1,4 @@
+import { hostBinaryName } from '../../../scripts/native-test-tools.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, cpSync, mkdirSync, rmSync, statSync, existsSync } from 'node:fs';
@@ -27,11 +28,11 @@ function npm(args, cwd) {
   return result.stdout;
 }
 
-test('linux-x64-gnu .node is present, stripped, and ≤2MB decimal', () => {
+test('host platform .node is present, stripped, and ≤2MB decimal', () => {
   const binary = readdirSync(pkgDir).find((f) => f.endsWith('.node') && f.startsWith(`${manifest.napi.binaryName}.`));
   assert.ok(binary, 'missing platform .node; run pnpm --filter rustd-unicode build');
   const bytes = statSync(join(pkgDir, binary)).size;
-  assert.equal(binary, 'rustd-unicode.linux-x64-gnu.node');
+  assert.equal(binary, hostBinaryName(manifest.napi.binaryName));
   assert.ok(bytes > 0);
   assert.ok(bytes <= SIZE_CAP, `${binary}: ${bytes} > ${SIZE_CAP}`);
 });

@@ -1,0 +1,20 @@
+{
+  "name": "rustd-gotool-linux-arm64-gnu",
+  "version": "0.1.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "rustd-gotool.linux-arm64-gnu.node",
+  "files": [
+    "rustd-gotool.linux-arm64-gnu.node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

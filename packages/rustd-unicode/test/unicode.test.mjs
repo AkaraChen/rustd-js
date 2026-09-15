@@ -223,20 +223,16 @@ function toHex(bytes) {
 }
 
 function recode(bytes) {
-  const chunks = [];
-  let total = 0;
+  // An invalid input byte expands to at most the three-byte RuneError encoding.
+  // Copy each result immediately instead of retaining a typed array per rune.
+  const out = new Uint8Array(bytes.length * 3);
+  let offset = 0;
   for (const { r } of utf8Runes(bytes)) {
     const enc = utf8EncodeRune(r);
-    chunks.push(enc);
-    total += enc.length;
+    out.set(enc, offset);
+    offset += enc.length;
   }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
+  return out.slice(0, offset);
 }
 
 function checksumBytes(bytes) {

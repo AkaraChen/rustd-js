@@ -8,7 +8,7 @@ import {
   setClock, formatLogCase, formatSlogCase, formatSyslogCase,
   Record, int, string, int64, float64, uint64, Logger, BadKeyError,
   FatalError, PanicError, info, newLoggerDefault, newTextHandler, setDefault,
-  MessageTooLongError, syslogDial, syslogNew, SyslogError, LEVEL, FACILITY, SEVERITY,
+  MessageTooLongError, syslogDial, syslogNew, SyslogError, UnsupportedPlatformError, LEVEL, FACILITY, SEVERITY,
 } from '../index.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
@@ -103,7 +103,11 @@ test('sink short-write is retried until complete', () => {
   assert.ok(n >= 2);
 });
 
-test('UDP syslog bytes match Go framing; oversized payload throws', async () => {
+const unixSyslogOnly = {
+  skip: process.platform === 'win32' && 'syslog transport is explicitly unsupported on Windows; byte-formatting tests still run',
+};
+
+test('UDP syslog bytes match Go framing; oversized payload throws', unixSyslogOnly, async () => {
   const generated = go();
   const packet = JSON.parse(generated.stdout);
   setClock(BigInt(packet.nowUnixNs));
@@ -116,19 +120,23 @@ test('UDP syslog bytes match Go framing; oversized payload throws', async () => 
   const port = server.address().port;
   const priority = FACILITY.USER | SEVERITY.INFO;
   const tag = 'rustd';
-  const w = syslogDial('udp', `127.0.0.1:${port}`, priority, tag);
-  w.info('hello');
-  const got = await received;
-  const expect = formatSyslogCase({
-    local: false, priority, hostname: hostname(), tag, pid: process.pid, msg: 'hello',
-  });
-  assert.equal(got.toString(), Buffer.from(expect).toString());
-  server.close();
-  assert.throws(() => w.info('x'.repeat(2000)), MessageTooLongError);
-  w.close();
+  let w;
+  try {
+    w = syslogDial('udp', `127.0.0.1:${port}`, priority, tag);
+    w.info('hello');
+    const got = await received;
+    const expect = formatSyslogCase({
+      local: false, priority, hostname: hostname(), tag, pid: process.pid, msg: 'hello',
+    });
+    assert.equal(got.toString(), Buffer.from(expect).toString());
+    assert.throws(() => w.info('x'.repeat(2000)), MessageTooLongError);
+  } finally {
+    w?.close();
+    server.close();
+  }
 });
 
-test('syslogNew either connects or throws a named Unix syslog error', () => {
+test('syslogNew either connects or throws a named Unix syslog error', unixSyslogOnly, () => {
   try {
     const w = syslogNew(FACILITY.USER | SEVERITY.INFO, 'rustd');
     w.close();
@@ -137,6 +145,19 @@ test('syslogNew either connects or throws a named Unix syslog error', () => {
     assert.match(String(err.message), /Unix syslog delivery error|log\/syslog/);
   }
 });
+
+if (process.platform === 'win32') {
+  test('Windows syslog transports report UnsupportedPlatformError', () => {
+    for (const call of [
+      () => syslogDial('udp', '127.0.0.1:514', FACILITY.USER | SEVERITY.INFO, 'rustd'),
+      () => syslogNew(FACILITY.USER | SEVERITY.INFO, 'rustd'),
+    ]) {
+      assert.throws(call, err => err instanceof UnsupportedPlatformError
+        && err.code === 'ERR_LOG_UNSUPPORTED_PLATFORM'
+        && err.message === 'log/syslog: not supported on Windows');
+    }
+  });
+}
 
 test('package slog info writes through the default handler after setDefault', () => {
   const chunks = [];

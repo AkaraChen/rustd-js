@@ -1,0 +1,17 @@
+{
+  "name": "rustd-archive-darwin-arm64",
+  "version": "0.1.0",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "rustd-archive.darwin-arm64.node",
+  "files": [
+    "rustd-archive.darwin-arm64.node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "darwin"
+  ]
+}

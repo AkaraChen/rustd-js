@@ -1,3 +1,4 @@
+import { hostBinaryName } from '../../../scripts/native-test-tools.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -379,7 +380,7 @@ test('defaultRand is a singleton auto-seeded ChaCha8, not Seed(1) / PCG(1,2)', (
 });
 
 test('release .node stays under 2MB (expected << 500KB)', () => {
-  const binary = join(pkg, 'rustd-mathx.linux-x64-gnu.node');
+  const binary = join(pkg, hostBinaryName('rustd-mathx'));
   const size = statSync(binary).size;
   assert.ok(size <= 2 * 1024 * 1024, `size ${size}`);
   assert.ok(size < 500 * 1024, `size ${size} suggests unexpected deps`);

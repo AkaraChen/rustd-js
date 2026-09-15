@@ -11,6 +11,9 @@ getrandom = "0.2"
 napi = { version = "3", default-features = false, features = ["napi8"] }
 napi-derive = "3"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Registry"] }
+
 [build-dependencies]
 napi-build = "2"
 

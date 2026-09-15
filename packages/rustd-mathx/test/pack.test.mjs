@@ -1,3 +1,4 @@
+import { hostBinaryName } from '../../../scripts/native-test-tools.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, cpSync, mkdirSync, rmSync, statSync } from 'node:fs';
@@ -24,13 +25,13 @@ if (process.platform !== 'win32' && !process.env.RUSTD_NPM_CLI) {
   process.env.RUSTD_NPM_CLI = resolve(process.execPath, '../../lib/node_modules/npm/bin/npm-cli.js');
 }
 
-test('linux-x64 .node is stripped and under 2MB (expected < 500KB after Zipf/ziggurat)', () => {
+test('host platform .node is stripped and under 2MB (expected < 500KB after Zipf/ziggurat)', () => {
   const binary = readdirSync(dir).find((f) => f.endsWith('.node') && f.startsWith(`${manifest.napi.binaryName}.`));
   assert.ok(binary, 'missing .node; build first');
   const bytes = statSync(join(dir, binary)).size;
   assert.ok(bytes <= SIZE_CAP, `${binary}: ${bytes} bytes exceeds 2MB`);
   assert.ok(bytes < SIZE_EXPECT, `${binary}: ${bytes} bytes suggests unexpected deps`);
-  assert.match(binary, /linux-x64-gnu\.node$/);
+  assert.equal(binary, hostBinaryName(manifest.napi.binaryName));
 });
 
 test('npm pack installs CJS and ESM with the native binary', () => {

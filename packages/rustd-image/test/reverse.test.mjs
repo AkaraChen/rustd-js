@@ -57,13 +57,16 @@ function goDecode(kind, bytes) {
   const tmp = mkdtempSync(join(tmpdir(), 'rustd-image-rev-'));
   const file = join(tmp, `in.${kind}`);
   writeFileSync(file, bytes);
-  const r = spawnSync('mise', ['exec', '--', 'go', 'run', '.', '-decode', kind, file], {
+  const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
+  const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
+  const r = spawnSync(command, [...prefix, 'run', '.', '-decode', kind, file], {
     cwd: join(dir, 'gofixtures'),
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
     env: { ...process.env, GOWORK: 'off', GOTOOLCHAIN: 'go1.25.0' },
   });
   rmSync(tmp, { recursive: true, force: true });
+  if (r.error) throw r.error;
   if (r.status !== 0) {
     throw new Error(`go -decode ${kind} failed:\n${r.stderr || r.stdout}`);
   }

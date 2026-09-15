@@ -18,37 +18,453 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
-  packages/_template: {}
+  packages/_template:
+    optionalDependencies:
+      rustd-template-smoke-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-template-smoke-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-template-smoke-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-template-smoke-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-template-smoke-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
 
-  packages/rustd-archive: {}
+  packages/_template/npm/darwin-arm64: {}
 
-  packages/rustd-checksum: {}
+  packages/_template/npm/darwin-x64: {}
 
-  packages/rustd-compress: {}
+  packages/_template/npm/linux-arm64-gnu: {}
 
-  packages/rustd-containers: {}
+  packages/_template/npm/linux-x64-gnu: {}
 
-  packages/rustd-crypto: {}
+  packages/_template/npm/win32-x64-msvc: {}
 
-  packages/rustd-encoding: {}
+  packages/rustd-archive:
+    optionalDependencies:
+      rustd-archive-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-archive-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-archive-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-archive-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-archive-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
 
-  packages/rustd-gotool: {}
+  packages/rustd-archive/npm/darwin-arm64: {}
 
-  packages/rustd-image: {}
+  packages/rustd-archive/npm/darwin-x64: {}
 
-  packages/rustd-log: {}
+  packages/rustd-archive/npm/linux-arm64-gnu: {}
 
-  packages/rustd-mail: {}
+  packages/rustd-archive/npm/linux-x64-gnu: {}
 
-  packages/rustd-mathx: {}
+  packages/rustd-archive/npm/win32-x64-msvc: {}
 
-  packages/rustd-mime: {}
+  packages/rustd-checksum:
+    optionalDependencies:
+      rustd-checksum-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-checksum-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-checksum-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-checksum-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-checksum-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
 
-  packages/rustd-regexsyntax: {}
+  packages/rustd-checksum/npm/darwin-arm64: {}
 
-  packages/rustd-serial: {}
+  packages/rustd-checksum/npm/darwin-x64: {}
 
-  packages/rustd-unicode: {}
+  packages/rustd-checksum/npm/linux-arm64-gnu: {}
+
+  packages/rustd-checksum/npm/linux-x64-gnu: {}
+
+  packages/rustd-checksum/npm/win32-x64-msvc: {}
+
+  packages/rustd-compress:
+    optionalDependencies:
+      rustd-compress-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-compress-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-compress-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-compress-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-compress-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-compress/npm/darwin-arm64: {}
+
+  packages/rustd-compress/npm/darwin-x64: {}
+
+  packages/rustd-compress/npm/linux-arm64-gnu: {}
+
+  packages/rustd-compress/npm/linux-x64-gnu: {}
+
+  packages/rustd-compress/npm/win32-x64-msvc: {}
+
+  packages/rustd-containers:
+    optionalDependencies:
+      rustd-containers-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-containers-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-containers-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-containers-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-containers-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-containers/npm/darwin-arm64: {}
+
+  packages/rustd-containers/npm/darwin-x64: {}
+
+  packages/rustd-containers/npm/linux-arm64-gnu: {}
+
+  packages/rustd-containers/npm/linux-x64-gnu: {}
+
+  packages/rustd-containers/npm/win32-x64-msvc: {}
+
+  packages/rustd-crypto:
+    optionalDependencies:
+      rustd-crypto-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-crypto-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-crypto-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-crypto-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-crypto-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-crypto/npm/darwin-arm64: {}
+
+  packages/rustd-crypto/npm/darwin-x64: {}
+
+  packages/rustd-crypto/npm/linux-arm64-gnu: {}
+
+  packages/rustd-crypto/npm/linux-x64-gnu: {}
+
+  packages/rustd-crypto/npm/win32-x64-msvc: {}
+
+  packages/rustd-encoding:
+    optionalDependencies:
+      rustd-encoding-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-encoding-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-encoding-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-encoding-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-encoding-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-encoding/npm/darwin-arm64: {}
+
+  packages/rustd-encoding/npm/darwin-x64: {}
+
+  packages/rustd-encoding/npm/linux-arm64-gnu: {}
+
+  packages/rustd-encoding/npm/linux-x64-gnu: {}
+
+  packages/rustd-encoding/npm/win32-x64-msvc: {}
+
+  packages/rustd-gotool:
+    optionalDependencies:
+      rustd-gotool-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-gotool-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-gotool-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-gotool-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-gotool-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-gotool/npm/darwin-arm64: {}
+
+  packages/rustd-gotool/npm/darwin-x64: {}
+
+  packages/rustd-gotool/npm/linux-arm64-gnu: {}
+
+  packages/rustd-gotool/npm/linux-x64-gnu: {}
+
+  packages/rustd-gotool/npm/win32-x64-msvc: {}
+
+  packages/rustd-image:
+    optionalDependencies:
+      rustd-image-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-image-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-image-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-image-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-image-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-image/npm/darwin-arm64: {}
+
+  packages/rustd-image/npm/darwin-x64: {}
+
+  packages/rustd-image/npm/linux-arm64-gnu: {}
+
+  packages/rustd-image/npm/linux-x64-gnu: {}
+
+  packages/rustd-image/npm/win32-x64-msvc: {}
+
+  packages/rustd-log:
+    optionalDependencies:
+      rustd-log-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-log-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-log-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-log-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-log-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-log/npm/darwin-arm64: {}
+
+  packages/rustd-log/npm/darwin-x64: {}
+
+  packages/rustd-log/npm/linux-arm64-gnu: {}
+
+  packages/rustd-log/npm/linux-x64-gnu: {}
+
+  packages/rustd-log/npm/win32-x64-msvc: {}
+
+  packages/rustd-mail:
+    optionalDependencies:
+      rustd-mail-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-mail-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-mail-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-mail-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-mail-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-mail/npm/darwin-arm64: {}
+
+  packages/rustd-mail/npm/darwin-x64: {}
+
+  packages/rustd-mail/npm/linux-arm64-gnu: {}
+
+  packages/rustd-mail/npm/linux-x64-gnu: {}
+
+  packages/rustd-mail/npm/win32-x64-msvc: {}
+
+  packages/rustd-mathx:
+    optionalDependencies:
+      rustd-mathx-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-mathx-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-mathx-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-mathx-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-mathx-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-mathx/npm/darwin-arm64: {}
+
+  packages/rustd-mathx/npm/darwin-x64: {}
+
+  packages/rustd-mathx/npm/linux-arm64-gnu: {}
+
+  packages/rustd-mathx/npm/linux-x64-gnu: {}
+
+  packages/rustd-mathx/npm/win32-x64-msvc: {}
+
+  packages/rustd-mime:
+    optionalDependencies:
+      rustd-mime-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-mime-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-mime-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-mime-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-mime-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-mime/npm/darwin-arm64: {}
+
+  packages/rustd-mime/npm/darwin-x64: {}
+
+  packages/rustd-mime/npm/linux-arm64-gnu: {}
+
+  packages/rustd-mime/npm/linux-x64-gnu: {}
+
+  packages/rustd-mime/npm/win32-x64-msvc: {}
+
+  packages/rustd-regexsyntax:
+    optionalDependencies:
+      rustd-regexsyntax-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-regexsyntax-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-regexsyntax-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-regexsyntax-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-regexsyntax-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-regexsyntax/npm/darwin-arm64: {}
+
+  packages/rustd-regexsyntax/npm/darwin-x64: {}
+
+  packages/rustd-regexsyntax/npm/linux-arm64-gnu: {}
+
+  packages/rustd-regexsyntax/npm/linux-x64-gnu: {}
+
+  packages/rustd-regexsyntax/npm/win32-x64-msvc: {}
+
+  packages/rustd-serial:
+    optionalDependencies:
+      rustd-serial-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-serial-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-serial-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-serial-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-serial-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-serial/npm/darwin-arm64: {}
+
+  packages/rustd-serial/npm/darwin-x64: {}
+
+  packages/rustd-serial/npm/linux-arm64-gnu: {}
+
+  packages/rustd-serial/npm/linux-x64-gnu: {}
+
+  packages/rustd-serial/npm/win32-x64-msvc: {}
+
+  packages/rustd-unicode:
+    optionalDependencies:
+      rustd-unicode-darwin-arm64:
+        specifier: 0.1.0
+        version: link:npm/darwin-arm64
+      rustd-unicode-darwin-x64:
+        specifier: 0.1.0
+        version: link:npm/darwin-x64
+      rustd-unicode-linux-arm64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-arm64-gnu
+      rustd-unicode-linux-x64-gnu:
+        specifier: 0.1.0
+        version: link:npm/linux-x64-gnu
+      rustd-unicode-win32-x64-msvc:
+        specifier: 0.1.0
+        version: link:npm/win32-x64-msvc
+
+  packages/rustd-unicode/npm/darwin-arm64: {}
+
+  packages/rustd-unicode/npm/darwin-x64: {}
+
+  packages/rustd-unicode/npm/linux-arm64-gnu: {}
+
+  packages/rustd-unicode/npm/linux-x64-gnu: {}
+
+  packages/rustd-unicode/npm/win32-x64-msvc: {}
 
 packages:
 

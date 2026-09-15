@@ -186,7 +186,12 @@ pub fn pow(x: C, y: C) -> C {
     let mut theta = y.0 * arg;
     if y.1 != 0.0 {
         r *= (-y.1 * arg).exp();
-        theta += y.1 * modulus.ln();
+        // Go's ARM64 compiler fuses this multiply-add. Near a zero of sin/cos,
+        // rounding the multiplication separately magnifies the final ULP error.
+        #[cfg(target_arch = "aarch64")]
+        { theta = y.1.mul_add(modulus.ln(), theta); }
+        #[cfg(not(target_arch = "aarch64"))]
+        { theta += y.1 * modulus.ln(); }
     }
     let (s, c) = theta.sin_cos();
     (r * c, r * s)

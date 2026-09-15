@@ -403,22 +403,26 @@ class NodeStreamIo {
     this._ended = false;
     this._err = null;
     this._wait = [];
-    stream.on('data', (d) => {
+    this._onData = (d) => {
       this._buf = Buffer.concat([this._buf, d]);
       this._wake();
-    });
-    stream.on('error', (err) => {
+    };
+    this._onError = (err) => {
       this._err = err;
       this._wake();
-    });
-    stream.on('end', () => {
+    };
+    this._onEnd = () => {
       this._ended = true;
       this._wake();
-    });
-    stream.on('timeout', () => {
+    };
+    this._onTimeout = () => {
       this._err = this._err ?? new SmtpError('smtp: connection timed out', { command: '' });
       this._wake();
-    });
+    };
+    stream.on('data', this._onData);
+    stream.on('error', this._onError);
+    stream.on('end', this._onEnd);
+    stream.on('timeout', this._onTimeout);
   }
 
   _wake() {
@@ -508,8 +512,19 @@ class NodeStreamIo {
     this._stream.destroy();
   }
 
-  takeFd() {
-    throw new SmtpError('smtp: STARTTLS already completed', { command: 'STARTTLS' });
+  takeSocket() {
+    if (this._stream.encrypted) {
+      throw new SmtpError('smtp: STARTTLS already completed', { command: 'STARTTLS' });
+    }
+    const stream = this._stream;
+    stream.pause();
+    stream.removeListener('data', this._onData);
+    stream.removeListener('error', this._onError);
+    stream.removeListener('end', this._onEnd);
+    stream.removeListener('timeout', this._onTimeout);
+    if (this._buf.length) stream.unshift(this._buf);
+    this._buf = Buffer.alloc(0);
+    return stream;
   }
 }
 
@@ -550,8 +565,31 @@ class SmtpClient {
     const host = opts.host == null ? splitHostPort(addr) : requireString(opts.host, 'host');
     const timeoutMs = opts.timeoutMs == null ? 30000 : opts.timeoutMs;
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new TypeError('smtp: timeoutMs must be a number');
-    const id = await smtpCall('DIAL', binding.smtpDial(addr, timeoutMs >>> 0));
-    const client = new SmtpClient(new NativeSmtpIo(id), host, timeoutMs);
+    let io;
+    if (process.platform === 'win32') {
+      // Windows SOCKET handles cannot be adopted via net.Socket({ fd }). Keep
+      // ownership in Node from connect through STARTTLS; DATA framing stays native.
+      const socket = await smtpCall('DIAL', new Promise((resolve, reject) => {
+        const net = require('node:net');
+        const port = Number(addr.slice(addr.lastIndexOf(':') + 1));
+        const s = net.createConnection({ host: splitHostPort(addr), port });
+        const fail = (err) => { s.destroy(); reject(err); };
+        const timedOut = () => fail(new SmtpError('smtp: connection timed out', { command: 'DIAL' }));
+        s.once('error', fail);
+        s.once('timeout', timedOut);
+        if (timeoutMs > 0) s.setTimeout(timeoutMs);
+        s.once('connect', () => {
+          s.removeListener('error', fail);
+          s.removeListener('timeout', timedOut);
+          resolve(s);
+        });
+      }));
+      io = new NodeStreamIo(socket);
+    } else {
+      const id = await smtpCall('DIAL', binding.smtpDial(addr, timeoutMs >>> 0));
+      io = new NativeSmtpIo(id);
+    }
+    const client = new SmtpClient(io, host, timeoutMs);
     try {
       // Go NewClient sets client.tls from conn.(*tls.Conn). rustd-net fromConn is
       // gone, so dial({ tls: { implicit: true } }) is tls.Dial + NewClient.
@@ -756,17 +794,22 @@ class SmtpClient {
   }
 
   async _wrapTls(config = {}) {
-    if (typeof this._io.takeFd !== 'function') {
+    if (typeof this._io.takeFd !== 'function' && typeof this._io.takeSocket !== 'function') {
       throw new FeatureNotBuiltError('smtp: STARTTLS handshake not built', { command: 'STARTTLS' });
     }
-    const taken = await smtpCall('STARTTLS', this._io.takeFd());
-    const fd = Number(taken.fd);
-    const leftover = taken.leftover ? Buffer.from(taken.leftover) : Buffer.alloc(0);
     const net = require('node:net');
     const tls = require('node:tls');
-    const socket = new net.Socket({ fd, readable: true, writable: true });
+    let socket;
+    if (typeof this._io.takeSocket === 'function') {
+      socket = this._io.takeSocket();
+    } else {
+      const taken = await smtpCall('STARTTLS', this._io.takeFd());
+      const fd = Number(taken.fd);
+      const leftover = taken.leftover ? Buffer.from(taken.leftover) : Buffer.alloc(0);
+      socket = new net.Socket({ fd, readable: true, writable: true });
+      if (leftover.length) socket.unshift(leftover);
+    }
     if (this._timeoutMs > 0) socket.setTimeout(this._timeoutMs);
-    if (leftover.length) socket.unshift(leftover);
     const servername = config.serverName == null ? this._serverName : String(config.serverName);
     const tlsOpts = {
       socket,
