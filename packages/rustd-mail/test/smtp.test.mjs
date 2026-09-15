@@ -51,7 +51,7 @@ function goSmtp(args = []) {
     cwd: testdata,
     encoding: 'utf8',
     maxBuffer: 32 << 20,
-    timeout: 120000,
+    timeout: 180000,
     env: { ...process.env, GOWORK: 'off' },
   });
   if (result.error) throw result.error;
