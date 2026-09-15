@@ -3,11 +3,13 @@
 //! `NextPart` transparently decodes `Content-Transfer-Encoding: quoted-printable`
 //! and hides that header. `NextRawPart` leaves the CTE and body alone. `write`
 //! may split a boundary across chunks; `next_part` returns `Ok(None)` until a
-//! complete part (or the closing delimiter) is buffered. `read_form` applies
-//! the Go `multipartmaxparts` cap (default 1000), Go `maxMemory + 10MB`
-//! accounting for non-file values, and Go `maxMemory` for in-memory file
-//! content. File parts that would spill to a temp file in Go throw
-//! `multipart: message too large` instead (issue #9 decision 3).
+//! complete part (or the closing delimiter) is buffered. `read_form` is one-shot
+//! after the body is buffered (whole, 1-byte, or mid-boundary `write` of the
+//! same complete body match). It applies the Go `multipartmaxparts` cap
+//! (default 1000), Go `maxMemory + 10MB` accounting for non-file values, and
+//! Go `maxMemory` for in-memory file content. File parts that would spill to a
+//! temp file in Go throw `multipart: message too large` instead (issue #9
+//! decision 3).
 
 use crate::header::{canonical_mime_header_key, canonical_mime_header_key_ok};
 use crate::mediatype::parse_media_type;
@@ -1336,5 +1338,39 @@ Content-Transfer-Encoding: quoted-printable\r\n\
             read_form_file_err(&one, 0),
             "multipart: message too large"
         );
+    }
+
+    fn mixed_value_file_body() -> Vec<u8> {
+        let mut w = MultipartWriter::new(Some("b".into())).unwrap();
+        w.write_field("title", "hello").unwrap();
+        let id = w.create_form_file("f", "f.txt").unwrap();
+        w.write_part(id, b"file-bytes").unwrap();
+        w.end_part(id).unwrap();
+        w.write_field("desc", "world").unwrap();
+        w.finish().unwrap()
+    }
+
+    #[test]
+    fn read_form_1_byte_feed_matches_whole_body_mixed_value_file() {
+        let body = mixed_value_file_body();
+        let whole = {
+            let mut r = MultipartReader::new("b".into());
+            r.write(&body);
+            r.read_form(1 << 20).unwrap()
+        };
+        let mut one = MultipartReader::new("b".into());
+        for byte in &body {
+            one.write(&[*byte]);
+        }
+        let one = one.read_form(1 << 20).unwrap();
+        assert_eq!(whole.value, one.value);
+        assert_eq!(whole.value.len(), 2);
+        assert_eq!(whole.value[0], ("title".into(), vec!["hello".into()]));
+        assert_eq!(whole.value[1], ("desc".into(), vec!["world".into()]));
+        assert_eq!(whole.file.len(), 1);
+        assert_eq!(whole.file[0].0, "f");
+        assert_eq!(whole.file[0].1[0].filename, "f.txt");
+        assert_eq!(whole.file[0].1[0].content, b"file-bytes");
+        assert_eq!(one.file[0].1[0].content, b"file-bytes");
     }
 }
