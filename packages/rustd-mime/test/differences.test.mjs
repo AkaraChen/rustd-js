@@ -116,6 +116,27 @@ test('readForm file over maxMemory throws instead of Go disk spill (checkpoint 2
   assert.equal(kept.readForm(0).file.z[0].content.length, 0);
 });
 
+test('readForm 1-byte and mid-boundary feeds match whole-body (checkpoint 27)', () => {
+  assert.equal(typeof api.MultipartReader.prototype.readForm, 'function');
+  const w = new api.MultipartWriter({ boundary: 'b' });
+  w.writeField('title', 'hello');
+  const file = w.createFormFile('f', 'f.txt');
+  file.write(Buffer.from('file-bytes'));
+  file.end();
+  w.writeField('desc', 'world');
+  const body = w.bytes();
+  const whole = new api.MultipartReader({ boundary: 'b' });
+  whole.write(body);
+  const want = whole.readForm(1 << 20);
+  const one = new api.MultipartReader({ boundary: 'b' });
+  for (let i = 0; i < body.length; i++) one.write(body.subarray(i, i + 1));
+  const got = one.readForm(1 << 20);
+  assert.equal(got.value.title[0], want.value.title[0]);
+  assert.equal(got.value.desc[0], want.value.desc[0]);
+  assert.equal(got.file.f[0].filename, want.file.f[0].filename);
+  assert.deepEqual(Buffer.from(got.file.f[0].content), Buffer.from(want.file.f[0].content));
+});
+
 test('documented Windows registry difference: no extra lookup API', () => {
   assert.equal(typeof api.typeByExtension, 'function');
   assert.equal(api.typeByRegistry, undefined);

@@ -809,6 +809,32 @@ function nativeReadForm(boundary, body, maxMemory = 1 << 20, extra = {}) {
   return reader.readForm(maxMemory);
 }
 
+function oneByteChunks(body) {
+  const chunks = [];
+  for (let i = 0; i < body.length; i++) chunks.push(body.subarray(i, i + 1));
+  return chunks;
+}
+
+function nativeReadFormChunks(boundary, chunks, maxMemory = 1 << 20, extra = {}) {
+  const reader = new MultipartReader({ boundary, ...extra });
+  for (const chunk of chunks) reader.write(chunk);
+  return reader.readForm(maxMemory);
+}
+
+function formSnapshot(form) {
+  const value = {};
+  for (const key of Object.keys(form.value).sort()) value[key] = form.value[key];
+  const file = {};
+  for (const key of Object.keys(form.file).sort()) {
+    file[key] = form.file[key].map((f) => ({
+      filename: f.filename,
+      size: f.size,
+      contentHex: hex(f.content),
+    }));
+  }
+  return { value, file };
+}
+
 function assertFormValuesMatch(form, goForm) {
   assert.equal(goForm.error ?? '', '');
   const keys = Object.keys(form.value).sort();
@@ -1007,4 +1033,133 @@ test('readForm 1000 files succeeds vs Go; 1001 is MessageTooLargeError', () => {
   const go1001 = goReadForm(body1001, 'b');
   assert.equal(go1001.error, 'multipart: message too large');
   assert.throws(() => nativeReadForm('b', body1001), MessageTooLargeError);
+});
+
+function assertFormMatch(form, goForm) {
+  assertFormValuesMatch(form, goForm);
+  const keys = Object.keys(form.file).sort();
+  assert.deepEqual(keys, Object.keys(goForm.file).sort());
+  for (const key of keys) {
+    assert.equal(form.file[key].length, goForm.file[key].length, `file[${key}].length`);
+    for (let i = 0; i < form.file[key].length; i++) {
+      assertFormFileMatch(form, goForm, key, i);
+    }
+  }
+}
+
+function assertReadFormFeedsMatchGo(boundary, body, maxMemory = 1 << 20) {
+  const goForm = goReadForm(body, boundary, maxMemory);
+  const midChunks = splitNearBoundary(body, boundary, MID_BOUNDARY_SEED);
+  assert.ok(midChunks.length > 1, 'mid-boundary feed actually splits the body');
+  assert.ok(midChunks.some((c) => c.length > 1), 'mid-boundary feed uses multi-byte chunks');
+  const whole = nativeReadForm(boundary, body, maxMemory);
+  const one = nativeReadFormChunks(boundary, oneByteChunks(body), maxMemory);
+  const mid = nativeReadFormChunks(boundary, midChunks, maxMemory);
+  assertFormMatch(whole, goForm);
+  assert.deepEqual(formSnapshot(one), formSnapshot(whole));
+  assert.deepEqual(formSnapshot(mid), formSnapshot(whole));
+  return whole;
+}
+
+function assertReadFormFeedsThrow(boundary, body, message) {
+  const run = (chunks) => {
+    const reader = new MultipartReader({ boundary });
+    for (const chunk of chunks) reader.write(chunk);
+    reader.readForm(1 << 20);
+  };
+  assertThrowsMultipart(() => run([body]), message);
+  assertThrowsMultipart(() => run(oneByteChunks(body)), message);
+  if (boundary) {
+    assertThrowsMultipart(
+      () => run(splitNearBoundary(body, boundary, MID_BOUNDARY_SEED)),
+      message,
+    );
+  }
+}
+
+function assertReadFormFeedsEmptyNative(boundary, body, goError) {
+  const goForm = goReadForm(body, boundary);
+  assert.equal(goForm.error, goError);
+  const midChunks = splitNearBoundary(body, boundary, MID_BOUNDARY_SEED);
+  const whole = nativeReadForm(boundary, body);
+  const one = nativeReadFormChunks(boundary, oneByteChunks(body));
+  const mid = nativeReadFormChunks(boundary, midChunks);
+  const empty = formSnapshot(whole);
+  assert.deepEqual(empty, { value: {}, file: {} });
+  assert.deepEqual(formSnapshot(one), empty);
+  assert.deepEqual(formSnapshot(mid), empty);
+}
+
+test('readForm 1-byte and mid-boundary match whole-body for mixed value+file vs Go', () => {
+  const golden = goWrite(
+    [
+      { name: 'title', value: 'hello', mode: 'writeField' },
+      { name: 'f', filename: 'f.txt', value: 'file-bytes', mode: 'createFormFile' },
+      { name: 'desc', value: 'world', mode: 'writeField' },
+    ],
+    'b',
+  );
+  assert.equal(golden.error ?? '', '');
+  const body = unhex(golden.bodyHex);
+  const form = assertReadFormFeedsMatchGo('b', body);
+  assert.equal(form.value.title[0], 'hello');
+  assert.equal(form.value.desc[0], 'world');
+  assert.equal(form.file.f[0].filename, 'f.txt');
+  assert.equal(Buffer.from(form.file.f[0].content).toString(), 'file-bytes');
+});
+
+test('readForm 1-byte and mid-boundary keep fake --b substring in value vs Go', () => {
+  const golden = goWrite([{ name: 'x', value: 'foo--bbar', mode: 'writeField' }], 'b');
+  const body = unhex(golden.bodyHex);
+  const form = assertReadFormFeedsMatchGo('b', body);
+  assert.equal(form.value.x[0], 'foo--bbar');
+});
+
+test('readForm 1-byte and mid-boundary keep fake --b-- bytes in file vs Go', () => {
+  const golden = goWrite(
+    [{ name: 'f', filename: 'f.bin', value: 'aaa--b--bbb', mode: 'createFormFile' }],
+    'b',
+  );
+  const body = unhex(golden.bodyHex);
+  const form = assertReadFormFeedsMatchGo('b', body);
+  assert.equal(Buffer.from(form.file.f[0].content).toString(), 'aaa--b--bbb');
+});
+
+test('readForm missing-colon header matches Go on whole/1-byte/mid-boundary feeds', () => {
+  const body = Buffer.from('--b\r\nNotAHeader\r\n\r\nx\r\n--b--\r\n');
+  const goForm = goReadForm(body, 'b');
+  assert.equal(goForm.error, 'malformed MIME header: missing colon: "NotAHeader"');
+  assertReadFormFeedsThrow('b', body, goForm.error);
+});
+
+test('readForm header without blank CRLF matches Go missing-colon on all feeds', () => {
+  const body = Buffer.from('--b\r\nContent-Disposition: form-data; name="x"\r\nhello\r\n--b--\r\n');
+  const goForm = goReadForm(body, 'b');
+  assert.equal(goForm.error, 'malformed MIME header: missing colon: "hello"');
+  assertReadFormFeedsThrow('b', body, goForm.error);
+});
+
+test('readForm empty boundary matches Go on whole and 1-byte feeds', () => {
+  const body = Buffer.from('--\r\nContent-Disposition: form-data; name="x"\r\n\r\nhi\r\n----\r\n');
+  const goForm = goReadForm(body, '');
+  assert.equal(goForm.error, 'multipart: boundary is empty');
+  assertReadFormFeedsThrow('', body, goForm.error);
+});
+
+test('readForm truncated is empty here; Go unexpected EOF; feeds agree', () => {
+  const truncated = Buffer.from(
+    '\r\nThis is a multi-part message.  This line is ignored.\r\n--MyBoundary\r\nContent-Disposition: form-data; name="x"\r\n\r\nOh no, premature EOF!\r\n',
+  );
+  assertReadFormFeedsEmptyNative('MyBoundary', truncated, 'unexpected EOF');
+  const noCloser = Buffer.from('--b\r\nContent-Disposition: form-data; name="a"\r\n\r\nhello');
+  assertReadFormFeedsEmptyNative('b', noCloser, 'unexpected EOF');
+});
+
+test('readForm missing Content-Disposition is skipped vs Go; feeds agree', () => {
+  const body = Buffer.from(
+    '--b\r\nContent-Type: text/plain\r\n\r\nhello\r\n--b\r\nContent-Disposition: form-data; name="keep"\r\n\r\nyes\r\n--b--\r\n',
+  );
+  const form = assertReadFormFeedsMatchGo('b', body);
+  assert.equal(form.value.keep[0], 'yes');
+  assert.equal(form.value.hello, undefined);
 });
