@@ -1,6 +1,8 @@
 import {
   MailError, MailHeader, MailAddress, MailMessage, AddressParser,
   readMessage, parseAddress, parseAddressList, parseDate,
+  SmtpError, FeatureNotBuiltError, SmtpClient, SmtpDataWriter,
+  plainAuth, loginAuth, cramMd5Auth, sendMail,
 } from '../index.js';
 
 const header: MailHeader = new MailHeader({ From: ['a@b.com'] });
@@ -15,7 +17,22 @@ const parsed: MailAddress = new AddressParser().parse('a@b.com');
 header.setDate(date);
 const err: MailError = new MailError('mail: x', 'header');
 const kind: 'header' | 'address' | 'date' | 'syntax' = err.kind;
-void [header, addr, list, date, msg, body, text, media, parsed, kind, MailAddress];
+const auth = plainAuth({ username: 'u', password: 'p', host: 'localhost' });
+const smtpErr: SmtpError = new SmtpError('535 no', { code: 535, command: 'AUTH', serverMessage: 'no' });
+const feat: FeatureNotBuiltError = new FeatureNotBuiltError('smtp: STARTTLS handshake not built', { command: 'STARTTLS' });
+void sendMail('127.0.0.1:25', auth, 'a@b.com', ['b@c.com'], 'Subject: x\r\n\r\nHi\r\n');
+void SmtpClient.dial('127.0.0.1:25').then(async (c) => {
+  await c.hello();
+  await c.mail('a@b.com');
+  await c.rcpt('b@c.com');
+  const w: SmtpDataWriter = await c.data();
+  await w.write('x');
+  await w.close();
+  await c.quit();
+  loginAuth({ username: 'u', password: 'p', host: 'localhost' });
+  cramMd5Auth('u', 's');
+});
+void [header, addr, list, date, msg, body, text, media, parsed, kind, MailAddress, smtpErr, feat];
 // @ts-expect-error bytes require Uint8Array or string
 readMessage(1);
 // @ts-expect-error kind is a closed union
