@@ -1426,9 +1426,34 @@ fn parse_tag(schema: &Schema) -> (String, String, Vec<String>, &'static str, boo
             } else {
                 name = name_part.to_string();
             }
+        } else if !xmlns.is_empty() {
+            // Go typeinfo: namespace token with empty local is not the schema field name.
+            name.clear();
         }
     }
     (name, xmlns, parents, kind, omitempty, cdata)
+}
+
+/// Go `encoding/xml` typeinfo checks used by Marshal (`xml:"url local"`).
+fn marshal_tag_error(
+    schema: &Schema,
+) -> Result<(String, String, Vec<String>, &'static str, bool, bool), XmlError> {
+    let (name, xmlns, parents, kind, omitempty, cdata) = parse_tag(schema);
+    if !parents.is_empty() && kind == "attr" {
+        return Err(XmlError::other("xml: a>b chain not valid with attr flag"));
+    }
+    if !xmlns.is_empty() && name.is_empty() {
+        let tag = schema.tag.as_deref().unwrap_or("");
+        let field = if schema.name.is_empty() {
+            "root"
+        } else {
+            schema.name.as_str()
+        };
+        return Err(XmlError::other(format!(
+            "xml: namespace without name in field {field}: \"{tag}\""
+        )));
+    }
+    Ok((name, xmlns, parents, kind, omitempty, cdata))
 }
 
 fn is_empty_json(v: &Value) -> bool {
@@ -1557,7 +1582,7 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
         }
         return Ok(());
     }
-    let (name, xmlns, parents, kind, omitempty, _) = parse_tag(schema);
+    let (name, xmlns, parents, kind, omitempty, _) = marshal_tag_error(schema)?;
     if omitempty && is_empty_json(value) {
         return Ok(());
     }
@@ -1584,20 +1609,13 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
         )?;
     }
     let mut attrs = Vec::new();
-    if !xmlns.is_empty() {
-        attrs.push(Attr {
-            name: Name {
-                space: String::new(),
-                local: "xmlns".into(),
-            },
-            value: xmlns.clone(),
-        });
-    }
+    // Default xmlns comes from write_start(name.space), matching Go printer.writeStart.
+    // Namespaced attributes use create_attr_prefix (`xmlns:url="url" url:local=`).
     if let Some(children) = &schema.children {
         let obj = value.as_object();
         for child in children {
             let cv = obj.and_then(|o| o.get(&child_key(child))).unwrap_or(&Value::Null);
-            let (_, _, _, ck, omit, _) = parse_tag(child);
+            let (aname, ax, _, ck, omit, _) = marshal_tag_error(child)?;
             if omit && is_empty_json(cv) {
                 continue;
             }
@@ -1605,7 +1623,6 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
                 if cv.is_null() {
                     continue;
                 }
-                let (aname, ax, _, _, _, _) = parse_tag(child);
                 attrs.push(Attr {
                     name: Name {
                         space: ax,
@@ -1622,7 +1639,7 @@ fn marshal_value(enc: &mut Encoder, schema: &Schema, value: &Value) -> Result<()
         enc.write_start(&start_name, &attrs)?;
         for child in children {
             let cv = obj.and_then(|o| o.get(&child_key(child))).unwrap_or(&Value::Null);
-            let (_, _, _, ck, omit, cdata) = parse_tag(child);
+            let (_, _, _, ck, omit, cdata) = marshal_tag_error(child)?;
             if omit && is_empty_json(cv) {
                 continue;
             }
