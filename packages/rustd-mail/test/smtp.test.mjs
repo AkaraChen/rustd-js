@@ -355,6 +355,38 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-mail-ehlo-size' || c.id === 'client-mail-8bitmime') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('localhost');
+      await client.mail('user@gmail.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-mail-smtputf8-emoji' || c.id === 'client-mail-8bit-smtputf8-emoji') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('localhost');
+      await client.mail('user+📧@gmail.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-starttls-502') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.hello('customhost');
+      await client.startTls();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -367,7 +399,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 30, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 35, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
