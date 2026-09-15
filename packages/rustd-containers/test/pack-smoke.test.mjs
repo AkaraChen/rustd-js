@@ -1,3 +1,4 @@
+import { hostBinaryName } from '../../../scripts/native-test-tools.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync, cpSync, mkdirSync, rmSync, statSync, existsSync } from 'node:fs';
@@ -36,8 +37,7 @@ test('host platform .node is present, stripped, and ≤2MB decimal', () => {
   const binary = findBinary();
   assert.ok(binary, 'missing platform .node; run pnpm --filter rustd-containers build');
   const bytes = statSync(join(pkgDir, binary)).size;
-  const suffix = process.platform === 'linux' ? '-gnu' : process.platform === 'win32' ? '-msvc' : '';
-  assert.equal(binary, `rustd-containers.${process.platform}-${process.arch}${suffix}.node`);
+  assert.equal(binary, hostBinaryName(manifest.napi.binaryName));
   assert.ok(bytes > 0);
   assert.ok(bytes <= SIZE_CAP, `${binary}: ${bytes} > ${SIZE_CAP}`);
   assertStripped(join(pkgDir, binary));
