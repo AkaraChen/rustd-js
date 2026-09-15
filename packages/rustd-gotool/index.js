@@ -82,6 +82,9 @@ function constToFloat(v) {
 function constToComplex(v) {
   return new GoConstValue(binding.constToComplex(asConst(v, 'v')._n));
 }
+function constToIntValue(v) {
+  return new GoConstValue(binding.constToIntValue(asConst(v, 'v')._n));
+}
 function constToInt(v) {
   const r = binding.constToInt(asConst(v, 'v')._n);
   return [r.value, r.ok];
@@ -409,6 +412,7 @@ module.exports.constMakeBool = constMakeBool;
 module.exports.constMakeFromLiteral = constMakeFromLiteral;
 module.exports.constToFloat = constToFloat;
 module.exports.constToComplex = constToComplex;
+module.exports.constToIntValue = constToIntValue;
 module.exports.constToInt = constToInt;
 module.exports.constBoolVal = constBoolVal;
 module.exports.constToString = constToString;

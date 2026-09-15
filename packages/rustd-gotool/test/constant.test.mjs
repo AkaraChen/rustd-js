@@ -10,6 +10,7 @@ import {
   constMakeFromLiteral,
   constToFloat,
   constToComplex,
+  constToIntValue,
   constToInt,
   constToString,
   constBoolVal,
@@ -1659,9 +1660,22 @@ function makeConvSrc(c) {
   }
 }
 
+function convertValue(src, convert) {
+  switch (convert) {
+    case 'ToFloat':
+      return constToFloat(src);
+    case 'ToComplex':
+      return constToComplex(src);
+    case 'ToInt':
+      return constToIntValue(src);
+    default:
+      throw new Error(`unknown convert ${convert}`);
+  }
+}
+
 function evaluateConv(c) {
   const src = makeConvSrc(c);
-  const r = c.convert === 'ToFloat' ? constToFloat(src) : constToComplex(src);
+  const r = convertValue(src, c.convert);
   const re = constReal(r);
   const im = constImag(r);
   const [f] = constFloat64Val(r);
@@ -1775,4 +1789,97 @@ test('constToFloat/constToComplex vs Go: Int→Float, 0i unwraps, 1i stays Unkno
   assert.equal(constToFloat(emptyChar).kind, 'Unknown');
   assert.throws(() => constToFloat(1), TypeError);
   assert.throws(() => constToComplex(1), TypeError);
+});
+
+test('Go 1.24 regenerates committed go/constant ToInt fixtures; native matches every case', () => {
+  const generated = go(['-constant-toint']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-toint-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go ToInt fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-toint');
+  assert.ok(fixture.cases.length >= 44, `too few ToInt cases: ${fixture.cases.length}`);
+  const ints = fixture.cases.filter((c) => c.kind === 'Int');
+  const unknownOut = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(ints.length >= 3, `need Int results, got ${ints.length}`);
+  assert.ok(unknownOut.length >= 3, `need Unknown results, got ${unknownOut.length}`);
+  const malformed = fixture.cases.filter((c) => ['1ii', 'i', 'xyz', `"\\z"`, `'ab'`, `''`].includes(c.x) || c.form === 'unknown');
+  assert.ok(malformed.length >= 3, `need malformed ToInt cases, got ${malformed.length}`);
+  const intValued = fixture.cases.filter((c) => c.form === 'quo' && c.kind === 'Int');
+  assert.ok(intValued.length >= 3, `need integer-valued Float ToInt, got ${intValued.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateConv(c);
+    assert.equal(got.origKind, c.origKind, `${c.id} origKind`);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.sign, c.sign, `${c.id} sign`);
+    assert.equal(got.reKind, c.reKind, `${c.id} reKind`);
+    assert.equal(got.reExact, c.reExact, `${c.id} reExact`);
+    assert.equal(got.imKind, c.imKind, `${c.id} imKind`);
+    assert.equal(got.imExact, c.imExact, `${c.id} imExact`);
+    assert.equal(got.f64Bits, c.f64Bits, `${c.id} f64Bits`);
+    assert.equal(got.f64Exact, c.f64Exact, `${c.id} f64Exact`);
+  }
+});
+
+test('JS ToInt extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { convert: 'ToInt', form: 'int', x: '5', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'quo', x: '5', y: '1', s: '0' },
+    { convert: 'ToInt', form: 'quo', x: '1', y: '3', s: '0' },
+    { convert: 'ToInt', form: 'char', x: `'π'`, y: '0', s: '0' },
+    { convert: 'ToInt', form: 'imag', x: '0i', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'string', x: '"', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'bool', x: 'false', y: '0', s: '0' },
+    { convert: 'ToInt', form: 'sum', x: '-1', y: '0i', s: '0' },
+  ];
+  const cases = extras.map((c, i) => evaluateConv({ id: `js-toint-${i}`, ...c }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-toint', cases };
+  const verified = go(['-verify-constant-toint'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 8 gotool constant-toint cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-an-int';
+  const rejected = go(['-verify-constant-toint'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-toint'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-toint', cases: [],
+  })).status, 0);
+});
+
+test('constToIntValue vs Go: Int identity, 4/2 unwraps, 1/2 Unknown, 0i→0, Bool/String Unknown', () => {
+  const one = constMakeInt64(1n);
+  const half = constBinaryOp(TOKEN.QUO, one, constMakeInt64(2n));
+  const two = constBinaryOp(TOKEN.QUO, constMakeInt64(4n), constMakeInt64(2n));
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const zeroI = constMakeFromLiteral('0i', TOKEN.IMAG, 0);
+  const t = constMakeBool(true);
+  const s = constMakeFromLiteral('"a"', TOKEN.STRING, 0);
+  const ch = constMakeFromLiteral("'a'", TOKEN.CHAR, 0);
+  const leftover = constMakeFromLiteral("'ab'", TOKEN.CHAR, 0);
+  const unk = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
+  const emptyChar = constMakeFromLiteral("''", TOKEN.CHAR, 0);
+  assert.equal(constToIntValue(one).kind, 'Int');
+  assert.equal(constToIntValue(one).toString(), '1');
+  assert.equal(constToIntValue(half).kind, 'Unknown');
+  assert.equal(constToIntValue(two).kind, 'Int');
+  assert.equal(constToIntValue(two).toString(), '2');
+  assert.equal(constToIntValue(i).kind, 'Unknown');
+  assert.equal(constToIntValue(zeroI).kind, 'Int');
+  assert.equal(constToIntValue(zeroI).toString(), '0');
+  assert.equal(constToIntValue(t).kind, 'Unknown');
+  assert.equal(constToIntValue(s).kind, 'Unknown');
+  assert.equal(constToIntValue(ch).toString(), '97');
+  assert.equal(leftover.kind, 'Int');
+  assert.equal(constToIntValue(leftover).toString(), '97');
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(constToIntValue(unk).kind, 'Unknown');
+  assert.equal(emptyChar.kind, 'Unknown');
+  assert.equal(constToIntValue(emptyChar).kind, 'Unknown');
+  const [iv, ok] = constToInt(constToIntValue(one));
+  assert.equal(iv, 1n);
+  assert.equal(ok, true);
+  assert.throws(() => constToIntValue(1), TypeError);
 });
