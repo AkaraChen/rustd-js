@@ -6,9 +6,11 @@ import { resolve } from 'node:path';
 import {
   GoConstValue,
   constMakeInt64,
+  constMakeBool,
   constMakeFromLiteral,
   constToInt,
   constToString,
+  constBoolVal,
   constFloat64Val,
   constCompare,
   constSign,
@@ -291,7 +293,7 @@ test('constUnaryOp/constShift Unknown, invalid op/prec/s, AND_NOT vs SHL BinaryO
   assert.equal(constUnaryOp(TOKEN.SUB, constMakeInt64(-(1n << 63n)), 0).toString(), (1n << 63n).toString());
   assert.equal(constShift(TOKEN.SHR, constMakeInt64(-1n), 64n).toString(), '-1');
   assert.equal(constBinaryOp(TOKEN.AND_NOT, constMakeInt64(7n), one).toString(), '6');
-  assert.throws(() => constUnaryOp(TOKEN.NOT, one, 0), /ADD/);
+  assert.throws(() => constUnaryOp(TOKEN.NOT, one, 0), /NOT requires Bool/);
   assert.throws(() => constUnaryOp(TOKEN.XOR, one, -1), TypeError);
   assert.throws(() => constUnaryOp(TOKEN.XOR, one, 1.5), TypeError);
   assert.throws(() => constShift(TOKEN.ADD, one, 1n), /SHL/);
@@ -1066,4 +1068,120 @@ test('constMakeInt64 rejects non-bigint and values outside int64', () => {
   assert.ok(min instanceof GoConstValue);
   assert.equal(min.kind, 'Int');
   assert.equal(constToInt(min)[0], -(1n << 63n));
+});
+
+const BOOL_OP_TOK = { MAKE: 0, NOT: TOKEN.NOT, LAND: TOKEN.LAND, LOR: TOKEN.LOR, EQL: TOKEN.EQL, NEQ: TOKEN.NEQ };
+
+function boolSrc(name) {
+  if (name === 'true') return constMakeBool(true);
+  if (name === 'false') return constMakeBool(false);
+  if (name === 'unknown') return constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+  throw new Error(`unknown bool src ${name}`);
+}
+
+function evaluateBool(c) {
+  const x = boolSrc(c.x);
+  let r;
+  if (c.form === 'make') r = x;
+  else if (c.form === 'not') r = constUnaryOp(TOKEN.NOT, x, 0);
+  else if (c.form === 'land') r = constBinaryOp(TOKEN.LAND, x, boolSrc(c.y));
+  else if (c.form === 'lor') r = constBinaryOp(TOKEN.LOR, x, boolSrc(c.y));
+  else if (c.form === 'eql' || c.form === 'neq') {
+    const y = boolSrc(c.y);
+    // Go Compare(unknown, EQL|NEQ, _) is false (unknownVal short-circuit), then MakeBool.
+    if (x.kind === 'Unknown' || y.kind === 'Unknown') r = constMakeBool(false);
+    else {
+      const [bx] = constBoolVal(x);
+      const [by] = constBoolVal(y);
+      r = constMakeBool(c.form === 'eql' ? bx === by : bx !== by);
+    }
+  } else throw new Error(`unknown form ${c.form}`);
+  const [boolVal, boolValOk] = constBoolVal(r);
+  return { ...c, kind: r.kind, exact: r.toString(), boolVal, boolValOk };
+}
+
+test('Go 1.24 regenerates committed go/constant Bool fixtures; native matches every case', () => {
+  const generated = go(['-constant-bool']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-bool-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go Bool fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-bool');
+  assert.ok(fixture.cases.length >= 42, `too few Bool cases: ${fixture.cases.length}`);
+  const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(unknown.length >= 3, `need Unknown Bool cases, got ${unknown.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateBool(c);
+    assert.equal(got.opTok, BOOL_OP_TOK[c.op], `${c.id} opTok`);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.boolVal, c.boolVal, `${c.id} boolVal`);
+    assert.equal(got.boolValOk, c.boolValOk, `${c.id} boolValOk`);
+  }
+});
+
+test('JS Bool extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    ['make', 'true', 'false'],
+    ['make', 'false', 'false'],
+    ['not', 'true', 'false'],
+    ['not', 'unknown', 'false'],
+    ['land', 'true', 'false'],
+    ['lor', 'false', 'false'],
+    ['eql', 'true', 'true'],
+    ['neq', 'true', 'false'],
+    ['eql', 'unknown', 'false'],
+    ['neq', 'unknown', 'true'],
+    ['land', 'unknown', 'true'],
+    ['lor', 'unknown', 'unknown'],
+  ];
+  const cases = extras.map(([form, x, y], i) => {
+    const r = evaluateBool({ form, x, y, op: form.toUpperCase() === 'MAKE' ? 'MAKE' : form.toUpperCase() });
+    return {
+      id: `js-bool-${i}`, form, x, y, op: r.op ?? (form === 'make' ? 'MAKE' : form.toUpperCase()),
+      opTok: BOOL_OP_TOK[form === 'make' ? 'MAKE' : form.toUpperCase()],
+      kind: r.kind, exact: r.exact, boolVal: r.boolVal, boolValOk: r.boolValOk,
+    };
+  });
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-bool', cases };
+  const verified = go(['-verify-constant-bool'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 12 gotool constant-bool cases/);
+  const broken = structuredClone(packet);
+  broken.cases[1].exact = 'not-a-bool';
+  const rejected = go(['-verify-constant-bool'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 1/);
+  assert.notEqual(go(['-verify-constant-bool'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-bool', cases: [],
+  })).status, 0);
+});
+
+test('constMakeBool / BoolVal / NOT / LAND / LOR vs Go; malformed throw', () => {
+  const t = constMakeBool(true);
+  const f = constMakeBool(false);
+  const unk = constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+  const one = constMakeInt64(1n);
+  assert.equal(t.kind, 'Bool');
+  assert.equal(t.toString(), 'true');
+  assert.deepEqual(constBoolVal(t), [true, true]);
+  assert.deepEqual(constBoolVal(f), [false, true]);
+  assert.deepEqual(constBoolVal(unk), [false, true]);
+  assert.deepEqual(constBoolVal(one), [false, false]);
+  assert.deepEqual(constToString(t), ['', false]);
+  assert.equal(constUnaryOp(TOKEN.NOT, t, 0).toString(), 'false');
+  assert.equal(constUnaryOp(TOKEN.NOT, f, 0).toString(), 'true');
+  assert.equal(constUnaryOp(TOKEN.NOT, unk, 0).kind, 'Unknown');
+  assert.equal(constBinaryOp(TOKEN.LAND, t, f).toString(), 'false');
+  assert.equal(constBinaryOp(TOKEN.LOR, t, f).toString(), 'true');
+  assert.equal(constBinaryOp(TOKEN.LAND, t, unk).kind, 'Unknown');
+  assert.throws(() => constMakeBool('true'), TypeError);
+  assert.throws(() => constMakeBool(1), TypeError);
+  assert.throws(() => constUnaryOp(TOKEN.NOT, one, 0), /NOT requires Bool/);
+  assert.throws(() => constBinaryOp(TOKEN.LAND, one, t), /LAND\/LOR require Bool/);
+  assert.throws(() => constBinaryOp(TOKEN.ADD, t, f), /LAND or LOR/);
+  assert.throws(() => constBinaryOp(TOKEN.AND, t, t), /LAND or LOR/);
+  assert.throws(() => constSign(t), /numeric or Unknown/);
+  assert.throws(() => constCompare(t, f), /Int or Float/);
 });

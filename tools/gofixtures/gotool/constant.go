@@ -1557,3 +1557,187 @@ func verifyConstantStringLiteral(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-string-literal cases\n", len(packet.Cases))
 }
+
+type ConstBoolCase struct {
+	ID        string `json:"id"`
+	Form      string `json:"form"`
+	X         string `json:"x"`
+	Y         string `json:"y"`
+	Op        string `json:"op"`
+	OpTok     int    `json:"opTok"`
+	Kind      string `json:"kind"`
+	Exact     string `json:"exact"`
+	BoolVal   bool   `json:"boolVal"`
+	BoolValOk bool   `json:"boolValOk"`
+}
+
+type ConstBoolPacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Slice   string          `json:"slice"`
+	Cases   []ConstBoolCase `json:"cases"`
+}
+
+func boolValOK(v constant.Value) (b bool, ok bool) {
+	defer func() {
+		if recover() != nil {
+			b, ok = false, false
+		}
+	}()
+	return constant.BoolVal(v), true
+}
+
+func makeBoolSrc(name string) (constant.Value, error) {
+	switch name {
+	case "true":
+		return constant.MakeBool(true), nil
+	case "false":
+		return constant.MakeBool(false), nil
+	case "unknown":
+		return constant.MakeUnknown(), nil
+	default:
+		return nil, fmt.Errorf("unknown bool src %q", name)
+	}
+}
+
+func evalBool(form, xName, yName string) (ConstBoolCase, error) {
+	c := ConstBoolCase{Form: form, X: xName, Y: yName}
+	vx, err := makeBoolSrc(xName)
+	if err != nil {
+		return c, err
+	}
+	var v constant.Value
+	switch form {
+	case "make":
+		c.Op = "MAKE"
+		c.OpTok = 0
+		v = vx
+	case "not":
+		c.Op = "NOT"
+		c.OpTok = int(token.NOT)
+		v = constant.UnaryOp(token.NOT, vx, 0)
+	case "land":
+		vy, err := makeBoolSrc(yName)
+		if err != nil {
+			return c, err
+		}
+		c.Op = "LAND"
+		c.OpTok = int(token.LAND)
+		v = constant.BinaryOp(vx, token.LAND, vy)
+	case "lor":
+		vy, err := makeBoolSrc(yName)
+		if err != nil {
+			return c, err
+		}
+		c.Op = "LOR"
+		c.OpTok = int(token.LOR)
+		v = constant.BinaryOp(vx, token.LOR, vy)
+	case "eql":
+		vy, err := makeBoolSrc(yName)
+		if err != nil {
+			return c, err
+		}
+		c.Op = "EQL"
+		c.OpTok = int(token.EQL)
+		v = constant.MakeBool(constant.Compare(vx, token.EQL, vy))
+	case "neq":
+		vy, err := makeBoolSrc(yName)
+		if err != nil {
+			return c, err
+		}
+		c.Op = "NEQ"
+		c.OpTok = int(token.NEQ)
+		v = constant.MakeBool(constant.Compare(vx, token.NEQ, vy))
+	default:
+		return c, fmt.Errorf("unknown form %q", form)
+	}
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	c.BoolVal, c.BoolValOk = boolValOK(v)
+	return c, nil
+}
+
+func boolSrcNames() []string {
+	return []string{"true", "false", "unknown"}
+}
+
+func dumpConstantBool(w io.Writer) {
+	packet := ConstBoolPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-bool",
+	}
+	names := boolSrcNames()
+	for i, x := range names {
+		c, err := evalBool("make", x, "false")
+		if err != nil {
+			fail(err)
+		}
+		c.ID = fmt.Sprintf("go-bool-make-%d", i)
+		packet.Cases = append(packet.Cases, c)
+		c, err = evalBool("not", x, "false")
+		if err != nil {
+			fail(err)
+		}
+		c.ID = fmt.Sprintf("go-bool-not-%d", i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	for _, form := range []string{"land", "lor", "eql", "neq"} {
+		for i, x := range names {
+			for j, y := range names {
+				c, err := evalBool(form, x, y)
+				if err != nil {
+					fail(err)
+				}
+				c.ID = fmt.Sprintf("go-bool-%s-%d-%d", form, i, j)
+				packet.Cases = append(packet.Cases, c)
+			}
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantBool(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstBoolPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-bool" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-bool packet header or empty cases"))
+	}
+	tokOf := map[string]int{
+		"MAKE": 0, "NOT": int(token.NOT), "LAND": int(token.LAND), "LOR": int(token.LOR),
+		"EQL": int(token.EQL), "NEQ": int(token.NEQ),
+	}
+	for i, c := range packet.Cases {
+		wantTok, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != wantTok {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, wantTok))
+		}
+		got, err := evalBool(c.Form, c.X, c.Y)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.BoolVal != c.BoolVal || got.BoolValOk != c.BoolValOk {
+			fail(fmt.Errorf("mismatch case %d id=%s form=%s x=%s y=%s: go kind=%s exact=%s boolVal=%v ok=%v got kind=%s exact=%s boolVal=%v ok=%v",
+				i, c.ID, c.Form, c.X, c.Y, got.Kind, got.Exact, got.BoolVal, got.BoolValOk,
+				c.Kind, c.Exact, c.BoolVal, c.BoolValOk))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-bool cases\n", len(packet.Cases))
+}

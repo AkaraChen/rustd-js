@@ -11,9 +11,13 @@ export class GoConstValue {
   toString(): string;
 }
 export function constMakeInt64(v: bigint): GoConstValue;
+/** Go `MakeBool`. */
+export function constMakeBool(v: boolean): GoConstValue;
 /** Go `MakeFromLiteral` for INT/FLOAT/IMAG/CHAR/STRING. Invalid lit → Unknown. CHAR is Int. IMAG is Complex. STRING is Unquote. `prec` must be 0. */
 export function constMakeFromLiteral(lit: string, tok: number, prec: number): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
+/** Go `BoolVal`. Bool → `[b, true]`; Unknown → `[false, true]`; other kinds panic in Go → `[false, false]`. */
+export function constBoolVal(v: GoConstValue): [boolean, boolean];
 /** Go `StringVal`. String → unquoted text; Int/Float/Complex would panic → `["", false]`; Unknown → `["", true]`. */
 export function constToString(v: GoConstValue): [string, boolean];
 /** Go `Float64Val` for Int/Float/Unknown. Bits match IEEE-754; Unknown is `[0, false]`. Complex panics in Go → `[0, false]`. */
@@ -29,13 +33,15 @@ export function constBitLen(v: GoConstValue): number;
 /**
  * Int ADD/SUB/MUL/QUO/REM/AND/OR/XOR/AND_NOT.
  * Float (and mixed Int/Float) ADD/SUB/MUL/QUO.
+ * Bool LAND/LOR. Unknown operand → Unknown.
  * QUO of Ints is Float (`n` / `n/d` ExactString). Integer-valued Float stays Float.
  * QUO/REM by zero → Unknown. REM/AND/OR/XOR/AND_NOT on Float throw.
+ * Mixed Bool+numeric LAND/LOR throw (Go `match` would duplicate the Bool; we reject).
  */
 export function constBinaryOp(op: number, x: GoConstValue, y: GoConstValue): GoConstValue;
 /**
  * Int ADD/SUB/XOR. Float ADD/SUB (identity / Neg via `big.Rat`).
- * XOR requires Int. `prec` is Go XOR width in bits; 0 = unlimited.
+ * Bool NOT. XOR requires Int. `prec` is Go XOR width in bits; 0 = unlimited.
  */
 export function constUnaryOp(op: number, y: GoConstValue, prec: number): GoConstValue;
 /** Int SHL/SHR. `s` is a non-negative bigint count (Go `uint`). */
