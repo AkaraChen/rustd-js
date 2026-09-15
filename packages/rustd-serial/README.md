@@ -88,7 +88,10 @@ hold file descriptors.
   StructuralError and arbitrary OID arcs stay aligned.
 - XML mapping uses an explicit `XmlSchema` (`kind` discriminant) instead of
   Go struct tags. `tag` / `path` still accept Go-style `name,attr` and
-  `a>b>c` strings. `,cdata` is a `kind: 'chardata'` field with `tag: ',cdata'`
+  `a>b>c` strings. `tag: 'url local'` / `tag: 'url local,attr'` is Go's
+  namespace-then-local token: elements get a default `xmlns`, attributes get
+  `createAttrPrefix` (`xmlns:url="url" url:local=`). `,cdata` is a
+  `kind: 'chardata'` field with `tag: ',cdata'`
   (no extra schema kind): marshal wraps text in `<![CDATA[...]]>` and splits
   on `]]>` the same way as Go `emitCDATA`. Repeated child elements become arrays.
 - `CharsetReader` runs in JavaScript (`TextDecoder` by default) and feeds
@@ -109,9 +112,9 @@ hold file descriptors.
 
 ## Size
 
-Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-14): **701,056 bytes** (issue cap 2 MB).
+Local Linux x64 GNU release + strip, Rust 1.97.1 (2026-09-15): **703,136 bytes** (issue cap 2 MB).
 
 ```text
 $ ls -l packages/rustd-serial/*.node
--rwxrwxr-x 1 akrc akrc 701056 Sep 14 18:00 packages/rustd-serial/rustd-serial.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 703136 Sep 15 11:08 packages/rustd-serial/rustd-serial.linux-x64-gnu.node
 ```
