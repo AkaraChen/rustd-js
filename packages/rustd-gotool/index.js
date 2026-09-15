@@ -88,6 +88,12 @@ function constCompare(x, y) {
 function constSign(v) {
   return binding.constSign(asConst(v, 'v')._n);
 }
+function constReal(v) {
+  return new GoConstValue(binding.constReal(asConst(v, 'v')._n));
+}
+function constImag(v) {
+  return new GoConstValue(binding.constImag(asConst(v, 'v')._n));
+}
 function constBitLen(v) {
   return binding.constBitLen(asConst(v, 'v')._n);
 }
@@ -384,6 +390,8 @@ module.exports.constToString = constToString;
 module.exports.constFloat64Val = constFloat64Val;
 module.exports.constCompare = constCompare;
 module.exports.constSign = constSign;
+module.exports.constReal = constReal;
+module.exports.constImag = constImag;
 module.exports.constBitLen = constBitLen;
 module.exports.constBinaryOp = constBinaryOp;
 module.exports.constUnaryOp = constUnaryOp;
