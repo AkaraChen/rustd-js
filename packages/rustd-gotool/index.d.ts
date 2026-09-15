@@ -42,6 +42,7 @@ export function constBitLen(v: GoConstValue): number;
 export function constBinaryOp(op: number, x: GoConstValue, y: GoConstValue): GoConstValue;
 /**
  * Int ADD/SUB/XOR. Float ADD/SUB (identity / Neg via `big.Rat`).
+ * Complex ADD/SUB: ADD is identity; SUB is `makeComplex(-re, -im)`.
  * Bool NOT. XOR requires Int. `prec` is Go XOR width in bits; 0 = unlimited.
  */
 export function constUnaryOp(op: number, y: GoConstValue, prec: number): GoConstValue;

@@ -8,7 +8,7 @@ use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 /// Opaque `go/constant.Value` (issue #28). Int is arbitrary-precision.
 /// QUO of Ints is a Float (`big.Rat`); QUO/REM by zero is Unknown.
 /// MakeFromLiteral IMAG is Complex with real Int 0 and imag Float (`im_rat`).
-/// Complex BinaryOp keeps both parts (`int`/`rat` = re, `im_int`/`im_rat` = im).
+/// Complex BinaryOp/UnaryOp keep both parts (`int`/`rat` = re, `im_int`/`im_rat` = im).
 /// MakeFromLiteral STRING is Go `strconv.Unquote` bytes (`str_bytes`).
 /// Bool is `MakeBool` / `BoolVal` (`bool_val`).
 #[napi]
@@ -772,7 +772,8 @@ fn as_shift_count(s: &BigInt) -> Result<u32> {
     Ok(n as u32)
 }
 
-/// Int ADD/SUB/XOR. Float ADD/SUB via `big.Rat` (identity / `Neg`). XOR requires Int.
+/// Int ADD/SUB/XOR. Float ADD/SUB via `big.Rat` (identity / `Neg`).
+/// Complex ADD/SUB: ADD is identity; SUB is `makeComplex(-re, -im)`. XOR requires Int.
 /// Bool NOT. `prec` is Go's XOR width in bits; 0 means unlimited (two's complement).
 #[napi]
 pub fn const_unary_op(op: i32, y: &GoConstValue, prec: i64) -> Result<GoConstValue> {
@@ -825,9 +826,25 @@ pub fn const_unary_op(op: i32, y: &GoConstValue, prec: i64) -> Result<GoConstVal
             _ => unreachable!(),
         };
     }
+    if y.kind == "Complex" {
+        if op == token::XOR {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constUnaryOp XOR requires Int",
+            ));
+        }
+        return match op {
+            token::ADD => Ok(clone_value(y)),
+            token::SUB => Ok(make_complex(
+                const_unary_op(token::SUB, &real_part(y)?, 0)?,
+                const_unary_op(token::SUB, &imag_part(y)?, 0)?,
+            )),
+            _ => unreachable!(),
+        };
+    }
     Err(Error::new(
         Status::InvalidArg,
-        "gotool: y must be Int or Float",
+        "gotool: y must be Int, Float, or Complex",
     ))
 }
 

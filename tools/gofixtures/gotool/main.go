@@ -130,7 +130,26 @@ func main() {
 	verifyConstantBoolFlag := flag.Bool("verify-constant-bool", false, "verify a constant-bool packet read from stdin")
 	constantCBinFlag := flag.Bool("constant-complex-binop", false, "dump go/constant Complex BinaryOp fixtures")
 	verifyConstantCBinFlag := flag.Bool("verify-constant-complex-binop", false, "verify a constant-complex-binop packet read from stdin")
+	constantCUnFlag := flag.Bool("constant-complex-unary", false, "dump go/constant Complex UnaryOp ADD/SUB fixtures")
+	verifyConstantCUnFlag := flag.Bool("verify-constant-complex-unary", false, "verify a constant-complex-unary packet read from stdin")
 	flag.Parse()
+	if *verifyConstantCUnFlag {
+		verifyConstantComplexUnary(os.Stdin)
+		return
+	}
+	if *constantCUnFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantComplexUnary(writer)
+		return
+	}
 	if *verifyConstantCBinFlag {
 		verifyConstantComplexBin(os.Stdin)
 		return

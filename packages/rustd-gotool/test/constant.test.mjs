@@ -1290,3 +1290,105 @@ test('constBinaryOp Complex: 1i*1i, mixed Int, QUO-0 Unknown, REM/AND throw', ()
   assert.throws(() => constBinaryOp(TOKEN.AND, i, one), /ADD, SUB, MUL, or QUO/);
   assert.throws(() => constBinaryOp(TOKEN.XOR, i, i), /ADD, SUB, MUL, or QUO/);
 });
+
+function makeCplxUn(form, x, y) {
+  if (form === 'imag') return constMakeFromLiteral(x, TOKEN.IMAG, 0);
+  if (form === 'unknown') return constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+  if (form === 'sum') return constBinaryOp(TOKEN.ADD, constMakeInt64(BigInt(x)), constMakeFromLiteral(y, TOKEN.IMAG, 0));
+  throw new Error(`unknown complex unary src ${form}`);
+}
+
+function evaluateCUn(c) {
+  const r = constUnaryOp(TOKEN[c.op], makeCplxUn(c.formY, c.yx, c.yy), 0);
+  const re = constReal(r);
+  const im = constImag(r);
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    sign: constSign(r),
+    reKind: re.kind,
+    reExact: re.toString(),
+    imKind: im.kind,
+    imExact: im.toString(),
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant Complex UnaryOp fixtures; native matches every case', () => {
+  const generated = go(['-constant-complex-unary']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-complex-unary-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go Complex UnaryOp fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-complex-unary');
+  assert.ok(fixture.cases.length >= 36, `too few Complex UnaryOp cases: ${fixture.cases.length}`);
+  const unknown = fixture.cases.filter((c) => c.kind === 'Unknown');
+  assert.ok(unknown.length >= 3, `need Unknown Complex UnaryOp cases, got ${unknown.length}`);
+  const complex = fixture.cases.filter((c) => c.kind === 'Complex');
+  assert.ok(complex.length >= 3, `need Complex UnaryOp cases, got ${complex.length}`);
+  const malformed = fixture.cases.filter((c) => c.formY === 'imag' && ['1ii', 'i', 'xyz'].includes(c.yx));
+  assert.ok(malformed.length >= 6, `need malformed IMAG unary cases, got ${malformed.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateCUn(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.sign, c.sign, `${c.id} sign`);
+    assert.equal(got.reKind, c.reKind, `${c.id} reKind`);
+    assert.equal(got.reExact, c.reExact, `${c.id} reExact`);
+    assert.equal(got.imKind, c.imKind, `${c.id} imKind`);
+    assert.equal(got.imExact, c.imExact, `${c.id} imExact`);
+    assert.equal(got.opTok, TOKEN[c.op], `${c.id} opTok`);
+  }
+});
+
+test('JS Complex UnaryOp extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { formY: 'imag', yx: '4i', yy: '0', op: 'ADD' },
+    { formY: 'imag', yx: '4i', yy: '0', op: 'SUB' },
+    { formY: 'sum', yx: '7', yy: '1i', op: 'SUB' },
+    { formY: 'imag', yx: '1ii', yy: '0', op: 'ADD' },
+    { formY: 'imag', yx: 'i', yy: '0', op: 'SUB' },
+    { formY: 'unknown', yx: '0', yy: '0', op: 'SUB' },
+  ];
+  const cases = extras.map((c, i) => evaluateCUn({
+    id: `js-cun-${i}`, opTok: TOKEN[c.op], ...c,
+  }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-complex-unary', cases };
+  const verified = go(['-verify-constant-complex-unary'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 6 gotool constant-complex-unary cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-a-complex';
+  const rejected = go(['-verify-constant-complex-unary'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-complex-unary'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-complex-unary', cases: [],
+  })).status, 0);
+});
+
+test('constUnaryOp Complex: +1i identity, -1i, mixed 1+1i, Unknown, XOR/NOT throw', () => {
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const pos = constUnaryOp(TOKEN.ADD, i, 0);
+  assert.equal(pos.kind, 'Complex');
+  assert.equal(pos.toString(), '(0 + 1i)');
+  assert.equal(constReal(pos).kind, 'Int');
+  assert.equal(constImag(pos).kind, 'Float');
+  const neg = constUnaryOp(TOKEN.SUB, i, 0);
+  assert.equal(neg.toString(), '(0 + -1i)');
+  assert.equal(constSign(neg), -1);
+  assert.equal(constUnaryOp(TOKEN.SUB, neg, 0).toString(), '(0 + 1i)');
+  const mixed = constBinaryOp(TOKEN.ADD, constMakeInt64(1n), i);
+  assert.equal(constUnaryOp(TOKEN.SUB, mixed, 0).toString(), '(-1 + -1i)');
+  const zeroI = constMakeFromLiteral('0i', TOKEN.IMAG, 0);
+  assert.equal(constUnaryOp(TOKEN.SUB, zeroI, 0).toString(), '(0 + 0i)');
+  assert.equal(constSign(constUnaryOp(TOKEN.SUB, zeroI, 0)), 0);
+  const unk = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(constUnaryOp(TOKEN.ADD, unk, 0).kind, 'Unknown');
+  assert.equal(constUnaryOp(TOKEN.SUB, unk, 0).kind, 'Unknown');
+  assert.throws(() => constUnaryOp(TOKEN.XOR, i, 0), /Int/);
+  assert.throws(() => constUnaryOp(TOKEN.XOR, i, 8), /Int/);
+  assert.throws(() => constUnaryOp(TOKEN.NOT, i, 0), /NOT requires Bool/);
+});
