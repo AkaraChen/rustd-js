@@ -206,8 +206,14 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `'\U00000041F'`) is ignored. Backslash + real newline is Unknown; unescaped
   BEL is Int 7. Unclosed `'中` / `'😀` / `'¥` is also U+FFFD; unclosed
   ASCII `"a` / `` `a `` is Unknown. STRING-style `"\x41"` / `"\'"` / `` `\n` ``
-  still UnquoteChar with quote `'`. Combining `'e\u0301'` takes only the first
-  rune (Int 101). `aa` (empty inner), `'''` (inner is `'`), `''中''` (inner
+  still UnquoteChar with quote `'`.   Combining `'e\u0301'` takes only the first
+  rune (Int 101). A grapheme cluster is still that first-rune rule:
+  `'👨‍👩'` / `'☀️'` / `'🇺🇸'` are Int 128104 / 9728 / 127482; leftover
+  after a named/hex/octal escape (`'\n中'` / `'\x41中'` / `'\101中'` /
+  `'\\中'`) is ignored. Unquoted ZWJ/VS16/RI and ZWSP/ZWJ pad around 中
+  wrap-strip to U+FFFD. Unclosed `'\n` / `'\a` / `'\\'`, invalid `'\xGG'` /
+  `'\8中'` / `'\x0'` / `'\u12G4'` / `'\u{1F600}'`, and backslash+TAB are
+  Unknown. `aa` (empty inner), `'''` (inner is `'`), `''中''` (inner
   starts with `'`), uppercase `'\X41'`, incomplete `'\x0g'` / `'\x4_1'` /
   `'\U0010FFF'`, backslash+CR, and JS-style `'\u{41}'` are Unknown.
   Unicode noncharacters (`'\uFFFE'`) are valid runes. STRING uses `strconv.Unquote` (leftover is Unknown:
