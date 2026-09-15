@@ -1334,6 +1334,17 @@ func charLiteralCorpus() []string {
 		"\"a'", "'a\"",
 		// Malformed: hex underscore, backslash+CR, 7-digit \U.
 		`'\x4_1'`, "'\\\r'", `'\U0010FFF'`,
+		// Named/hex/octal leftover: first UnquoteChar wins; UTF-8 tail ignored.
+		`'\nX'`, `'\n中'`, `'\t😀'`, `'\aX'`, `'\x41中'`, `'\101中'`, `'\\中'`,
+		`'\U0001F600x'`, `'\U0001F1FA\U0001F1F8'`,
+		// Grapheme cluster is not a rune: CHAR keeps the first rune only.
+		"'👨\u200D👩'", "'\u2600\uFE0F'", "'🇺🇸'", "'a\u20DD'",
+		// Unquoted ZWJ/VS/RI wrap-strip splits first/last BYTE → U+FFFD.
+		"👨\u200D👩", "\u2600\uFE0F", "🇺🇸",
+		"\u200b中\u200b", "\u200D中\u200D",
+		// Malformed: unclosed named escape, invalid octal/hex/unicode, backslash+TAB.
+		"'\n", `'\a`, `'\xGG'`, `'\8中'`, `'\u{1F600}'`, "'\\\t'", `'\x0'`, `'\u12G4'`,
+		`'\U0001F600`, `'\nX`, `'\x41中`,
 	}
 }
 
