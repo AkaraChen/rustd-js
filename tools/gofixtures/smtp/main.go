@@ -852,6 +852,123 @@ func main() {
 			},
 		},
 		{
+			id:     "client-mail-ehlo-size",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250 SIZE 35651584",
+				"250 Sender OK",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				if err := c.Mail("user@gmail.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-mail-8bitmime",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250 8BITMIME",
+				"250 Sender OK",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				if err := c.Mail("user@gmail.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-mail-smtputf8-emoji",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250 SMTPUTF8",
+				"250 Sender OK",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				if err := c.Mail("user+📧@gmail.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-mail-8bit-smtputf8-emoji",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-8BITMIME\n250 SMTPUTF8",
+				"250 Sender OK",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				if err := c.Mail("user+📧@gmail.com"); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-starttls-502",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"502 Not implemented",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.StartTLS(nil)
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
