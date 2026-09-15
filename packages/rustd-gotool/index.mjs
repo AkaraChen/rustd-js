@@ -7,6 +7,8 @@ export const {
   constMakeInt64,
   constMakeBool,
   constMakeFromLiteral,
+  constToFloat,
+  constToComplex,
   constToInt,
   constToString,
   constBoolVal,
