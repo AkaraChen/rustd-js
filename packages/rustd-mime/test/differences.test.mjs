@@ -93,14 +93,27 @@ test('readForm maxMemory non-file values vs Go (checkpoint 25); file spill later
   const ok = new api.MultipartReader({ boundary: 'b' });
   ok.write(body);
   assert.equal(ok.readForm(failAt).value.largetext[0].length, 1024);
+});
+
+test('readForm file over maxMemory throws instead of Go disk spill (checkpoint 26)', () => {
+  assert.equal(typeof api.MultipartReader.prototype.readForm, 'function');
   const file = new api.MultipartWriter({ boundary: 'b' });
   const part = file.createFormFile('f', 'f.txt');
-  part.write(Buffer.from('hello'));
+  part.write(Buffer.from('x'.repeat(1024)));
   part.end();
+  const body = file.bytes();
+  const over = new api.MultipartReader({ boundary: 'b' });
+  over.write(body);
+  assert.throws(() => over.readForm(1023), api.MessageTooLargeError);
+  const ok = new api.MultipartReader({ boundary: 'b' });
+  ok.write(body);
+  assert.equal(ok.readForm(1024).file.f[0].content.length, 1024);
+  const empty = new api.MultipartWriter({ boundary: 'b' });
+  const emptyPart = empty.createFormFile('z', 'z.txt');
+  emptyPart.end();
   const kept = new api.MultipartReader({ boundary: 'b' });
-  kept.write(file.bytes());
-  const form = kept.readForm(0);
-  assert.equal(Buffer.from(form.file.f[0].content).toString(), 'hello');
+  kept.write(empty.bytes());
+  assert.equal(kept.readForm(0).file.z[0].content.length, 0);
 });
 
 test('documented Windows registry difference: no extra lookup API', () => {
