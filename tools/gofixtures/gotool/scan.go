@@ -193,8 +193,10 @@ func scanCorpus() []struct {
 		if err != nil {
 			fail(err)
 		}
-		add("stdlib-"+filepath.Base(rel), path, src, scanner.ScanComments)
-		add("stdlib-"+filepath.Base(rel)+"-nocomment", path, src, 0)
+		// Fixture filenames must not contain the machine-specific GOROOT prefix.
+		name := filepath.ToSlash(rel)
+		add("stdlib-"+filepath.Base(rel), name, src, scanner.ScanComments)
+		add("stdlib-"+filepath.Base(rel)+"-nocomment", name, src, 0)
 	}
 	return out
 }

@@ -1,0 +1,17 @@
+{
+  "name": "rustd-image-win32-x64-msvc",
+  "version": "0.1.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "rustd-image.win32-x64-msvc.node",
+  "files": [
+    "rustd-image.win32-x64-msvc.node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32"
+  ]
+}

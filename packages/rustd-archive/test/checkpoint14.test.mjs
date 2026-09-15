@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { checkedSpawnSync as spawnSync, goExecutable } from '../../../scripts/native-test-tools.mjs';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -124,7 +124,7 @@ function compileInspect() {
   const dir = mkdtempSync(join(tmpdir(), 'rustd-archive-cp14-'));
   writeFileSync(join(dir, 'main.go'), GO_SRC);
   const { command, prefix } = goCmd();
-  const result = spawnSync(command, [...prefix, 'build', '-o', 'goinspect', 'main.go'], {
+  const result = spawnSync(command, [...prefix, 'build', '-o', goExecutable('goinspect'), 'main.go'], {
     cwd: dir, encoding: 'utf8', timeout: 120_000,
   });
   if (result.status !== 0) {
@@ -136,7 +136,7 @@ function compileInspect() {
 
 function goDump(zipBytes) {
   const dir = compileInspect();
-  const result = spawnSync(join(dir, 'goinspect'), ['dump'], {
+  const result = spawnSync(join(dir, goExecutable('goinspect')), ['dump'], {
     input: zipBytes,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,
@@ -150,7 +150,7 @@ function goDump(zipBytes) {
 
 function goWrite(entries) {
   const dir = compileInspect();
-  const result = spawnSync(join(dir, 'goinspect'), ['write'], {
+  const result = spawnSync(join(dir, goExecutable('goinspect')), ['write'], {
     input: JSON.stringify(entries),
     maxBuffer: 32 * 1024 * 1024,
     timeout: 30_000,

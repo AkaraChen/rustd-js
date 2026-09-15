@@ -64,7 +64,7 @@ test('GNU tar -tf and unzip -l list JS and Go archives', () => {
     writeFileSync(tarPath, tar);
     const tarList = spawnSync('tar', ['-tf', tarPath], { encoding: 'utf8' });
     assert.equal(tarList.status, 0, tarList.stderr);
-    const tarNames = tarList.stdout.trim().split('\n').filter(Boolean);
+    const tarNames = tarList.stdout.trim().split(/\r?\n/).filter(Boolean);
     assert.deepEqual(tarNames, ['a.txt', 'dir/', 'dir/b.txt']);
 
     const zip = zipCreate([
@@ -75,7 +75,7 @@ test('GNU tar -tf and unzip -l list JS and Go archives', () => {
     writeFileSync(zipPath, zip);
     const zipList = spawnSync('unzip', ['-Z', '-1', zipPath], { encoding: 'utf8' });
     assert.equal(zipList.status, 0, zipList.stderr + zipList.stdout);
-    const zipNames = zipList.stdout.trim().split('\n').filter(Boolean);
+    const zipNames = zipList.stdout.trim().split(/\r?\n/).filter(Boolean);
     assert.deepEqual(zipNames, ['s.txt', 'd.txt']);
 
     const packet = JSON.parse(go(['-pkg', 'archive']));
@@ -87,7 +87,7 @@ test('GNU tar -tf and unzip -l list JS and Go archives', () => {
     writeFileSync(goTarPath, Buffer.from(tarCase.archiveHex, 'hex'));
     const goTarList = spawnSync('tar', ['-tf', goTarPath], { encoding: 'utf8' });
     assert.equal(goTarList.status, 0, goTarList.stderr);
-    const goTarNames = goTarList.stdout.trim().split('\n').filter(Boolean);
+    const goTarNames = goTarList.stdout.trim().split(/\r?\n/).filter(Boolean);
     const wantTar = tarCase.entries.map((e) => e.name).filter((n) => n && n !== '././@PaxHeader');
     for (const name of wantTar) {
       assert.ok(goTarNames.includes(name) || goTarNames.includes(name.replace(/^\.\//, '')), `tar missing ${name} in ${goTarNames}`);
@@ -97,7 +97,7 @@ test('GNU tar -tf and unzip -l list JS and Go archives', () => {
     writeFileSync(goZipPath, Buffer.from(zipCase.archiveHex, 'hex'));
     const goZipList = spawnSync('unzip', ['-Z', '-1', goZipPath], { encoding: 'utf8' });
     assert.equal(goZipList.status, 0, goZipList.stderr + goZipList.stdout);
-    const goZipNames = goZipList.stdout.trim().split('\n').filter(Boolean);
+    const goZipNames = goZipList.stdout.trim().split(/\r?\n/).filter(Boolean);
     for (const entry of zipCase.entries) {
       assert.ok(goZipNames.includes(entry.name), `zip missing ${entry.name} in ${goZipNames}`);
     }

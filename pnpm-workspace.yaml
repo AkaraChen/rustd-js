@@ -1,3 +1,6 @@
 packages:
   - packages/*
-  - '!packages/*/npm/**'
+  - packages/*/npm/*
+# Resolve the unpublished platform packages locally while keeping publishable semver dependencies.
+linkWorkspacePackages: true
+preferWorkspacePackages: true

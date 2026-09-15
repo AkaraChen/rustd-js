@@ -40,9 +40,9 @@ jobs:
         with:
           go-version: '1.24.13'
           cache: false
-      # 平台子包（rustd-<pkg>-darwin-arm64 等）尚未发布到 npm，pnpm 无法把它们写进 pnpm-lock.yaml，
-      # 因此 --frozen-lockfile 必然失败（ERR_PNPM_OUTDATED_LOCKFILE）。发布后再改回 frozen。
-      - run: pnpm install --no-frozen-lockfile
+      # Committed npm platform workspaces resolve the semver optional dependencies locally.
+      # Their links are in pnpm-lock.yaml, so frozen installs do not need unpublished npm packages.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm test

@@ -1,0 +1,20 @@
+{
+  "name": "rustd-encoding-linux-x64-gnu",
+  "version": "0.1.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "rustd-encoding.linux-x64-gnu.node",
+  "files": [
+    "rustd-encoding.linux-x64-gnu.node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

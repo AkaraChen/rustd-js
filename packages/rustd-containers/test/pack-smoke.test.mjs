@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { assertStripped } from '../../../scripts/assert-stripped.mjs';
 
 const pkgDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
@@ -31,16 +32,15 @@ function findBinary() {
   return readdirSync(pkgDir).find((f) => f.endsWith('.node') && f.startsWith(`${manifest.napi.binaryName}.`));
 }
 
-test('linux-x64-gnu .node is present, stripped, and ≤2MB decimal', () => {
+test('host platform .node is present, stripped, and ≤2MB decimal', () => {
   const binary = findBinary();
   assert.ok(binary, 'missing platform .node; run pnpm --filter rustd-containers build');
   const bytes = statSync(join(pkgDir, binary)).size;
-  assert.equal(binary, 'rustd-containers.linux-x64-gnu.node');
+  const suffix = process.platform === 'linux' ? '-gnu' : process.platform === 'win32' ? '-msvc' : '';
+  assert.equal(binary, `rustd-containers.${process.platform}-${process.arch}${suffix}.node`);
   assert.ok(bytes > 0);
   assert.ok(bytes <= SIZE_CAP, `${binary}: ${bytes} > ${SIZE_CAP}`);
-  const file = spawnSync('file', ['-b', join(pkgDir, binary)], { encoding: 'utf8' });
-  assert.equal(file.status, 0, file.stderr);
-  assert.match(file.stdout, /\bstripped\b/);
+  assertStripped(join(pkgDir, binary));
 });
 
 test('npm pack CJS+ESM in a clean directory; main tarball has no .node', () => {

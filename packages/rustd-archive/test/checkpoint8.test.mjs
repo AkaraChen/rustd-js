@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { checkedSpawnSync as spawnSync, goExecutable } from '../../../scripts/native-test-tools.mjs';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -88,13 +88,13 @@ function compileDump() {
   const dir = mkdtempSync(join(tmpdir(), 'rustd-archive-cp8-'));
   writeFileSync(join(dir, 'main.go'), GO_DUMP);
   const { command, prefix } = goCmd();
-  const result = spawnSync(command, [...prefix, 'build', '-o', 'godump', 'main.go'], {
+  const result = spawnSync(command, [...prefix, 'build', '-o', goExecutable('godump'), 'main.go'], {
     cwd: dir, encoding: 'utf8', timeout: 120_000,
   });
   if (result.status !== 0) {
     throw new Error(`go build godump exited ${result.status}: ${result.stderr}`);
   }
-  dumpBin = join(dir, 'godump');
+  dumpBin = join(dir, goExecutable('godump'));
   return dumpBin;
 }
 

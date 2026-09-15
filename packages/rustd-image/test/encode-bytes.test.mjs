@@ -21,12 +21,15 @@ function sampleNRGBA8() {
 }
 
 function goEncodeBytes() {
-  const r = spawnSync('mise', ['exec', '--', 'go', 'run', '.', '-encode-bytes'], {
+  const command = process.env.RUSTD_GO === 'path' ? 'go' : (process.env.RUSTD_GO ?? 'mise');
+  const prefix = process.env.RUSTD_GO ? [] : ['exec', '--', 'go'];
+  const r = spawnSync(command, [...prefix, 'run', '.', '-encode-bytes'], {
     cwd: join(dir, 'gofixtures'),
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
     env: { ...process.env, GOWORK: 'off', GOTOOLCHAIN: 'go1.25.0' },
   });
+  if (r.error) throw r.error;
   if (r.status !== 0) {
     throw new Error(`go -encode-bytes failed:\n${r.stderr || r.stdout}`);
   }
