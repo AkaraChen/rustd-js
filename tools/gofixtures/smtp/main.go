@@ -969,6 +969,126 @@ func main() {
 			},
 		},
 		{
+			id:     "client-mail-auth-required",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"530 Authentication required",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				err = c.Mail("user@gmail.com")
+				_ = c.Quit()
+				return err
+			},
+		},
+		{
+			id:     "client-vrfy-252",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250-mx.google.com at your service\n250-SIZE 35651584\n250-AUTH LOGIN PLAIN\n250 8BITMIME",
+				"252 Send some mail, I'll try my best",
+				"221 OK",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				err = c.Verify("user1@gmail.com")
+				_ = c.Quit()
+				return err
+			},
+		},
+		{
+			id:     "client-hello-vrfy",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 User is valid",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Verify("test@example.com")
+			},
+		},
+		{
+			id:     "client-hello-mail",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"502 EH?",
+				"250-mx.google.com at your service\n250 FEATURE",
+				"250 Sender ok",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("customhost"); err != nil {
+					return err
+				}
+				return c.Mail("test@example.com")
+			},
+		},
+		{
+			id:     "client-mail-inject",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 mx.google.com at your service",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				return c.Mail("user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n")
+			},
+		},
+		{
+			id:     "client-rcpt-inject",
+			kind:   "client",
+			banner: "220 hello world",
+			replies: []string{
+				"250 mx.google.com at your service",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Hello("localhost"); err != nil {
+					return err
+				}
+				return c.Rcpt("golang-nuts@googlegroups.com>\r\nDATA\r\nInjected message body\r\n.\r\nQUIT\r\n")
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
