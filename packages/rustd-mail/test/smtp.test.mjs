@@ -571,6 +571,58 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-auth-plain-challenge') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-auth-no-advertise') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-banner-421') {
+    await SmtpClient.dial(addr);
+    return;
+  }
+  if (c.id === 'sendMail-null-from') {
+    await sendMail(addr, null, '', ['c@d.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'client-rcpt-251') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-implicit-tls-send') {
+    const client = await SmtpClient.dial(addr, { tls: { implicit: true, ...tlsClient } });
+    try {
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      const w = await client.data();
+      await w.write(sendMsg);
+      await w.close();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -583,7 +635,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 52, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 58, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -897,6 +949,31 @@ test('hung banner respects timeoutMs and does not hang', async () => {
   } finally {
     server.close();
   }
+});
+
+test('sendMail with AUTH after HELO-only errors instead of Go silent skip', async () => {
+  // Go SendMail skips AUTH when helo() left c.ext == nil. Issue #12 forbids
+  // silently sending mail after the caller passed credentials.
+  const recorded = await withFakeSmtp({
+    banner: '220 hello world',
+    replies: ['502 EH?', '250 mx.google.com at your service', '221 Goodbye'],
+  }, async (addr) => {
+    await assert.rejects(
+      () => sendMail(
+        addr,
+        plainAuth({ username: 'user', password: 's3cret-password', host: '127.0.0.1' }),
+        'a@b.com',
+        ['c@d.com'],
+        sendMsg,
+      ),
+      (err) => err instanceof SmtpError && err.message === "smtp: server doesn't support AUTH",
+    );
+  });
+  const wire = recorded.toString('binary');
+  assert.match(wire, /^EHLO localhost\r\nHELO localhost\r\n/);
+  assert.equal(wire.includes('AUTH'), false);
+  assert.equal(wire.includes('MAIL FROM'), false);
+  assert.equal(wire.includes('s3cret-password'), false);
 });
 
 test('linux-x64 .node is under 2MB', () => {
