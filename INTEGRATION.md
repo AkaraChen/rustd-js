@@ -2365,3 +2365,55 @@ Suggested next: wait for `pkg/rustd-gotool-misc` CHAR rebase onto `origin/main`,
 - `CI=false` on `--filter` builds. Lockfile unchanged this round (no regen).
 - Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
 - Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
+
+## Round 2026-09-15T06:07:59+02:00
+
+Agent: `cursor-integrator`  
+`origin/main` before: `6462a13`  
+`origin/main` after: `8ea0b72` (gotool CHAR+IMAG)
+
+Operator prompt still said `origin/main` was `c61eea7` with mail/mathx unmerged. Git+LoopX disagreed: mathx `5afe53b`, mail parse `5b75514`, and mail smtp `219c085` already on main. Selected LoopX todo `todo_f6e9ec36bbc2` was verify+merge `pkg/rustd-gotool-misc` after worker rebase. Worker had replayed CHAR+IMAG onto `48a23ad`; merge-tree vs `6462a13` was CLEAN. Followed LoopX.
+
+### Merged (verified green, `--no-ff`, pushed)
+
+| 分支 | 包 | 验证 | merge sha |
+|---|---|---|---|
+| `pkg/rustd-gotool-misc` @ `9a1d2a6` rebased as `ff3ed08` (`verify/gotool`; CHAR `480e818`) | rustd-gotool MakeFromLiteral CHAR+IMAG vs Go | rebase CLEAN onto `6462a13`; `CI=false` build + **48/48** tests pass; tsc clean; linux-x64 `.node` 765400 (strip no-op) ≤2MB | `8ea0b72` |
+
+### Rejected / skipped
+
+- `pkg/rustd-mail-grok-bulk-worker` @ `2852022` — **superseded**. Already on main via replayed `29b2932` / `5b75514`. merge-tree vs current main is add/add + lockfile; not re-merged.
+- `pkg/rustd-mathx-grok-bulk-10` — already an ancestor of `origin/main` (`5afe53b`). LoopX rebase todo `todo_05d96a89e255` already **done** (2026-09-15T05:29:30+02:00). No new commits; not re-completed.
+- `pkg/rustd-mail-smtp` @ `49f4635` — leftover original tip after rebase; skip (already merged as `93df4fe` / `219c085`).
+- `pkg/rustd-gotool-grok-bulk-4` @ `d5febbc` — **superseded**. `git log origin/main..` is not empty (parallel BinaryOp/UnaryOp/MakeFromLiteral), but those landed via `4a72622`/`4c64c3e`/`24a98cb`. Do not merge the old parallel history.
+- `pkg/rustd-image-grok-bulk-2` @ `d9c447c` — **superseded** by `pkg/rustd-image-grok-bulk-8` (`60b0675`). merge-tree add/add across image sources.
+- `pkg/rustd-testing-grok-bulk-6` — `rejected-by-owner` (issue #20).
+- `pkg/rustd-debugfmt-grok-bulk-5` — `rejected-by-owner` (issue #18).
+- `pkg/rustd-std-*` — `rejected-by-owner` (issue #29). No unmerged `origin/pkg/rustd-std-*`.
+- `pkg/rustd-mime-grok-bulk-3` @ `abd37bb` / `pkg/rustd-serial-grok-bulk-7` @ `624b270` — leftover original tips after rebase; skip (already merged as `96f52e5` / `f77f368`).
+
+### Not processed / remaining unmerged `origin/pkg/*`
+
+1. `pkg/rustd-image-grok-bulk-2` (`d9c447c`) — skip; superseded
+2. `pkg/rustd-testing-grok-bulk-6` — skip; rejected-by-owner
+3. `pkg/rustd-debugfmt-grok-bulk-5` — skip; rejected-by-owner
+4. `pkg/rustd-mail-grok-bulk-worker` (`2852022`) — skip; superseded
+5. `pkg/rustd-gotool-grok-bulk-4` (`d5febbc`) — skip; superseded
+6. `pkg/rustd-mime-grok-bulk-3` (`abd37bb`) — leftover original tip; skip
+7. `pkg/rustd-serial-grok-bulk-7` (`624b270`) — leftover original tip; skip
+8. `pkg/rustd-mail-smtp` (`49f4635`) — leftover original tip; skip
+9. `pkg/rustd-gotool-misc` @ `9a1d2a6` — leftover original tip after rebase; skip (merged as `ff3ed08`)
+
+Suggested next: wait for the next CLEAN `origin/pkg/*` tip (likely gotool STRING from grok-bulk-4). Skip leftover superseded tips and owner-rejected debugfmt/testing/std.
+
+### Notes
+
+- Decision (todo note): operator snapshot at `c61eea7` is still stale; LoopX selected todo is the merge source of truth. Reason: mail parse + mathx + smtp already on main; remaining integrator slice was gotool CHAR+IMAG after worker rebase.
+- Decision: do not re-complete `todo_05d96a89e255` (mathx rebase). Reason: already `status=done` with evidence `git:5afe53b`; mathx branch is an ancestor of `origin/main`.
+- Decision: merge CHAR and IMAG together from `pkg/rustd-gotool-misc`. Reason: both commits were on the same CLEAN rebased tip (`9a1d2a6`); splitting would leave IMAG unmerged for no protocol reason.
+- Decision: do not merge `pkg/rustd-gotool-grok-bulk-4` even though `git log origin/main..` is non-empty. Reason: LoopX said skip leftover superseded tips; those three commits already landed via `4a72622`/`4c64c3e`/`24a98cb`.
+- Owner skip list still in force: `pkg/rustd-testing-*` (#20), `pkg/rustd-std-*` (#29), `pkg/rustd-debugfmt-*` (#18).
+- `main` is locked in `~/Developer/rustd-js`; this worktree merges on `grok-integrator-main` and `git push origin grok-integrator-main:main`.
+- `CI=false` on `--filter` builds. Lockfile unchanged this round (no regen).
+- Builds: `CARGO_BUILD_JOBS=2 nice -n 10 pnpm --filter rustd-<x> {build,test}`.
+- Go via `mise` (go1.24.13). Rust 1.97.1. Node v24.20.0.
