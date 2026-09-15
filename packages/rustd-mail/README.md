@@ -4,8 +4,9 @@ Rust + Node-API port of Go `net/mail` (RFC 5322 message/address/date parse)
 and `net/smtp` (`SmtpClient`, `sendMail`, `plainAuth` / `loginAuth` / `cramMd5Auth`).
 
 Runtime Node >=20; no JavaScript runtime dependencies. rustd-net was cancelled,
-so SMTP uses an in-crate TCP client (`std::net::TcpStream`). `SmtpError` is
-local (there is no shared `TextProtoError`).
+so SMTP uses an in-crate TCP client (`std::net::TcpStream`). STARTTLS upgrades
+that socket with Node `tls` (rustd-tls is out of plan). `SmtpError` is local
+(there is no shared `TextProtoError`).
 
 ```js
 import { readMessage, parseAddress, sendMail, plainAuth, SmtpClient } from 'rustd-mail';
@@ -42,10 +43,18 @@ await sendMail('127.0.0.1:2525', plainAuth({
   `NNN ...`) and adds `command` plus `permanent` (`code >= 500`).
 - `extension` / `extensionParams` are synchronous and do not send EHLO.
   Call `hello()`, `mail()`, or `sendMail` first. Go's `Extension` may I/O.
-- `startTls()` sends `STARTTLS` and expects 220, then throws
-  `FeatureNotBuiltError` (`rustd-tls` is out of scope). It does **not**
-  continue in plaintext. `sendMail` therefore cannot complete when the server
-  advertises STARTTLS.
+- `startTls(config?)` sends `STARTTLS`, expects 220, then upgrades with Node
+  `tls` (not `rustd-tls`, which is out of plan). It always re-sends `EHLO`
+  after the handshake, matching Go. Default `rejectUnauthorized` is true.
+  Pass `{ ca }` for a private CA. There is no plaintext continuation if the
+  handshake fails. `sendMail` calls `startTls(opts.tls)` when the server
+  advertises STARTTLS. Node omits SNI when the name is an IP (RFC 6066);
+  certificate identity is still checked against that IP.
+- `tlsConnectionState()` returns a small local object after a successful
+  upgrade (`protocol`, `authorized`, `serverName`, `cipher`), not a
+  `rustd-tls` type. It is `null` before STARTTLS.
+- `FeatureNotBuiltError` remains exported for compatibility; the STARTTLS
+  handshake is built.
 - `loginAuth` is extra (Go stdlib has PLAIN and CRAM-MD5 only). Same
   TLS-or-localhost rule as `plainAuth`.
 - DATA lines longer than 998 bytes throw (RFC 5321). Go's `DotWriter` does not

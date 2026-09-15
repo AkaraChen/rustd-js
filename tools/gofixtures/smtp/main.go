@@ -4,6 +4,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -17,12 +19,13 @@ import (
 )
 
 type Case struct {
-	ID       string   `json:"id"`
-	Kind     string   `json:"kind"`
-	Banner   string   `json:"banner"`
-	Replies  []string `json:"replies"`
-	ClientHex string  `json:"clientHex"`
-	Error    string   `json:"error,omitempty"`
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"`
+	Banner    string   `json:"banner"`
+	Replies   []string `json:"replies"`
+	ClientHex string   `json:"clientHex"`
+	TLS       bool     `json:"tls,omitempty"`
+	Error     string   `json:"error,omitempty"`
 }
 
 type Packet struct {
@@ -64,12 +67,33 @@ func lastCode(reply string) string {
 	return ""
 }
 
-func serveScript(conn net.Conn, banner string, replies []string) {
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+func serverTLS() *tls.Config {
+	cert, err := tls.LoadX509KeyPair("cert.pem", "key.pem")
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{Certificates: []tls.Certificate{cert}}
+}
+
+func clientTLS() *tls.Config {
+	pem, err := os.ReadFile("cert.pem")
+	if err != nil {
+		panic(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		panic("no cert")
+	}
+	return &tls.Config{ServerName: "127.0.0.1", RootCAs: pool, MinVersion: tls.VersionTLS12}
+}
+
+func serveScript(conn net.Conn, raw net.Conn, rec *bytes.Buffer, banner string, replies []string, useTLS bool) {
+	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
 	br := bufio.NewReader(conn)
 	bw := bufio.NewWriter(conn)
 	writeReply(bw, banner)
 	i := 0
+	upgraded := false
 	for i < len(replies) {
 		if _, err := br.ReadString('\n'); err != nil {
 			return
@@ -77,6 +101,17 @@ func serveScript(conn net.Conn, banner string, replies []string) {
 		reply := replies[i]
 		i++
 		writeReply(bw, reply)
+		if useTLS && !upgraded && lastCode(reply) == "220" {
+			tlsConn := tls.Server(raw, serverTLS())
+			_ = tlsConn.SetDeadline(time.Now().Add(8 * time.Second))
+			if err := tlsConn.Handshake(); err != nil {
+				return
+			}
+			conn = &recConn{Conn: tlsConn, buf: rec}
+			br = bufio.NewReader(conn)
+			bw = bufio.NewWriter(conn)
+			upgraded = true
+		}
 		if lastCode(reply) == "354" {
 			for {
 				line, err := br.ReadString('\n')
@@ -100,7 +135,7 @@ func serveScript(conn net.Conn, banner string, replies []string) {
 	io.Copy(io.Discard, br)
 }
 
-func runCase(banner string, replies []string, fn func(addr string) error) (client []byte, clientErr error) {
+func runCase(banner string, replies []string, useTLS bool, fn func(addr string) error) (client []byte, clientErr error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -115,7 +150,7 @@ func runCase(banner string, replies []string, fn func(addr string) error) (clien
 		}
 		buf := &bytes.Buffer{}
 		rc := &recConn{Conn: conn, buf: buf}
-		serveScript(rc, banner, replies)
+		serveScript(rc, conn, buf, banner, replies, useTLS)
 		rc.Close()
 		done <- buf.Bytes()
 	}()
@@ -123,7 +158,7 @@ func runCase(banner string, replies []string, fn func(addr string) error) (clien
 	go func() { errCh <- fn(ln.Addr().String()) }()
 	select {
 	case err = <-errCh:
-	case <-time.After(5 * time.Second):
+	case <-time.After(8 * time.Second):
 		ln.Close()
 		err = fmt.Errorf("client timeout")
 	}
@@ -149,6 +184,7 @@ func main() {
 		kind    string
 		banner  string
 		replies []string
+		tls     bool
 		fn      func(addr string) error
 	}{
 		{
@@ -210,6 +246,23 @@ func main() {
 			},
 			fn: func(addr string) error {
 				return smtp.SendMail(addr, smtp.PlainAuth("", "user", "pass", "smtp.google.com"), "a@b.com", []string{"c@d.com"}, msgCRLF(sendMsg))
+			},
+		},
+		{
+			id:     "sendMail-multi-rcpt",
+			kind:   "sendMail",
+			banner: "220 hello world",
+			replies: []string{
+				"250 localhost",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				return smtp.SendMail(addr, nil, "a@b.com", []string{"one@b.com", "two@b.com"}, msgCRLF(sendMsg))
 			},
 		},
 		{
@@ -375,6 +428,53 @@ func main() {
 			},
 		},
 		{
+			id:     "client-starttls-auth",
+			kind:   "client",
+			banner: "220 localhost",
+			replies: []string{
+				"250-localhost\n250-STARTTLS\n250 AUTH PLAIN LOGIN",
+				"220 ready",
+				"250-localhost\n250 AUTH PLAIN LOGIN",
+				"235 Accepted",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			tls: true,
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.StartTLS(clientTLS()); err != nil {
+					return err
+				}
+				if err := c.Auth(smtp.PlainAuth("", "user", "pass", "127.0.0.1")); err != nil {
+					return err
+				}
+				if err := c.Mail("a@b.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("c@d.com"); err != nil {
+					return err
+				}
+				w, err := c.Data()
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(msgCRLF(sendMsg)); err != nil {
+					return err
+				}
+				if err := w.Close(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
@@ -392,7 +492,7 @@ func main() {
 		if spec.kind == "validate" {
 			err = spec.fn("")
 		} else {
-			client, err = runCase(spec.banner, spec.replies, spec.fn)
+			client, err = runCase(spec.banner, spec.replies, spec.tls, spec.fn)
 		}
 		c := Case{
 			ID:        spec.id,
@@ -400,6 +500,7 @@ func main() {
 			Banner:    spec.banner,
 			Replies:   spec.replies,
 			ClientHex: hex.EncodeToString(client),
+			TLS:       spec.tls,
 		}
 		if err != nil {
 			c.Error = err.Error()

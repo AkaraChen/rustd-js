@@ -5,13 +5,18 @@ import { spawnSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import {
-  SmtpError, FeatureNotBuiltError, SmtpClient,
+  SmtpError, SmtpClient,
   plainAuth, loginAuth, cramMd5Auth, sendMail,
 } from '../index.mjs';
 import { withFakeSmtp } from './smtp-fake.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 const fixturePath = new URL('./fixtures/smtp.json', import.meta.url);
+const testdata = resolve(root, 'tools/gofixtures/smtp');
+const tlsCert = readFileSync(join(testdata, 'cert.pem'));
+const tlsKey = readFileSync(join(testdata, 'key.pem'));
+const tlsServer = { cert: tlsCert, key: tlsKey };
+const tlsClient = { ca: tlsCert, serverName: '127.0.0.1' };
 const sendMsg = 'From: test@example.com\r\nTo: other@example.com\r\nSubject: SendMail test\r\n\r\nSendMail is working for me.\r\n';
 const dotMsg = 'From: user@gmail.com\nTo: golang-nuts@googlegroups.com\nSubject: Hooray for Go\n\nLine 1\n.Leading dot line .\nGoodbye.';
 const lfMsg = 'From: a@b.com\nTo: c@d.com\n\nhello\n.world\nmixed\r\nline\n';
@@ -33,6 +38,26 @@ function goSmtp() {
 async function runTsCase(c, addr) {
   if (c.id === 'sendMail-ehlo-fail' || c.id === 'sendMail-ehlo-8bitmime') {
     await sendMail(addr, null, 'test@example.com', ['other@example.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'sendMail-multi-rcpt') {
+    await sendMail(addr, null, 'a@b.com', ['one@b.com', 'two@b.com'], sendMsg);
+    return;
+  }
+  if (c.id === 'client-starttls-auth') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.startTls(tlsClient);
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }));
+      await client.mail('a@b.com');
+      await client.rcpt('c@d.com');
+      const w = await client.data();
+      await w.write(sendMsg);
+      await w.close();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
     return;
   }
   if (c.id === 'sendMail-auth-plain') {
@@ -131,7 +156,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
       continue;
     }
     let caught;
-    const bytes = await withFakeSmtp(c, async (addr) => {
+    const bytes = await withFakeSmtp({ ...c, tls: c.tls ? tlsServer : undefined }, async (addr) => {
       try {
         await runTsCase(c, addr);
       } catch (err) {
@@ -201,20 +226,55 @@ test('AUTH LOGIN challenge/response and AUTH PLAIN localhost', async () => {
   assert.match(text, new RegExp(`\r\n${user}\r\n${pass}\r\nMAIL FROM:<a@b.com>`));
 });
 
-test('STARTTLS command is sent then FeatureNotBuiltError; no plaintext AUTH', async () => {
+test('STARTTLS handshake, re-EHLO, then AUTH; no plaintext password', async () => {
   const recorded = await withFakeSmtp({
     banner: '220 localhost',
-    replies: ['250-localhost\n250-STARTTLS\n250 AUTH PLAIN', '220 ready'],
+    replies: [
+      '250-localhost\n250-STARTTLS\n250 AUTH PLAIN',
+      '220 ready',
+      '250-localhost\n250 AUTH PLAIN',
+      '235 ok',
+      '250 sender',
+      '250 rcpt',
+      '354 go',
+      '250 data',
+      '221 bye',
+    ],
+    tls: tlsServer,
   }, async (addr) => {
-    await assert.rejects(
-      () => sendMail(addr, plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }), 'a@b.com', ['c@d.com'], sendMsg),
-      (err) => err instanceof FeatureNotBuiltError && err.command === 'STARTTLS',
+    await sendMail(
+      addr,
+      plainAuth({ username: 'user', password: 'pass', host: '127.0.0.1' }),
+      'a@b.com',
+      ['c@d.com'],
+      sendMsg,
+      { tls: tlsClient },
     );
   });
   const text = recorded.toString();
-  assert.match(text, /EHLO localhost\r\nSTARTTLS\r\n/);
-  assert.equal(text.includes('AUTH PLAIN'), false);
-  assert.equal(text.includes('pass'), false);
+  assert.match(text, /EHLO localhost\r\nSTARTTLS\r\nEHLO localhost\r\nAUTH PLAIN /);
+  assert.match(text, /MAIL FROM:<a@b.com>/);
+  const preTls = text.slice(0, text.indexOf('STARTTLS') + 'STARTTLS\r\n'.length);
+  assert.equal(preTls.includes('AUTH PLAIN'), false);
+  assert.equal(preTls.includes('pass'), false);
+});
+
+test('startTls sets tlsConnectionState and serverInfo.tls', async () => {
+  await withFakeSmtp({
+    banner: '220 localhost',
+    replies: ['250-localhost\n250-STARTTLS\n250 AUTH PLAIN', '220 ready', '250 localhost', '221 bye'],
+    tls: tlsServer,
+  }, async (addr) => {
+    const client = await SmtpClient.dial(addr);
+    assert.equal(client.tlsConnectionState(), null);
+    await client.startTls(tlsClient);
+    assert.equal(client.serverInfo.tls, true);
+    const st = client.tlsConnectionState();
+    assert.equal(typeof st.protocol, 'string');
+    assert.ok(st.protocol.startsWith('TLSv1.'));
+    assert.equal(st.authorized, true);
+    await client.quit();
+  });
 });
 
 test('CRAM-MD5 next() matches Go hmac-md5 vector', () => {

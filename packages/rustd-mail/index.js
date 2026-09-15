@@ -354,6 +354,165 @@ function cramMd5Auth(username, secret) {
   };
 }
 
+function parseCodeLine(line, expectCode) {
+  if (line.length < 4 || (line[3] !== ' ' && line[3] !== '-')) {
+    throw new SmtpError(`short response: ${line}`, { command: '' });
+  }
+  const continued = line[3] === '-';
+  const code = Number(line.slice(0, 3));
+  if (!Number.isInteger(code) || code < 100) {
+    throw new SmtpError(`invalid response code: ${line}`, { command: '' });
+  }
+  const message = line.slice(4);
+  const unmatched = (expectCode >= 1 && expectCode < 10 && Math.floor(code / 100) !== expectCode)
+    || (expectCode >= 10 && expectCode < 100 && Math.floor(code / 10) !== expectCode)
+    || (expectCode >= 100 && expectCode < 1000 && code !== expectCode);
+  return { code, continued, message, unmatched };
+}
+
+class NativeSmtpIo {
+  constructor(id) {
+    this._id = id;
+  }
+  writeLine(line) {
+    return binding.smtpWriteLine(this._id, line);
+  }
+  readResponse(expect) {
+    return binding.smtpReadResponse(this._id, expect);
+  }
+  dotWrite(data) {
+    return binding.smtpDotWrite(this._id, data);
+  }
+  dotClose() {
+    return binding.smtpDotClose(this._id);
+  }
+  close() {
+    return binding.smtpClose(this._id);
+  }
+  takeFd() {
+    return binding.smtpTakeFd(this._id);
+  }
+}
+
+class NodeStreamIo {
+  constructor(stream) {
+    this._stream = stream;
+    this._buf = Buffer.alloc(0);
+    this._dotState = 0;
+    this._lineLen = 0;
+    this._ended = false;
+    this._err = null;
+    this._wait = [];
+    stream.on('data', (d) => {
+      this._buf = Buffer.concat([this._buf, d]);
+      this._wake();
+    });
+    stream.on('error', (err) => {
+      this._err = err;
+      this._wake();
+    });
+    stream.on('end', () => {
+      this._ended = true;
+      this._wake();
+    });
+    stream.on('timeout', () => {
+      this._err = this._err ?? new SmtpError('smtp: connection timed out', { command: '' });
+      this._wake();
+    });
+  }
+
+  _wake() {
+    const waiters = this._wait;
+    this._wait = [];
+    for (const w of waiters) w();
+  }
+
+  _more() {
+    if (this._err) return Promise.reject(this._err);
+    if (this._ended) return Promise.reject(new SmtpError('EOF', { command: '' }));
+    return new Promise((resolve, reject) => {
+      this._wait.push(() => {
+        if (this._err) reject(this._err);
+        else resolve();
+      });
+    });
+  }
+
+  async _readLine() {
+    for (;;) {
+      const n = this._buf.indexOf(0x0a);
+      if (n !== -1) {
+        let line = this._buf.subarray(0, n);
+        this._buf = this._buf.subarray(n + 1);
+        if (line.length && line[line.length - 1] === 0x0d) line = line.subarray(0, -1);
+        return line.toString('utf8');
+      }
+      await this._more();
+    }
+  }
+
+  _writeRaw(buf) {
+    return new Promise((resolve, reject) => {
+      this._stream.write(buf, (err) => (err ? reject(err) : resolve()));
+    });
+  }
+
+  async writeLine(line) {
+    await this._writeRaw(Buffer.from(`${line}\r\n`));
+  }
+
+  async readResponse(expect) {
+    const first = parseCodeLine(await this._readLine(), expect);
+    let { code, continued, message, unmatched } = first;
+    while (continued) {
+      const line = await this._readLine();
+      try {
+        const parsed = parseCodeLine(line, 0);
+        if (parsed.code === code) {
+          continued = parsed.continued;
+          message += `\n${parsed.message}`;
+        } else {
+          message += `\n${line.replace(/[\r\n]+$/, '')}`;
+          continued = true;
+        }
+      } catch {
+        message += `\n${line.replace(/[\r\n]+$/, '')}`;
+        continued = true;
+      }
+    }
+    if (unmatched) {
+      throw new SmtpError(`${String(code).padStart(3, '0')} ${message}`, {
+        code,
+        command: '',
+        serverMessage: message,
+      });
+    }
+    return { code, message };
+  }
+
+  async dotWrite(data) {
+    const r = binding.smtpDotStuff(this._dotState, this._lineLen, data);
+    this._dotState = r.state;
+    this._lineLen = r.lineLen;
+    if (r.output.byteLength) await this._writeRaw(Buffer.from(r.output));
+  }
+
+  async dotClose() {
+    const out = binding.smtpDotFinish(this._dotState);
+    this._dotState = 0;
+    this._lineLen = 0;
+    if (out.byteLength) await this._writeRaw(Buffer.from(out));
+  }
+
+  async close() {
+    this._stream.destroy();
+  }
+
+  takeFd() {
+    throw new SmtpError('smtp: STARTTLS already completed', { command: 'STARTTLS' });
+  }
+}
+
 class SmtpDataWriter {
   constructor(client) {
     this._client = client;
@@ -361,21 +520,23 @@ class SmtpDataWriter {
   }
   async write(chunk) {
     if (this._closed) throw new SmtpError('smtp: data writer closed', { command: 'DATA' });
-    await smtpCall('DATA', binding.smtpDotWrite(this._client._id, toBytes(chunk)));
+    await smtpCall('DATA', this._client._io.dotWrite(toBytes(chunk)));
   }
   async close() {
     if (this._closed) return;
     this._closed = true;
-    await smtpCall('DATA', binding.smtpDotClose(this._client._id));
+    await smtpCall('DATA', this._client._io.dotClose());
     await this._client._readResponse(250, 'DATA');
   }
 }
 
 class SmtpClient {
-  constructor(id, serverName) {
-    this._id = id;
+  constructor(io, serverName, timeoutMs) {
+    this._io = io;
     this._serverName = serverName;
+    this._timeoutMs = timeoutMs;
     this._tls = false;
+    this._tlsState = null;
     this._ext = null;
     this._auth = [];
     this._localName = 'localhost';
@@ -390,7 +551,7 @@ class SmtpClient {
     const timeoutMs = opts.timeoutMs == null ? 30000 : opts.timeoutMs;
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new TypeError('smtp: timeoutMs must be a number');
     const id = await smtpCall('DIAL', binding.smtpDial(addr, timeoutMs >>> 0));
-    const client = new SmtpClient(id, host);
+    const client = new SmtpClient(new NativeSmtpIo(id), host, timeoutMs);
     try {
       await client._readResponse(220, '');
       return client;
@@ -406,13 +567,13 @@ class SmtpClient {
 
   async _writeLine(line) {
     this._ensureOpen();
-    await smtpCall(line.split(/[ ]/, 1)[0], binding.smtpWriteLine(this._id, line));
+    await smtpCall(line.split(/[ ]/, 1)[0], this._io.writeLine(line));
   }
 
   async _readResponse(expect, command) {
     this._ensureOpen();
     try {
-      return await binding.smtpReadResponse(this._id, expect);
+      return await this._io.readResponse(expect);
     } catch (cause) {
       throw mapSmtpCause(cause, command);
     }
@@ -589,17 +750,55 @@ class SmtpClient {
     return Object.prototype.hasOwnProperty.call(this._ext, key) ? this._ext[key] : '';
   }
 
-  async startTls() {
+  async startTls(config = {}) {
     await this._hello();
     await this._cmd(220, 'STARTTLS');
-    throw new FeatureNotBuiltError('smtp: STARTTLS handshake not built', {
-      command: 'STARTTLS',
-      serverMessage: 'rustd-tls cancelled; refusing plaintext continuation',
-    });
+    if (typeof this._io.takeFd !== 'function') {
+      throw new FeatureNotBuiltError('smtp: STARTTLS handshake not built', { command: 'STARTTLS' });
+    }
+    const taken = await smtpCall('STARTTLS', this._io.takeFd());
+    const fd = Number(taken.fd);
+    const leftover = taken.leftover ? Buffer.from(taken.leftover) : Buffer.alloc(0);
+    const net = require('node:net');
+    const tls = require('node:tls');
+    const socket = new net.Socket({ fd, readable: true, writable: true });
+    if (this._timeoutMs > 0) socket.setTimeout(this._timeoutMs);
+    if (leftover.length) socket.unshift(leftover);
+    const servername = config.serverName == null ? this._serverName : String(config.serverName);
+    const tlsOpts = {
+      socket,
+      rejectUnauthorized: config.rejectUnauthorized !== false,
+    };
+    if (servername && !net.isIP(servername)) tlsOpts.servername = servername;
+    if (config.ca != null) tlsOpts.ca = config.ca;
+    if (servername) {
+      tlsOpts.checkServerIdentity = (_host, cert) => tls.checkServerIdentity(servername, cert);
+    }
+    let tlsSock;
+    try {
+      tlsSock = await new Promise((resolve, reject) => {
+        const s = tls.connect(tlsOpts, () => resolve(s));
+        const fail = (err) => reject(err);
+        s.once('error', fail);
+        socket.once('timeout', () => fail(new SmtpError('smtp: TLS handshake timeout', { command: 'STARTTLS' })));
+      });
+    } catch (err) {
+      socket.destroy();
+      throw mapSmtpCause(err, 'STARTTLS');
+    }
+    this._io = new NodeStreamIo(tlsSock);
+    this._tls = true;
+    this._tlsState = {
+      protocol: tlsSock.getProtocol() || '',
+      authorized: !!tlsSock.authorized,
+      serverName: servername,
+      cipher: tlsSock.getCipher() || null,
+    };
+    await this._ehlo();
   }
 
   tlsConnectionState() {
-    return null;
+    return this._tlsState;
   }
 
   async quit() {
@@ -618,7 +817,7 @@ class SmtpClient {
   async close() {
     if (this._closed) return;
     this._closed = true;
-    await smtpCall('', binding.smtpClose(this._id)).catch(() => {});
+    await smtpCall('', this._io.close()).catch(() => {});
   }
 
   async abandon() {
@@ -641,7 +840,7 @@ async function sendMail(address, auth, from, to, msg, opts) {
   try {
     await client._hello();
     if (client.extension('STARTTLS')) {
-      await client.startTls();
+      await client.startTls(opts && opts.tls);
     }
     if (auth != null) {
       requireSmtpAuth(auth);
