@@ -2431,3 +2431,223 @@ func verifyConstantStringCompare(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-string-compare cases\n", len(packet.Cases))
 }
+
+type ConstConvCase struct {
+	ID       string `json:"id"`
+	Convert  string `json:"convert"`
+	Form     string `json:"form"`
+	X        string `json:"x"`
+	Y        string `json:"y"`
+	S        string `json:"s"`
+	OrigKind string `json:"origKind"`
+	Kind     string `json:"kind"`
+	Exact    string `json:"exact"`
+	Sign     int    `json:"sign"`
+	ReKind   string `json:"reKind"`
+	ReExact  string `json:"reExact"`
+	ImKind   string `json:"imKind"`
+	ImExact  string `json:"imExact"`
+	F64Bits  string `json:"f64Bits"`
+	F64Exact bool   `json:"f64Exact"`
+}
+
+type ConstConvPacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Slice   string          `json:"slice"`
+	Cases   []ConstConvCase `json:"cases"`
+}
+
+func makeConvSrc(form, xStr, yStr, sStr string) (constant.Value, error) {
+	switch form {
+	case "int":
+		n, err := strconv.ParseInt(xStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return constant.MakeInt64(n), nil
+	case "quo":
+		return makeConst("quo", xStr, yStr, sStr)
+	case "shift":
+		n, err := strconv.ParseInt(xStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		s, err := strconv.ParseUint(sStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return constant.Shift(constant.MakeInt64(n), token.SHL, uint(s)), nil
+	case "imag":
+		return constant.MakeFromLiteral(xStr, token.IMAG, 0), nil
+	case "sum":
+		n, err := strconv.ParseInt(xStr, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		im := constant.MakeFromLiteral(yStr, token.IMAG, 0)
+		return constant.BinaryOp(constant.MakeInt64(n), token.ADD, im), nil
+	case "bool":
+		switch xStr {
+		case "true":
+			return constant.MakeBool(true), nil
+		case "false":
+			return constant.MakeBool(false), nil
+		default:
+			return nil, fmt.Errorf("unknown bool %q", xStr)
+		}
+	case "string":
+		return constant.MakeFromLiteral(xStr, token.STRING, 0), nil
+	case "char":
+		return constant.MakeFromLiteral(xStr, token.CHAR, 0), nil
+	case "unknown":
+		return constant.MakeUnknown(), nil
+	default:
+		return nil, fmt.Errorf("unknown convert form %q", form)
+	}
+}
+
+func fillConv(v constant.Value, c *ConstConvCase) {
+	c.Kind = v.Kind().String()
+	c.Exact = v.ExactString()
+	c.Sign = constant.Sign(v)
+	re := constant.Real(v)
+	im := constant.Imag(v)
+	c.ReKind = re.Kind().String()
+	c.ReExact = re.ExactString()
+	c.ImKind = im.Kind().String()
+	c.ImExact = im.ExactString()
+	if v.Kind() == constant.Complex {
+		c.F64Bits = "0"
+		c.F64Exact = false
+		return
+	}
+	f, exact := constant.Float64Val(v)
+	c.F64Bits = fmt.Sprintf("%016x", math.Float64bits(f))
+	c.F64Exact = exact
+}
+
+func evalConvert(form, xStr, yStr, sStr, convert string) (ConstConvCase, error) {
+	src, err := makeConvSrc(form, xStr, yStr, sStr)
+	if err != nil {
+		return ConstConvCase{}, err
+	}
+	var v constant.Value
+	switch convert {
+	case "ToFloat":
+		v = constant.ToFloat(src)
+	case "ToComplex":
+		v = constant.ToComplex(src)
+	default:
+		return ConstConvCase{}, fmt.Errorf("unknown convert %q", convert)
+	}
+	c := ConstConvCase{
+		Convert:  convert,
+		Form:     form,
+		X:        xStr,
+		Y:        yStr,
+		S:        sStr,
+		OrigKind: src.Kind().String(),
+	}
+	fillConv(v, &c)
+	return c, nil
+}
+
+type convSrc struct {
+	form, x, y, s string
+}
+
+// ToFloat/ToComplex vs Go. BitLen>=4096 Int ToFloat is 512-bit floatVal
+// ExactString (same deferral as 1e9999 FLOAT/IMAG); not in this corpus.
+func convertCorpus() []convSrc {
+	return []convSrc{
+		{"int", "0", "0", "0"},
+		{"int", "1", "0", "0"},
+		{"int", "-1", "0", "0"},
+		{"int", "42", "0", "0"},
+		{"int", "97", "0", "0"},
+		{"int", "9223372036854775807", "0", "0"},
+		{"int", "-9223372036854775808", "0", "0"},
+		{"shift", "1", "0", "0"},
+		{"shift", "1", "0", "63"},
+		{"shift", "-1", "0", "63"},
+		{"shift", "1", "0", "100"},
+		{"quo", "1", "2", "0"},
+		{"quo", "-1", "2", "0"},
+		{"quo", "2", "4", "0"},
+		{"quo", "22", "7", "0"},
+		{"imag", "0i", "0", "0"},
+		{"imag", "1i", "0", "0"},
+		{"imag", "-1i", "0", "0"},
+		{"imag", "1.5i", "0", "0"},
+		{"imag", "1ii", "0", "0"},
+		{"imag", "i", "0", "0"},
+		{"imag", "xyz", "0", "0"},
+		{"sum", "3", "1i", "0"},
+		{"sum", "1", "0i", "0"},
+		{"sum", "0", "0i", "0"},
+		{"bool", "true", "0", "0"},
+		{"bool", "false", "0", "0"},
+		{"string", `"a"`, "0", "0"},
+		{"string", `"\z"`, "0", "0"},
+		{"string", `'ab'`, "0", "0"},
+		{"char", `'a'`, "0", "0"},
+		{"char", `'ab'`, "0", "0"},
+		{"char", `''`, "0", "0"},
+		{"unknown", "0", "0", "0"},
+	}
+}
+
+func dumpConstantConvert(w io.Writer) {
+	packet := ConstConvPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-tofloat-tocomplex",
+	}
+	corpus := convertCorpus()
+	for _, convert := range []string{"ToFloat", "ToComplex"} {
+		for i, src := range corpus {
+			c, err := evalConvert(src.form, src.x, src.y, src.s, convert)
+			if err != nil {
+				fail(err)
+			}
+			c.ID = fmt.Sprintf("go-conv-%s-%d", convert, i)
+			packet.Cases = append(packet.Cases, c)
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantConvert(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstConvPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-tofloat-tocomplex" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-tofloat-tocomplex packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		got, err := evalConvert(c.Form, c.X, c.Y, c.S, c.Convert)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.OrigKind != c.OrigKind || got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ReKind != c.ReKind || got.ReExact != c.ReExact || got.ImKind != c.ImKind || got.ImExact != c.ImExact || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s convert=%s form=%s: go orig=%s kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v got orig=%s kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v",
+				i, c.ID, c.Convert, c.Form, got.OrigKind, got.Kind, got.Exact, got.Sign, got.ReKind, got.ReExact, got.ImKind, got.ImExact, got.F64Bits, got.F64Exact,
+				c.OrigKind, c.Kind, c.Exact, c.Sign, c.ReKind, c.ReExact, c.ImKind, c.ImExact, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-tofloat-tocomplex cases\n", len(packet.Cases))
+}

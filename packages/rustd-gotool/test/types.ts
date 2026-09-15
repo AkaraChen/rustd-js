@@ -6,6 +6,8 @@ import {
   constMakeInt64,
   constMakeBool,
   constMakeFromLiteral,
+  constToFloat,
+  constToComplex,
   constToInt,
   constToString,
   constFloat64Val,
@@ -42,6 +44,8 @@ const fromFLit: GoConstValue = constMakeFromLiteral('1.5', TOKEN.FLOAT, 0);
 const fromCLit: GoConstValue = constMakeFromLiteral("'a'", TOKEN.CHAR, 0);
 const fromILit: GoConstValue = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
 const fromSLit: GoConstValue = constMakeFromLiteral('"foo"', TOKEN.STRING, 0);
+const toF: GoConstValue = constToFloat(cv);
+const toC: GoConstValue = constToComplex(cv);
 const kind: GoConstValue['kind'] = cv.kind;
 const [ival, iok]: [bigint, boolean] = constToInt(cv);
 const [sval, sok]: [string, boolean] = constToString(cv);
@@ -92,6 +96,10 @@ const exported: boolean = astIsExported(id.name);
 constMakeInt64(1);
 // @ts-expect-error MakeFromLiteral lit is a string
 constMakeFromLiteral(1, TOKEN.INT, 0);
+// @ts-expect-error ToFloat operand is GoConstValue
+constToFloat(1);
+// @ts-expect-error ToComplex operand is GoConstValue
+constToComplex(1);
 // @ts-expect-error StringVal operand is GoConstValue
 constToString(1);
 // @ts-expect-error Float64Val operand is GoConstValue
@@ -112,4 +120,4 @@ versionLang(1);
 const wrong: boolean = versionCompare('go1', 'go1.1');
 // @ts-expect-error CompareOp operands are GoConstValue
 constCompareOp(1n, TOKEN.EQL, fromILit);
-void [cv, fromLit, fromFLit, fromCLit, fromILit, fromSLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, ceq, slss, isign, ireal, iimag, ibits, badd, fadd, cadd, cmul, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
+void [cv, fromLit, fromFLit, fromCLit, fromILit, fromSLit, toF, toC, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, ceq, slss, beq, isign, ireal, iimag, ibits, badd, fadd, cadd, cmul, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];

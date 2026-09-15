@@ -5,7 +5,7 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 24 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 25 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
@@ -33,7 +33,10 @@ plus Complex `constUnaryOp` ADD/SUB vs Go `UnaryOp` (ADD is identity; SUB is
 can be NEQ true), String `constCompareOp` EQL/NEQ/LSS/LEQ/GTR/GEQ vs Go
 `MakeBool(Compare)` (byte-wise Go string `<`; Unknown vs String is false),
 and Bool `constCompareOp` EQL/NEQ vs Go `MakeBool(Compare)` (Unknown vs Bool
-is false; mixed Bool vs Int/Float/Complex throw).
+is false; mixed Bool vs Int/Float/Complex throw),
+plus `constToFloat` / `constToComplex` vs Go `ToFloat` / `ToComplex`
+(Int → Float `n/1`; Float identity; Complex with imag 0 unwraps re; Bool/String
+and nonzero-imag Complex → Unknown; Int/Float → Complex with imag Int 0).
 `go/format` / `gofmt` and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
@@ -41,7 +44,7 @@ is false; mixed Bool vs Int/Float/Complex throw).
 import {
   versionLang, FileSet, Scanner, TOKEN, SCAN_MODE,
   PARSE_MODE, parseFile, astFprint,
-  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constCompareOp, constToInt, constToString, constFloat64Val, constBoolVal,
+  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constCompareOp, constToFloat, constToComplex, constToInt, constToString, constFloat64Val, constBoolVal,
   constBinaryOp, constUnaryOp, constShift, TOKEN,
 } from 'rustd-gotool';
 
@@ -62,6 +65,8 @@ constCompareOp(constMakeFromLiteral('"a"', TOKEN.STRING, 0), TOKEN.LSS, constMak
 constCompareOp(constMakeBool(true), TOKEN.EQL, constMakeBool(false)).toString(); // "false"
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
+constToFloat(constMakeInt64(1n)).kind; // "Float"
+constToComplex(constMakeInt64(1n)).toString(); // "(1 + 0i)"
 constToInt(constMakeInt64(1n)); // [1n, true]
 constToString(constMakeInt64(1n)); // ["", false] — Int is not a Go string constant
 constFloat64Val(constMakeInt64(1n)); // [1, true]
@@ -186,17 +191,23 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   for STRING it is Go `ExactString` (`strconv.Quote`);
   for Bool it is `"true"`/`"false"`.
   `constCompare` on Complex throws (ordering is -1/0/1 and undefined);
-  use `constCompareOp` for bool EQL/NEQ. `1e9999i` (512-bit `floatVal`
+  use `constCompareOp` for bool EQL/NEQ.
+  `constToFloat` is Go `ToFloat`: Int becomes Float `n/1` (`ratVal`); Float is
+  identity; Complex with `Sign(im)==0` converts the real part (so `0i` is Float
+  `"0"`); Bool/String/Unknown and nonzero-imag Complex are Unknown.
+  `constToComplex` is Go `ToComplex`: Int/Float wrap as Complex with imag Int 0;
+  Complex is identity; Bool/String/Unknown are Unknown.
+  `1e9999i` (512-bit `floatVal`
   ExactString) is not in this checkpoint, same as FLOAT.
   Large-component rats that Go promotes to 512-bit
-  `floatVal` (`BitLen >= 4096`) are not in this checkpoint.
+  `floatVal` (`BitLen >= 4096`, including `ToFloat(1<<4096)`) are not in this checkpoint.
 - No `go/types`, `go/importer`, `go/build`, `ParseDir`, or `gofmt`.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **787,936 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **790,416 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 787936 Sep 15 08:30 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 790416 Sep 15 09:03 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```
