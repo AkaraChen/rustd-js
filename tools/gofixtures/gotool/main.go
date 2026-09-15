@@ -134,7 +134,26 @@ func main() {
 	verifyConstantCUnFlag := flag.Bool("verify-constant-complex-unary", false, "verify a constant-complex-unary packet read from stdin")
 	constantCCmpFlag := flag.Bool("constant-complex-compare", false, "dump go/constant Complex Compare EQL/NEQ fixtures")
 	verifyConstantCCmpFlag := flag.Bool("verify-constant-complex-compare", false, "verify a constant-complex-compare packet read from stdin")
+	constantSCmpFlag := flag.Bool("constant-string-compare", false, "dump go/constant String Compare EQL/NEQ/order fixtures")
+	verifyConstantSCmpFlag := flag.Bool("verify-constant-string-compare", false, "verify a constant-string-compare packet read from stdin")
 	flag.Parse()
+	if *verifyConstantSCmpFlag {
+		verifyConstantStringCompare(os.Stdin)
+		return
+	}
+	if *constantSCmpFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantStringCompare(writer)
+		return
+	}
 	if *verifyConstantCCmpFlag {
 		verifyConstantComplexCompare(os.Stdin)
 		return
