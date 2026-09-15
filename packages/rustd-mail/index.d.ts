@@ -62,6 +62,12 @@ export interface SmtpTlsOptions {
   rejectUnauthorized?: boolean;
   /** Extra trusted CA PEMs, used by tests and private CAs. */
   ca?: string | Buffer | Array<string | Buffer>;
+  /**
+   * SMTPS: TLS-wrap the TCP socket before reading the 220 banner.
+   * Maps to Go `tls.Dial` + `smtp.NewClient` (`client.tls == true` immediately).
+   * Default false: plain dial, then optional STARTTLS.
+   */
+  implicit?: boolean;
 }
 
 export interface SmtpTlsConnectionState {

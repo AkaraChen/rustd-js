@@ -530,6 +530,47 @@ async function runTsCase(c, addr) {
     }
     return;
   }
+  if (c.id === 'client-newclient-implicit-tls') {
+    const client = await SmtpClient.dial(addr, { tls: { implicit: true, ...tlsClient } });
+    try {
+      if (!client.serverInfo.tls) throw new Error('expected serverInfo.tls');
+      const st = client.tlsConnectionState();
+      if (!st || !st.protocol) throw new Error('expected tlsConnectionState');
+      await client.hello();
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-implicit-tls-auth') {
+    const client = await SmtpClient.dial(addr, {
+      host: 'smtp.test.local',
+      tls: { implicit: true, ca: tlsCert, serverName: 'smtp.test.local' },
+    });
+    try {
+      if (!client.serverInfo.tls) throw new Error('expected serverInfo.tls');
+      await client.auth(plainAuth({ username: 'user', password: 'pass', host: 'smtp.test.local' }));
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
+  if (c.id === 'client-tls-connstate') {
+    const client = await SmtpClient.dial(addr);
+    try {
+      await client.startTls(tlsClient);
+      const st = client.tlsConnectionState();
+      if (!st || !st.protocol.startsWith('TLSv1.') || !st.authorized) {
+        throw new Error('bad TLS connection state');
+      }
+      await client.quit();
+    } finally {
+      await client.close();
+    }
+    return;
+  }
   throw new Error(`unhandled case ${c.id}`);
 }
 
@@ -542,7 +583,7 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
   assert.equal(generated.stdout, committed, 'Go smtp fixture drift');
   const packet = JSON.parse(committed);
   assert.equal(packet.package, 'smtp');
-  assert.ok(packet.cases.length >= 49, `cases ${packet.cases.length}`);
+  assert.ok(packet.cases.length >= 52, `cases ${packet.cases.length}`);
 
   for (const c of packet.cases) {
     if (c.kind === 'validate') {
@@ -556,7 +597,11 @@ test('Go regenerates committed smtp fixtures; TS client bytes match', async () =
       continue;
     }
     let caught;
-    const bytes = await withFakeSmtp({ ...c, tls: c.tls ? tlsServer : undefined }, async (addr) => {
+    const bytes = await withFakeSmtp({
+      ...c,
+      tls: (c.tls || c.implicitTls) ? tlsServer : undefined,
+      implicitTls: c.implicitTls,
+    }, async (addr) => {
       try {
         await runTsCase(c, addr);
       } catch (err) {
@@ -584,7 +629,11 @@ test('Go net/smtp against Node fake server matches committed clientHex', async (
     for (const c of packet.cases) {
       if (c.kind === 'validate') continue;
       let goErr;
-      const bytes = await withFakeSmtp({ ...c, tls: c.tls ? tlsServer : undefined }, async (addr) => {
+      const bytes = await withFakeSmtp({
+        ...c,
+        tls: (c.tls || c.implicitTls) ? tlsServer : undefined,
+        implicitTls: c.implicitTls,
+      }, async (addr) => {
         const result = await goClient(built.bin, c.id, addr);
         if (result.status !== 0) goErr = (result.stderr || '') + (result.stdout || '');
       }).catch((err) => {
