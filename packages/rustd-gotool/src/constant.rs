@@ -802,6 +802,123 @@ fn apply_exp2_exp5(
     Some(make_float(BigRational::new(numer, denom)))
 }
 
+fn unhex(b: u8) -> Option<u32> {
+    match b {
+        b'0'..=b'9' => Some(u32::from(b - b'0')),
+        b'a'..=b'f' => Some(u32::from(b - b'a' + 10)),
+        b'A'..=b'F' => Some(u32::from(b - b'A' + 10)),
+        _ => None,
+    }
+}
+
+fn valid_rune(v: u32) -> bool {
+    v < 0xD800 || (0xDFFF < v && v <= 0x10FFFF)
+}
+
+/// Go `utf8.DecodeRune`: invalid leading bytes become U+FFFD with size 1.
+fn decode_rune_prefix(s: &[u8]) -> (u32, usize) {
+    if s.is_empty() {
+        return (0xFFFD, 0);
+    }
+    match std::str::from_utf8(s) {
+        Ok(t) => match t.chars().next() {
+            Some(ch) => (ch as u32, ch.len_utf8()),
+            None => (0xFFFD, 0),
+        },
+        Err(err) => {
+            if err.valid_up_to() > 0 {
+                let t = std::str::from_utf8(&s[..err.valid_up_to()]).expect("prefix utf8");
+                let ch = t.chars().next().expect("prefix char");
+                (ch as u32, ch.len_utf8())
+            } else {
+                (0xFFFD, 1)
+            }
+        }
+    }
+}
+
+/// Go `strconv.UnquoteChar(s, '\'')` value; leftover tail is ignored (MakeFromLiteral).
+fn unquote_char(s: &[u8]) -> Option<i32> {
+    if s.is_empty() {
+        return None;
+    }
+    let c = s[0];
+    if c == b'\'' {
+        return None;
+    }
+    if c >= 0x80 {
+        let (r, _) = decode_rune_prefix(s);
+        return Some(r as i32);
+    }
+    if c != b'\\' {
+        return Some(i32::from(c));
+    }
+    if s.len() <= 1 {
+        return None;
+    }
+    let esc = s[1];
+    let rest = &s[2..];
+    match esc {
+        b'a' => Some(0x07),
+        b'b' => Some(0x08),
+        b'f' => Some(0x0c),
+        b'n' => Some(0x0a),
+        b'r' => Some(0x0d),
+        b't' => Some(0x09),
+        b'v' => Some(0x0b),
+        b'\\' => Some(i32::from(b'\\')),
+        b'\'' => Some(i32::from(b'\'')),
+        b'"' => None,
+        b'x' | b'u' | b'U' => {
+            let n = match esc {
+                b'x' => 2,
+                b'u' => 4,
+                _ => 8,
+            };
+            if rest.len() < n {
+                return None;
+            }
+            let mut v = 0u32;
+            for j in 0..n {
+                v = (v << 4) | unhex(rest[j])?;
+            }
+            if esc == b'x' {
+                Some(v as i32)
+            } else if valid_rune(v) {
+                Some(v as i32)
+            } else {
+                None
+            }
+        }
+        b'0'..=b'7' => {
+            if rest.len() < 2 {
+                return None;
+            }
+            let mut v = u32::from(esc - b'0');
+            for j in 0..2 {
+                let x = u32::from(rest[j].wrapping_sub(b'0'));
+                if x > 7 {
+                    return None;
+                }
+                v = (v << 3) | x;
+            }
+            if v > 255 {
+                return None;
+            }
+            Some(v as i32)
+        }
+        _ => None,
+    }
+}
+
+fn parse_char_literal(lit: &str) -> Option<i32> {
+    let n = lit.len();
+    if n < 2 {
+        return None;
+    }
+    unquote_char(&lit.as_bytes()[1..n - 1])
+}
+
 fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
     if lit.is_empty() {
         return None;
@@ -842,8 +959,8 @@ fn parse_float_literal(lit: &str) -> Option<GoConstValue> {
     apply_exp2_exp5(mant, neg, exp2, exp5)
 }
 
-/// Go `MakeFromLiteral` for INT/FLOAT. Invalid lit → Unknown. Other toks throw.
-/// `prec` must be 0 (Go panics otherwise).
+/// Go `MakeFromLiteral` for INT/FLOAT/CHAR. Invalid lit → Unknown. Other toks throw.
+/// `prec` must be 0 (Go panics otherwise). CHAR is an Int (rune code).
 #[napi]
 pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoConstValue> {
     if prec != 0 {
@@ -857,9 +974,12 @@ pub fn const_make_from_literal(lit: String, tok: i32, prec: i64) -> Result<GoCon
             .map(make_int)
             .unwrap_or_else(make_unknown)),
         token::FLOAT => Ok(parse_float_literal(&lit).unwrap_or_else(make_unknown)),
+        token::CHAR => Ok(parse_char_literal(&lit)
+            .map(|code| make_int(num_bigint::BigInt::from(code)))
+            .unwrap_or_else(make_unknown)),
         _ => Err(Error::new(
             Status::InvalidArg,
-            "gotool: constMakeFromLiteral tok must be INT or FLOAT",
+            "gotool: constMakeFromLiteral tok must be INT, FLOAT, or CHAR",
         )),
     }
 }

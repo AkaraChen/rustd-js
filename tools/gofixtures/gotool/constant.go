@@ -1142,6 +1142,8 @@ func evalLiteral(lit string, tok token.Token) ConstLitCase {
 		c.Tok = "INT"
 	case token.FLOAT:
 		c.Tok = "FLOAT"
+	case token.CHAR:
+		c.Tok = "CHAR"
 	default:
 		c.Tok = tok.String()
 	}
@@ -1256,4 +1258,71 @@ func verifyConstantLiteral(r io.Reader) {
 		}
 	}
 	fmt.Printf("Go verified %d gotool constant-int-float-literal cases\n", len(packet.Cases))
+}
+
+func charLiteralCorpus() []string {
+	return []string{
+		`'a'`, `'A'`, `'0'`, `' '`, `'"'`, `'中'`, `'π'`, `'😀'`,
+		`'\a'`, `'\b'`, `'\f'`, `'\n'`, `'\r'`, `'\t'`, `'\v'`, `'\\'`, `'\''`,
+		`'\x00'`, `'\x41'`, `'\x7f'`, `'\xff'`, `'\xFF'`, `'\x80'`,
+		`'\u0000'`, `'\u00e9'`, `'\u4e2d'`, `'\u0027'`,
+		`'\U00000000'`, `'\U0001F600'`, `'\U0010FFFF'`,
+		`'\000'`, `'\101'`, `'\377'`, `'\012'`,
+		`'ab'`, `'\x4142'`, `'\0123'`, `'中x'`, `'\n '`,
+		`abc`, `XyZ`,
+		``, `'`, `''`, `'a`, `a'`, `'\x'`, `'\x4'`, `'\xGG'`,
+		`'\u'`, `'\u12'`, `'\u00GG'`, `'\uD800'`, `'\uDFFF'`,
+		`'\U'`, `'\U1234567'`, `'\U00110000'`, `'\U0000D800'`,
+		`'\400'`, `'\8'`, `'\9'`, `'\"'`, `'\z'`, `'\ '`, `'\'`,
+	}
+}
+
+func dumpConstantCharLiteral(w io.Writer) {
+	packet := ConstLitPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-char-literal",
+	}
+	for i, lit := range charLiteralCorpus() {
+		c := evalLiteral(lit, token.CHAR)
+		c.ID = fmt.Sprintf("go-lit-CHAR-%d", i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantCharLiteral(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstLitPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-char-literal" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-char-literal packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		if c.Tok != "CHAR" {
+			fail(fmt.Errorf("case %d id=%s: tok %q != CHAR", i, c.ID, c.Tok))
+		}
+		if c.TokNum != int(token.CHAR) {
+			fail(fmt.Errorf("case %d id=%s: tokNum %d != Go CHAR %d", i, c.ID, c.TokNum, int(token.CHAR)))
+		}
+		got := evalLiteral(c.Lit, token.CHAR)
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ToInt != c.ToInt || got.ToIntOk != c.ToIntOk || got.BitLen != c.BitLen || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s lit=%q: go kind=%s exact=%s sign=%d toInt=%s ok=%v bitLen=%d f64=%s exact64=%v got kind=%s exact=%s sign=%d toInt=%s ok=%v bitLen=%d f64=%s exact64=%v",
+				i, c.ID, c.Lit, got.Kind, got.Exact, got.Sign, got.ToInt, got.ToIntOk, got.BitLen, got.F64Bits, got.F64Exact,
+				c.Kind, c.Exact, c.Sign, c.ToInt, c.ToIntOk, c.BitLen, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-char-literal cases\n", len(packet.Cases))
 }

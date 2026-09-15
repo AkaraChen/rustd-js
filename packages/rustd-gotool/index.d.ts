@@ -11,7 +11,7 @@ export class GoConstValue {
   toString(): string;
 }
 export function constMakeInt64(v: bigint): GoConstValue;
-/** Go `MakeFromLiteral` for INT/FLOAT. Invalid lit → Unknown. `prec` must be 0. */
+/** Go `MakeFromLiteral` for INT/FLOAT/CHAR. Invalid lit → Unknown. CHAR is Int. `prec` must be 0. */
 export function constMakeFromLiteral(lit: string, tok: number, prec: number): GoConstValue;
 export function constToInt(v: GoConstValue): [bigint, boolean];
 /** Go `StringVal`. Int/Float would panic → `["", false]`; Unknown → `["", true]`. */

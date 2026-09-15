@@ -35,6 +35,7 @@ import {
 const cv: GoConstValue = constMakeInt64(-42n);
 const fromLit: GoConstValue = constMakeFromLiteral('0x10', TOKEN.INT, 0);
 const fromFLit: GoConstValue = constMakeFromLiteral('1.5', TOKEN.FLOAT, 0);
+const fromCLit: GoConstValue = constMakeFromLiteral("'a'", TOKEN.CHAR, 0);
 const kind: GoConstValue['kind'] = cv.kind;
 const [ival, iok]: [bigint, boolean] = constToInt(cv);
 const [sval, sok]: [string, boolean] = constToString(cv);
@@ -95,4 +96,4 @@ versionIsValid(1);
 versionLang(1);
 // @ts-expect-error compare does not return boolean
 const wrong: boolean = versionCompare('go1', 'go1.1');
-void [cv, fromLit, fromFLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, isign, ibits, badd, fadd, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
+void [cv, fromLit, fromFLit, fromCLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, isign, ibits, badd, fadd, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
