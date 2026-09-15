@@ -95,6 +95,11 @@ function constFloat64Val(v) {
 function constCompare(x, y) {
   return binding.constCompare(asConst(x, 'x')._n, asConst(y, 'y')._n);
 }
+function constCompareOp(x, op, y) {
+  return new GoConstValue(
+    binding.constCompareOp(asConst(x, 'x')._n, asNumber(op, 'op'), asConst(y, 'y')._n),
+  );
+}
 function constSign(v) {
   return binding.constSign(asConst(v, 'v')._n);
 }
@@ -401,6 +406,7 @@ module.exports.constBoolVal = constBoolVal;
 module.exports.constToString = constToString;
 module.exports.constFloat64Val = constFloat64Val;
 module.exports.constCompare = constCompare;
+module.exports.constCompareOp = constCompareOp;
 module.exports.constSign = constSign;
 module.exports.constReal = constReal;
 module.exports.constImag = constImag;

@@ -24,6 +24,13 @@ export function constToString(v: GoConstValue): [string, boolean];
 export function constFloat64Val(v: GoConstValue): [number, boolean];
 /** Int/Float ordering via Go `Compare` (`big.Rat.Cmp`): -1 / 0 / 1. Throws on Unknown. */
 export function constCompare(x: GoConstValue, y: GoConstValue): number;
+/**
+ * Go `MakeBool(Compare(x, op, y))` for EQL/NEQ.
+ * Complex (and mixed Int/Float/Unknown) uses component EQL after `match`/`vtoc`.
+ * Unknown vs non-Complex is false; Unknown vs Complex can be NEQ true.
+ * LSS/LEQ/GTR/GEQ and Bool/String throw (not this slice).
+ */
+export function constCompareOp(x: GoConstValue, op: number, y: GoConstValue): GoConstValue;
 export function constSign(v: GoConstValue): number;
 /** Go `Real`. Complex returns the stored re (IMAG real is Int 0); Unknown/Int/Float return `x`. */
 export function constReal(v: GoConstValue): GoConstValue;

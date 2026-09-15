@@ -9,6 +9,7 @@ import {
   constToString,
   constFloat64Val,
   constCompare,
+  constCompareOp,
   constSign,
   constReal,
   constImag,
@@ -46,6 +47,7 @@ const [sval, sok]: [string, boolean] = constToString(cv);
 const [fval, fok]: [number, boolean] = constFloat64Val(cv);
 const icmp: number = constCompare(cv, constMakeInt64(0n));
 const fcmp: number = constCompare(constBinaryOp(TOKEN.QUO, cv, constMakeInt64(2n)), cv);
+const ceq: GoConstValue = constCompareOp(fromILit, TOKEN.EQL, fromILit);
 const isign: number = constSign(cv);
 const ireal: GoConstValue = constReal(fromILit);
 const iimag: GoConstValue = constImag(fromILit);
@@ -105,4 +107,6 @@ versionIsValid(1);
 versionLang(1);
 // @ts-expect-error compare does not return boolean
 const wrong: boolean = versionCompare('go1', 'go1.1');
-void [cv, fromLit, fromFLit, fromCLit, fromILit, fromSLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, isign, ireal, iimag, ibits, badd, fadd, cadd, cmul, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];
+// @ts-expect-error CompareOp operands are GoConstValue
+constCompareOp(1n, TOKEN.EQL, fromILit);
+void [cv, fromLit, fromFLit, fromCLit, fromILit, fromSLit, kind, ival, iok, sval, sok, fval, fok, icmp, fcmp, ceq, isign, ireal, iimag, ibits, badd, fadd, cadd, cmul, uxor, fneg, sshl, bstr, cmp, ok, lang, tok, kw, exp, s, scanner, err, parseErr, wrong, parsed, expr, id, exported];

@@ -12,6 +12,7 @@ export const {
   constBoolVal,
   constFloat64Val,
   constCompare,
+  constCompareOp,
   constSign,
   constReal,
   constImag,

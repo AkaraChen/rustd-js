@@ -5,7 +5,7 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 21 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 22 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
@@ -28,15 +28,17 @@ propagates; `Compare` EQL/NEQ is dumped as `MakeBool(Compare(...))`),
 and Complex `constBinaryOp` ADD/SUB/MUL/QUO vs Go `BinaryOp` (`vtoc` then
 the component formula; mixed Int/Float; `1i*1i` stays Complex `(-1 + 0i)`),
 plus Complex `constUnaryOp` ADD/SUB vs Go `UnaryOp` (ADD is identity; SUB is
-`makeComplex(-re, -im)`).
-`go/format` / `gofmt`, Complex Compare, and
+`makeComplex(-re, -im)`), and Complex `constCompareOp` EQL/NEQ vs Go
+`MakeBool(Compare)` (component EQL after `match`/`vtoc`; Unknown vs Complex
+can be NEQ true).
+`go/format` / `gofmt`, String Compare, and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
 ```js
 import {
   versionLang, FileSet, Scanner, TOKEN, SCAN_MODE,
   PARSE_MODE, parseFile, astFprint,
-  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constToInt, constToString, constFloat64Val, constBoolVal,
+  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constCompareOp, constToInt, constToString, constFloat64Val, constBoolVal,
   constBinaryOp, constUnaryOp, constShift, TOKEN,
 } from 'rustd-gotool';
 
@@ -52,6 +54,7 @@ constBoolVal(constUnaryOp(TOKEN.NOT, constMakeBool(true), 0)); // [false, true]
 constBinaryOp(TOKEN.LAND, constMakeBool(true), constMakeBool(false)).toString(); // "false"
 constBinaryOp(TOKEN.MUL, constMakeFromLiteral('1i', TOKEN.IMAG, 0), constMakeFromLiteral('1i', TOKEN.IMAG, 0)).toString(); // "(-1 + 0i)"
 constUnaryOp(TOKEN.SUB, constMakeFromLiteral('1i', TOKEN.IMAG, 0), 0).toString(); // "(0 + -1i)"
+constCompareOp(constMakeFromLiteral('1i', TOKEN.IMAG, 0), TOKEN.EQL, constMakeFromLiteral('1i', TOKEN.IMAG, 0)).toString(); // "true"
 constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
 constToInt(constMakeInt64(1n)); // [1n, true]
@@ -139,7 +142,13 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `constBoolVal` is Go `BoolVal`: Bool is `[b, true]`; Unknown is `[false, true]`;
   other kinds panic in Go → `[false, false]`. `GoConstValue#toString` for Bool is
   `"true"`/`"false"`. `constCompare` stays numeric-only (EQL/NEQ Bool results
-  are `MakeBool(Compare)` in the Go dump). `constSign` throws on Bool/String
+  are `MakeBool(Compare)` in the Go dump). `constCompareOp` is Go
+  `MakeBool(Compare(x, op, y))` for EQL/NEQ on Int/Float/Complex/Unknown.
+  Complex uses component EQL after `match`/`vtoc` (numeric → imag Int 0;
+  Unknown → `complexVal{unknown, 0}`, so Unknown vs Complex NEQ can be true).
+  Unknown vs Unknown or vs non-Complex is false for both EQL and NEQ.
+  LSS/LEQ/GTR/GEQ and Bool/String operands throw (Go panics on Complex
+  ordering; String Compare stays later). `constSign` throws on Bool/String
   (Go panics: not numeric).
   `constShift` is Int SHL/SHR; `s` must be a non-negative bigint in
   `0..1000000` (JS mapping of Go's unbounded `uint` to avoid native OOM).
@@ -166,8 +175,8 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `GoConstValue#toString` for IMAG is Go `ExactString` (`(0 + 3/2i)`);
   for STRING it is Go `ExactString` (`strconv.Quote`);
   for Bool it is `"true"`/`"false"`.
-  `constCompare` on Complex stays later (`Compare` on Complex
-  is bool EQL/NEQ, not -1/0/1). `1e9999i` (512-bit `floatVal`
+  `constCompare` on Complex throws (ordering is -1/0/1 and undefined);
+  use `constCompareOp` for bool EQL/NEQ. `1e9999i` (512-bit `floatVal`
   ExactString) is not in this checkpoint, same as FLOAT.
   Large-component rats that Go promotes to 512-bit
   `floatVal` (`BitLen >= 4096`) are not in this checkpoint.
@@ -175,9 +184,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **783,016 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **787,136 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 783016 Sep 15 07:23 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 787136 Sep 15 07:44 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```
