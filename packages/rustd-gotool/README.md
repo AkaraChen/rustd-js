@@ -188,9 +188,14 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   throws on non-Int. `constMakeFromLiteral` is INT/FLOAT/CHAR/IMAG/STRING
   (`prec` must be 0; other tokens throw). Invalid literals are Unknown, matching
   Go. CHAR uses `strconv.UnquoteChar` on `lit[1:n-1]` without checking the
-  wrapping bytes (`"a"` and `` `a` `` are Int 97) and ignores leftover tail
-  (`'ab'` / `'a'x` are Int 97). `aa` (empty inner) and `'''` (inner is `'`)
-  are Unknown. Unicode noncharacters (`'\uFFFE'`) are valid runes. STRING uses `strconv.Unquote` (leftover is Unknown:
+  wrapping **bytes** (`"a"` and `` `a` `` are Int 97) and ignores leftover tail
+  (`'ab'` / `'a'x` are Int 97). Unquoted 2-byte UTF-8 (`π` / `é` / `¥`) strips
+  both bytes and is Unknown; unquoted 3+/4-byte (`中` / `€` / `😀`) leaves an
+  invalid UTF-8 inner byte and is Int 65533 (`U+FFFD`). Unclosed `'中` is also
+  U+FFFD. Quoted `"中"` / `"€"` / `` `😀` `` keep the rune. Combining
+  `'e\u0301'` takes only the first rune (Int 101). `aa` (empty inner), `'''`
+  (inner is `'`), and JS-style `'\u{41}'` are Unknown.
+  Unicode noncharacters (`'\uFFFE'`) are valid runes. STRING uses `strconv.Unquote` (leftover is Unknown:
   `'ab'` as STRING is Unknown; `''` is the empty String). IMAG requires a trailing
   `i` and parses the prefix as a
   FLOAT (`08i` is Complex 8 because float `SetString` is decimal). Result is

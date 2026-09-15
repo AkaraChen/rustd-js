@@ -1281,6 +1281,19 @@ func charLiteralCorpus() []string {
 		`'\uFFFE'`, `'\uFFFF'`, `'\uFDD0'`, `'\uFEFF'`, `'\uFFFD'`,
 		`"aa"`, `' 'x`, `'\u000A'`, "'\n'", "'\t'", "'\x00'",
 		`a b`, `'a''`, `''''`,
+		// First/last BYTE, not rune. 2-byte UTF-8 unquoted → empty inner Unknown.
+		`中`, `π`, `😀`, `é`, `ω`, `ÿ`,
+		`"中"`, "`中`", `"π"`, "`π`",
+		`中a`, `a中`, `😀x`,
+		`'\U0000FFFE'`, `'\U0001FFFE'`,
+		`"'"`, `"a"x`, "`a`x", `"\n"`,
+		// Unclosed/unopened UTF-8 quotes: inner is a truncated sequence → U+FFFD.
+		`'中`, `中'`, `中中`,
+		// 3-byte unquoted € / ₩ → U+FFFD; quoted keeps the rune. 2-byte ¥ → Unknown.
+		`€`, `'€'`, `"€"`, "`€`", `¥`, `₩`,
+		`"😀"`, "`😀`",
+		" a ", `"\""`, `''a`, `éé`,
+		`'\u{41}'`, "'e\u0301'",
 	}
 }
 
