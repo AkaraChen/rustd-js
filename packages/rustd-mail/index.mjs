@@ -9,4 +9,12 @@ export const {
   parseAddress,
   parseAddressList,
   parseDate,
+  SmtpError,
+  FeatureNotBuiltError,
+  SmtpClient,
+  SmtpDataWriter,
+  plainAuth,
+  loginAuth,
+  cramMd5Auth,
+  sendMail,
 } = api;

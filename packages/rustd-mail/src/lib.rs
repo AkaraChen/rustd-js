@@ -3,6 +3,7 @@ mod date;
 mod error;
 mod header;
 mod media;
+mod smtp;
 mod word;
 
 use napi::bindgen_prelude::*;

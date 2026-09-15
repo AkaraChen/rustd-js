@@ -1,20 +1,21 @@
 # rustd-mail
 
-Synchronous Rust + Node-API port of Go `net/mail` (message, address, and
-RFC 5322 date parsing). SMTP (`net/smtp`) is not in this slice; it waits on
-`rustd-net` / `rustd-tls`.
+Rust + Node-API port of Go `net/mail` (RFC 5322 message/address/date parse)
+and `net/smtp` (`SmtpClient`, `sendMail`, `plainAuth` / `loginAuth` / `cramMd5Auth`).
 
-Runtime Node >=20; no JavaScript runtime dependencies.
+Runtime Node >=20; no JavaScript runtime dependencies. rustd-net was cancelled,
+so SMTP uses an in-crate TCP client (`std::net::TcpStream`). `SmtpError` is
+local (there is no shared `TextProtoError`).
 
 ```js
-import { readMessage, parseAddress, parseAddressList, parseDate } from 'rustd-mail';
+import { readMessage, parseAddress, sendMail, plainAuth, SmtpClient } from 'rustd-mail';
 
-const msg = readMessage(Buffer.from('From: A <a@b.com>\n\nHello\n'));
-msg.header.get('From');          // 'A <a@b.com>'
-msg.header.addressList('From');  // [MailAddress { name: 'A', address: 'a@b.com' }]
-msg.body;                        // raw body bytes; no MIME recursion
+readMessage(Buffer.from('From: A <a@b.com>\n\nHello\n'));
 parseAddress('John Doe <jdoe@machine.example>');
-parseDate('Fri, 21 Nov 1997 09:55:06 -0600');
+
+await sendMail('127.0.0.1:2525', plainAuth({
+  username: 'user', password: 'pass', host: '127.0.0.1',
+}), 'a@b.com', ['c@d.com'], 'From: a@b.com\r\nTo: c@d.com\r\n\r\nHi\r\n');
 ```
 
 ## Differences from Go
@@ -32,19 +33,26 @@ parseDate('Fri, 21 Nov 1997 09:55:06 -0600');
 - `readMessage` takes in-memory `Uint8Array` or string, not `io.Reader`.
 - `bodyText()` / `mediaType()` are JS conveniences. Missing `Content-Type`
   defaults to `text/plain; charset=us-ascii`. Charsets other than utf-8,
-  us-ascii, and iso-8859-1 throw. Custom `mime.WordDecoder` / `CharsetReader`
-  is not exposed; the Go default decoder is used (utf-8 / us-ascii / iso-8859-1).
-- Named zones without a numeric offset (CST, PDT, …) use offset 0 when the
-  abbreviation is not GMT/UT/UTC, matching Go `time.Parse` on a location that
-  does not define that abbreviation. Prefer numeric offsets for portable instants.
+  us-ascii, and iso-8859-1 throw.
 - RFC 5322 dates are parsed in this package; they are not HTTP dates.
-- SMTP, STARTTLS, and `SmtpClient` are out of scope for 0.1.0 mail-parse.
+- There is no `NetConn` / `SmtpClient.fromConn`. `SmtpClient.dial(address, {
+  host })` maps to Go `Dial` + `NewClient`'s host name (auth / TLS identity).
+  Default `host` is the host in `address`.
+- `SmtpError` matches `textproto.Error` (`code` / `serverMessage`, message
+  `NNN ...`) and adds `command` plus `permanent` (`code >= 500`).
+- `extension` / `extensionParams` are synchronous and do not send EHLO.
+  Call `hello()`, `mail()`, or `sendMail` first. Go's `Extension` may I/O.
+- `startTls()` sends `STARTTLS` and expects 220, then throws
+  `FeatureNotBuiltError` (`rustd-tls` is out of scope). It does **not**
+  continue in plaintext. `sendMail` therefore cannot complete when the server
+  advertises STARTTLS.
+- `loginAuth` is extra (Go stdlib has PLAIN and CRAM-MD5 only). Same
+  TLS-or-localhost rule as `plainAuth`.
+- DATA lines longer than 998 bytes throw (RFC 5321). Go's `DotWriter` does not
+  enforce this.
+- Default dial timeout is 30s. Pass `{ timeoutMs: 0 }` for Go-like blocking.
+- No connection pool; one `SmtpClient` is one TCP connection.
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-14): **414,800 bytes**.
-
-```text
-$ ls -l packages/rustd-mail/*.node
--rwxrwxr-x 1 akrc akrc 414800 Sep 14 18:43 packages/rustd-mail/rustd-mail.linux-x64-gnu.node
-```
+Local Linux x64 GNU release probe is asserted in tests: **≤ 2 MB** stripped.
