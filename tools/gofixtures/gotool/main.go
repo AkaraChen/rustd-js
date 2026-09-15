@@ -138,7 +138,26 @@ func main() {
 	verifyConstantSCmpFlag := flag.Bool("verify-constant-string-compare", false, "verify a constant-string-compare packet read from stdin")
 	constantConvFlag := flag.Bool("constant-tofloat-tocomplex", false, "dump go/constant ToFloat/ToComplex fixtures")
 	verifyConstantConvFlag := flag.Bool("verify-constant-tofloat-tocomplex", false, "verify a constant-tofloat-tocomplex packet read from stdin")
+	constantToIntFlag := flag.Bool("constant-toint", false, "dump go/constant ToInt fixtures")
+	verifyConstantToIntFlag := flag.Bool("verify-constant-toint", false, "verify a constant-toint packet read from stdin")
 	flag.Parse()
+	if *verifyConstantToIntFlag {
+		verifyConstantToInt(os.Stdin)
+		return
+	}
+	if *constantToIntFlag {
+		var writer io.Writer = os.Stdout
+		if *out != "" {
+			f, err := os.Create(*out)
+			if err != nil {
+				fail(err)
+			}
+			defer f.Close()
+			writer = f
+		}
+		dumpConstantToInt(writer)
+		return
+	}
 	if *verifyConstantConvFlag {
 		verifyConstantConvert(os.Stdin)
 		return

@@ -735,6 +735,29 @@ fn convert_to_complex(v: &GoConstValue) -> GoConstValue {
     }
 }
 
+/// Go `ToInt`. Int identity; integer-valued Float (`rat.IsInt`) → Int;
+/// Complex with imag 0 converts the real part; otherwise Unknown
+/// (including Bool/String and 512-bit `floatVal`, which this checkpoint
+/// does not construct). `constToInt` stays `Int64Val`.
+fn convert_to_int(v: &GoConstValue) -> GoConstValue {
+    match v.kind.as_str() {
+        "Int" => clone_value(v),
+        "Float" => match v.rat.as_ref() {
+            Some(r) if r.is_integer() => make_int(r.numer().clone()),
+            _ => make_unknown(),
+        },
+        "Complex" => {
+            let re = convert_to_float(v);
+            if re.kind == "Float" {
+                convert_to_int(&re)
+            } else {
+                make_unknown()
+            }
+        }
+        _ => make_unknown(),
+    }
+}
+
 /// Go `ToFloat`.
 #[napi]
 pub fn const_to_float(v: &GoConstValue) -> GoConstValue {
@@ -745,6 +768,12 @@ pub fn const_to_float(v: &GoConstValue) -> GoConstValue {
 #[napi]
 pub fn const_to_complex(v: &GoConstValue) -> GoConstValue {
     convert_to_complex(v)
+}
+
+/// Go `ToInt` (Value conversion). `constToInt` remains `Int64Val`.
+#[napi]
+pub fn const_to_int_value(v: &GoConstValue) -> GoConstValue {
+    convert_to_int(v)
 }
 
 /// Go `Real`. Numeric non-Complex returns `x`; Complex returns the stored re.

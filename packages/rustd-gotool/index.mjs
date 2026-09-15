@@ -9,6 +9,7 @@ export const {
   constMakeFromLiteral,
   constToFloat,
   constToComplex,
+  constToIntValue,
   constToInt,
   constToString,
   constBoolVal,

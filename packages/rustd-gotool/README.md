@@ -5,7 +5,7 @@
 binding only when a Node process must classify Go toolchain strings or
 tokenize Go source without spawning `go`.
 
-Checkpoint 25 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
+Checkpoint 26 of [issue #28](https://github.com/AkaraChen/rustd-js/issues/28):
 `go/version`, `go/token`, `go/scanner`, `go/parser` / `ast.Fprint`,
 `GoParseError` recovery, §4.8 edges, plus the `go/constant` **Int** slice
 (`constMakeInt64` / `constToInt` / `constCompare` / `constSign` / `constBitLen`
@@ -34,9 +34,10 @@ can be NEQ true), String `constCompareOp` EQL/NEQ/LSS/LEQ/GTR/GEQ vs Go
 `MakeBool(Compare)` (byte-wise Go string `<`; Unknown vs String is false),
 and Bool `constCompareOp` EQL/NEQ vs Go `MakeBool(Compare)` (Unknown vs Bool
 is false; mixed Bool vs Int/Float/Complex throw),
-plus `constToFloat` / `constToComplex` vs Go `ToFloat` / `ToComplex`
+plus `constToFloat` / `constToComplex` / `constToIntValue` vs Go `ToFloat` / `ToComplex` / `ToInt`
 (Int → Float `n/1`; Float identity; Complex with imag 0 unwraps re; Bool/String
-and nonzero-imag Complex → Unknown; Int/Float → Complex with imag Int 0).
+and nonzero-imag Complex → Unknown; Int/Float → Complex with imag Int 0;
+`ToInt` is Int identity, integer-valued Float unwraps, else Unknown).
 `go/format` / `gofmt` and
 `go/build/constraint` are **not** in this release. API is `0.x` and unstable.
 
@@ -44,7 +45,7 @@ and nonzero-imag Complex → Unknown; Int/Float → Complex with imag Int 0).
 import {
   versionLang, FileSet, Scanner, TOKEN, SCAN_MODE,
   PARSE_MODE, parseFile, astFprint,
-  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constCompareOp, constToFloat, constToComplex, constToInt, constToString, constFloat64Val, constBoolVal,
+  constMakeInt64, constMakeBool, constMakeFromLiteral, constCompare, constCompareOp, constToFloat, constToComplex, constToIntValue, constToInt, constToString, constFloat64Val, constBoolVal,
   constBinaryOp, constUnaryOp, constShift, TOKEN,
 } from 'rustd-gotool';
 
@@ -67,6 +68,8 @@ constCompare(constMakeInt64(1n), constMakeInt64(2n)); // -1
 constCompare(constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(2n)), constMakeInt64(1n)); // -1
 constToFloat(constMakeInt64(1n)).kind; // "Float"
 constToComplex(constMakeInt64(1n)).toString(); // "(1 + 0i)"
+constToIntValue(constMakeInt64(1n)).kind; // "Int"
+constToIntValue(constBinaryOp(TOKEN.QUO, constMakeInt64(4n), constMakeInt64(2n))).toString(); // "2"
 constToInt(constMakeInt64(1n)); // [1n, true]
 constToString(constMakeInt64(1n)); // ["", false] — Int is not a Go string constant
 constFloat64Val(constMakeInt64(1n)); // [1, true]
@@ -169,6 +172,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `0..1000000` (JS mapping of Go's unbounded `uint` to avoid native OOM).
   `constToInt` is Go `Int64Val`: `[value, true]` when the Int fits in int64;
   otherwise `[low64-with-sign, false]` (Go's `big.Int.Int64` wrapping).
+  `constToIntValue` is Go `ToInt`: Int identity; integer-valued Float (`rat.IsInt`)
+  becomes Int; Complex with `Sign(im)==0` converts the real part (`0i` is Int
+  `"0"`); Bool/String/Unknown and non-integer Float / nonzero-imag Complex are Unknown.
   `constToString` is Go `StringVal` with panic mapped to `ok=false`: Int/Float/Bool
   are `["", false]`; String is `[unquoted, true]`; Unknown is `["", true]`.
   Invalid UTF-8 StringVal bytes become U+FFFD in the JS string; identity is
@@ -197,6 +203,8 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   `"0"`); Bool/String/Unknown and nonzero-imag Complex are Unknown.
   `constToComplex` is Go `ToComplex`: Int/Float wrap as Complex with imag Int 0;
   Complex is identity; Bool/String/Unknown are Unknown.
+  `constToIntValue` is Go `ToInt` (keep `constToInt` as `Int64Val`): Int identity;
+  `4/2` is Int `"2"`; `1/2` is Unknown; `0i` is Int `"0"`; `1i` is Unknown.
   `1e9999i` (512-bit `floatVal`
   ExactString) is not in this checkpoint, same as FLOAT.
   Large-component rats that Go promotes to 512-bit
@@ -205,9 +213,9 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
 
 ## Size
 
-Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **790,416 bytes**.
+Local Linux x64 GNU release probe, Rust 1.97.1 (2026-09-15): **791,640 bytes**.
 
 ```text
 $ ls -l packages/rustd-gotool/*.node
--rwxrwxr-x 1 akrc akrc 790416 Sep 15 09:03 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
+-rwxrwxr-x 1 akrc akrc 791640 Sep 15 09:40 packages/rustd-gotool/rustd-gotool.linux-x64-gnu.node
 ```

@@ -19,6 +19,9 @@ export function constMakeFromLiteral(lit: string, tok: number, prec: number): Go
 export function constToFloat(v: GoConstValue): GoConstValue;
 /** Go `ToComplex`. Int/Float → Complex with imag Int 0; Complex identity; Bool/String/Unknown → Unknown. */
 export function constToComplex(v: GoConstValue): GoConstValue;
+/** Go `ToInt` (Value conversion). Integer-valued Float/Complex unwraps to Int; else Unknown. */
+export function constToIntValue(v: GoConstValue): GoConstValue;
+/** Go `Int64Val`. */
 export function constToInt(v: GoConstValue): [bigint, boolean];
 /** Go `BoolVal`. Bool → `[b, true]`; Unknown → `[false, true]`; other kinds panic in Go → `[false, false]`. */
 export function constBoolVal(v: GoConstValue): [boolean, boolean];
