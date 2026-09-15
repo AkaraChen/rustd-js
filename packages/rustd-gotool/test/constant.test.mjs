@@ -851,6 +851,14 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
     "'\\U0001FFFE'",
     '"\\n"',
     '"a"x',
+    "'中",
+    '€',
+    '¥',
+    ' a ',
+    '"😀"',
+    "'\\u{41}'",
+    "'e\u0301'",
+    '"\\""',
   ];
   const cases = extras.map((lit, i) => evaluateLit({
     id: `js-char-${i}`, tok: 'CHAR', tokNum: TOKEN.CHAR, lit,
@@ -858,7 +866,7 @@ test('JS MakeFromLiteral CHAR extras → native computes → Go verifies; corrup
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-char-literal', cases };
   const verified = go(['-verify-constant-char-literal'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 30 gotool constant-char-literal cases/);
+  assert.match(verified.stdout, /Go verified 38 gotool constant-char-literal cases/);
   const broken = structuredClone(packet);
   broken.cases[0].exact = 'not-a-rune';
   const rejected = go(['-verify-constant-char-literal'], JSON.stringify(broken));
@@ -904,6 +912,22 @@ test('constMakeFromLiteral CHAR: rune Int, tail ignored, malformed Unknown', () 
   assert.equal(emojiStrip.toString(), '65533');
   const dqQuote = constMakeFromLiteral('"\'"', TOKEN.CHAR, 0);
   assert.equal(dqQuote.kind, 'Unknown');
+  const unclosedHan = constMakeFromLiteral("'中", TOKEN.CHAR, 0);
+  assert.equal(unclosedHan.toString(), '65533');
+  const euroStrip = constMakeFromLiteral('€', TOKEN.CHAR, 0);
+  assert.equal(euroStrip.toString(), '65533');
+  const yenStrip = constMakeFromLiteral('¥', TOKEN.CHAR, 0);
+  assert.equal(yenStrip.kind, 'Unknown');
+  const quotedEuro = constMakeFromLiteral("'€'", TOKEN.CHAR, 0);
+  assert.equal(quotedEuro.toString(), '8364');
+  const combining = constMakeFromLiteral("'e\u0301'", TOKEN.CHAR, 0);
+  assert.equal(combining.toString(), '101');
+  const spaceWrap = constMakeFromLiteral(' a ', TOKEN.CHAR, 0);
+  assert.equal(spaceWrap.toString(), '97');
+  const jsUnicode = constMakeFromLiteral("'\\u{41}'", TOKEN.CHAR, 0);
+  assert.equal(jsUnicode.kind, 'Unknown');
+  const quotedEmoji = constMakeFromLiteral('"😀"', TOKEN.CHAR, 0);
+  assert.equal(quotedEmoji.toString(), '128512');
 });
 
 function evaluateImagLit(c) {
