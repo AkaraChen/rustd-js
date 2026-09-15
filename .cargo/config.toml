@@ -1,0 +1,3 @@
+[build]
+# The native packages build sequentially; share compiled dependencies across them.
+target-dir = "target"

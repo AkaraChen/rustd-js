@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { maphashBytes, maphashSeed } from '../index.mjs';
 
 function popcount64(n) {
@@ -24,7 +25,7 @@ test('same seed and input are stable across 100 in-process runs and a child proc
   const first = maphashBytes(seed, data);
   for (let i = 0; i < 100; i++) assert.equal(maphashBytes(seed, data), first);
   const child = spawnSync(process.execPath, ['-e', `
-    const { maphashBytes } = require(${JSON.stringify(new URL('../index.js', import.meta.url).pathname)});
+    const { maphashBytes } = require(${JSON.stringify(fileURLToPath(new URL('../index.js', import.meta.url)))});
     process.stdout.write(String(maphashBytes(${seed}n, Buffer.from('maphash-stability'))));
   `], { encoding: 'utf8' });
   assert.equal(child.status, 0, child.stderr);
