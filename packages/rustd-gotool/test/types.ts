@@ -8,6 +8,7 @@ import {
   constMakeFromLiteral,
   constToFloat,
   constToComplex,
+  constToIntValue,
   constToInt,
   constToString,
   constFloat64Val,
@@ -46,6 +47,7 @@ const fromILit: GoConstValue = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
 const fromSLit: GoConstValue = constMakeFromLiteral('"foo"', TOKEN.STRING, 0);
 const toF: GoConstValue = constToFloat(cv);
 const toC: GoConstValue = constToComplex(cv);
+const toIV: GoConstValue = constToIntValue(cv);
 const kind: GoConstValue['kind'] = cv.kind;
 const [ival, iok]: [bigint, boolean] = constToInt(cv);
 const [sval, sok]: [string, boolean] = constToString(cv);
@@ -100,6 +102,8 @@ constMakeFromLiteral(1, TOKEN.INT, 0);
 constToFloat(1);
 // @ts-expect-error ToComplex operand is GoConstValue
 constToComplex(1);
+// @ts-expect-error ToInt Value operand is GoConstValue
+constToIntValue(1);
 // @ts-expect-error StringVal operand is GoConstValue
 constToString(1);
 // @ts-expect-error Float64Val operand is GoConstValue

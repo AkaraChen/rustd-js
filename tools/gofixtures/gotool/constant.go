@@ -1276,6 +1276,11 @@ func charLiteralCorpus() []string {
 		`'\u'`, `'\u12'`, `'\u00GG'`, `'\uD800'`, `'\uDFFF'`,
 		`'\U'`, `'\U1234567'`, `'\U00110000'`, `'\U0000D800'`,
 		`'\400'`, `'\8'`, `'\9'`, `'\"'`, `'\z'`, `'\ '`, `'\'`,
+		// Go strips lit[1:n-1] without checking quotes. Noncharacters are valid runes.
+		`"a"`, "`a`", `'a'x`, `'''`, `''a'`, `aa`, `ab`, `x`,
+		`'\uFFFE'`, `'\uFFFF'`, `'\uFDD0'`, `'\uFEFF'`, `'\uFFFD'`,
+		`"aa"`, `' 'x`, `'\u000A'`, "'\n'", "'\t'", "'\x00'",
+		`a b`, `'a''`, `''''`,
 	}
 }
 
@@ -2539,6 +2544,8 @@ func evalConvert(form, xStr, yStr, sStr, convert string) (ConstConvCase, error) 
 		v = constant.ToFloat(src)
 	case "ToComplex":
 		v = constant.ToComplex(src)
+	case "ToInt":
+		v = constant.ToInt(src)
 	default:
 		return ConstConvCase{}, fmt.Errorf("unknown convert %q", convert)
 	}
@@ -2650,4 +2657,75 @@ func verifyConstantConvert(r io.Reader) {
 		}
 	}
 	fmt.Printf("Go verified %d gotool constant-tofloat-tocomplex cases\n", len(packet.Cases))
+}
+
+func toIntCorpus() []convSrc {
+	extra := []convSrc{
+		{"quo", "4", "2", "0"},
+		{"quo", "0", "1", "0"},
+		{"quo", "8", "2", "0"},
+		{"quo", "3", "1", "0"},
+		{"quo", "-4", "2", "0"},
+		{"quo", "9", "3", "0"},
+		{"quo", "1", "1", "0"},
+		{"quo", "7", "7", "0"},
+		{"quo", "-8", "2", "0"},
+		{"quo", "2", "1", "0"},
+	}
+	return append(convertCorpus(), extra...)
+}
+
+// ToInt vs Go. 512-bit floatVal (BitLen>=4096 Int ToFloat then ToInt)
+// stays deferred with the ToFloat checkpoint.
+func dumpConstantToInt(w io.Writer) {
+	packet := ConstConvPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-toint",
+	}
+	for i, src := range toIntCorpus() {
+		c, err := evalConvert(src.form, src.x, src.y, src.s, "ToInt")
+		if err != nil {
+			fail(err)
+		}
+		c.ID = fmt.Sprintf("go-conv-ToInt-%d", i)
+		packet.Cases = append(packet.Cases, c)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantToInt(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstConvPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-toint" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-toint packet header or empty cases"))
+	}
+	for i, c := range packet.Cases {
+		if c.Convert != "ToInt" {
+			fail(fmt.Errorf("case %d id=%s: convert %q != ToInt", i, c.ID, c.Convert))
+		}
+		got, err := evalConvert(c.Form, c.X, c.Y, c.S, c.Convert)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.OrigKind != c.OrigKind || got.Kind != c.Kind || got.Exact != c.Exact || got.Sign != c.Sign || got.ReKind != c.ReKind || got.ReExact != c.ReExact || got.ImKind != c.ImKind || got.ImExact != c.ImExact || got.F64Bits != c.F64Bits || got.F64Exact != c.F64Exact {
+			fail(fmt.Errorf("mismatch case %d id=%s convert=%s form=%s: go orig=%s kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v got orig=%s kind=%s exact=%s sign=%d re=%s/%s im=%s/%s f64=%s exact64=%v",
+				i, c.ID, c.Convert, c.Form, got.OrigKind, got.Kind, got.Exact, got.Sign, got.ReKind, got.ReExact, got.ImKind, got.ImExact, got.F64Bits, got.F64Exact,
+				c.OrigKind, c.Kind, c.Exact, c.Sign, c.ReKind, c.ReExact, c.ImKind, c.ImExact, c.F64Bits, c.F64Exact))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-toint cases\n", len(packet.Cases))
 }
