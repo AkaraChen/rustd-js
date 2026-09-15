@@ -13,6 +13,7 @@ import {
   constBoolVal,
   constFloat64Val,
   constCompare,
+  constCompareOp,
   constSign,
   constReal,
   constImag,
@@ -1391,4 +1392,110 @@ test('constUnaryOp Complex: +1i identity, -1i, mixed 1+1i, Unknown, XOR/NOT thro
   assert.throws(() => constUnaryOp(TOKEN.XOR, i, 0), /Int/);
   assert.throws(() => constUnaryOp(TOKEN.XOR, i, 8), /Int/);
   assert.throws(() => constUnaryOp(TOKEN.NOT, i, 0), /NOT requires Bool/);
+});
+
+function makeCplxCmp(form, x, y) {
+  if (form === 'imag' || form === 'int' || form === 'quo' || form === 'unknown') {
+    return makeCplx(form, x, y);
+  }
+  if (form === 'sum') return makeCplxUn(form, x, y);
+  throw new Error(`unknown complex compare src ${form}`);
+}
+
+function evaluateCCmp(c) {
+  const r = constCompareOp(
+    makeCplxCmp(c.formX, c.xx, c.xy),
+    TOKEN[c.op],
+    makeCplxCmp(c.formY, c.yx, c.yy),
+  );
+  const [boolVal, boolValOk] = constBoolVal(r);
+  return {
+    ...c,
+    kind: r.kind,
+    exact: r.toString(),
+    boolVal,
+    boolValOk,
+  };
+}
+
+test('Go 1.24 regenerates committed go/constant Complex Compare fixtures; native matches every case', () => {
+  const generated = go(['-constant-complex-compare']);
+  assert.equal(generated.status, 0, generated.stderr);
+  const committed = readFileSync(new URL('./constant-complex-compare-fixtures.json', import.meta.url), 'utf8');
+  assert.equal(generated.stdout, committed, 'Go Complex Compare fixture drift');
+  const fixture = JSON.parse(committed);
+  assert.equal(fixture.package, 'gotool');
+  assert.equal(fixture.slice, 'constant-complex-compare');
+  assert.ok(fixture.cases.length >= 450, `too few Complex Compare cases: ${fixture.cases.length}`);
+  const unknown = fixture.cases.filter((c) => c.formX === 'unknown' || c.formY === 'unknown' || (c.formX === 'imag' && ['1ii', 'i', 'xyz'].includes(c.xx)) || (c.formY === 'imag' && ['1ii', 'i', 'xyz'].includes(c.yx)));
+  assert.ok(unknown.length >= 3, `need Unknown/malformed Complex Compare cases, got ${unknown.length}`);
+  const eql = fixture.cases.filter((c) => c.op === 'EQL');
+  const neq = fixture.cases.filter((c) => c.op === 'NEQ');
+  assert.ok(eql.length >= 3, `need EQL cases, got ${eql.length}`);
+  assert.ok(neq.length >= 3, `need NEQ cases, got ${neq.length}`);
+  const malformed = fixture.cases.filter((c) => (c.formX === 'imag' && ['1ii', 'i', 'xyz'].includes(c.xx)) || (c.formY === 'imag' && ['1ii', 'i', 'xyz'].includes(c.yx)));
+  assert.ok(malformed.length >= 3, `need malformed IMAG compare cases, got ${malformed.length}`);
+  for (const c of fixture.cases) {
+    const got = evaluateCCmp(c);
+    assert.equal(got.kind, c.kind, `${c.id} kind`);
+    assert.equal(got.exact, c.exact, `${c.id} exact`);
+    assert.equal(got.boolVal, c.boolVal, `${c.id} boolVal`);
+    assert.equal(got.boolValOk, c.boolValOk, `${c.id} boolValOk`);
+    assert.equal(got.opTok, TOKEN[c.op], `${c.id} opTok`);
+  }
+});
+
+test('JS Complex Compare extras → native computes → Go verifies; corruptions fail', () => {
+  const extras = [
+    { formX: 'imag', xx: '4i', xy: '0', formY: 'imag', yx: '4i', yy: '0', op: 'EQL' },
+    { formX: 'imag', xx: '4i', xy: '0', formY: 'imag', yx: '2i', yy: '0', op: 'NEQ' },
+    { formX: 'int', xx: '0', xy: '0', formY: 'imag', yx: '0i', yy: '0', op: 'EQL' },
+    { formX: 'sum', xx: '1', xy: '1i', formY: 'imag', yx: '1i', yy: '0', op: 'NEQ' },
+    { formX: 'imag', xx: '1ii', xy: '0', formY: 'imag', yx: '1i', yy: '0', op: 'EQL' },
+    { formX: 'imag', xx: 'xyz', xy: '0', formY: 'unknown', yx: '0', yy: '0', op: 'NEQ' },
+  ];
+  const cases = extras.map((c, i) => evaluateCCmp({
+    id: `js-ccmp-${i}`, opTok: TOKEN[c.op], ...c,
+  }));
+  const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-complex-compare', cases };
+  const verified = go(['-verify-constant-complex-compare'], JSON.stringify(packet));
+  assert.equal(verified.status, 0, verified.stderr);
+  assert.match(verified.stdout, /Go verified 6 gotool constant-complex-compare cases/);
+  const broken = structuredClone(packet);
+  broken.cases[0].exact = 'not-a-bool';
+  const rejected = go(['-verify-constant-complex-compare'], JSON.stringify(broken));
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /mismatch case 0/);
+  assert.notEqual(go(['-verify-constant-complex-compare'], JSON.stringify({
+    schema: 1, package: 'gotool', go: 'js', slice: 'constant-complex-compare', cases: [],
+  })).status, 0);
+});
+
+test('constCompareOp Complex EQL/NEQ vs Go; LSS/Bool/String throw; constCompare stays numeric', () => {
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const twoI = constMakeFromLiteral('2i', TOKEN.IMAG, 0);
+  const zeroI = constMakeFromLiteral('0i', TOKEN.IMAG, 0);
+  const one = constMakeInt64(1n);
+  const z = constMakeInt64(0n);
+  const unk = constMakeFromLiteral('1ii', TOKEN.IMAG, 0);
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(constCompareOp(i, TOKEN.EQL, i).toString(), 'true');
+  assert.equal(constCompareOp(i, TOKEN.NEQ, i).toString(), 'false');
+  assert.equal(constCompareOp(i, TOKEN.EQL, twoI).toString(), 'false');
+  assert.equal(constCompareOp(i, TOKEN.NEQ, twoI).toString(), 'true');
+  assert.equal(constCompareOp(z, TOKEN.EQL, zeroI).toString(), 'true');
+  assert.equal(constCompareOp(one, TOKEN.EQL, i).toString(), 'false');
+  const mixed = constBinaryOp(TOKEN.ADD, one, i);
+  assert.equal(constCompareOp(mixed, TOKEN.EQL, i).toString(), 'false');
+  assert.equal(constCompareOp(mixed, TOKEN.EQL, mixed).toString(), 'true');
+  assert.equal(constCompareOp(unk, TOKEN.EQL, i).toString(), 'false');
+  assert.equal(constCompareOp(unk, TOKEN.NEQ, i).toString(), 'true');
+  assert.equal(constCompareOp(unk, TOKEN.NEQ, unk).toString(), 'false');
+  const t = constMakeBool(true);
+  const s = constMakeFromLiteral('"a"', TOKEN.STRING, 0);
+  assert.throws(() => constCompareOp(i, TOKEN.LSS, twoI), /EQL or NEQ/);
+  assert.throws(() => constCompareOp(i, TOKEN.ADD, twoI), /EQL or NEQ/);
+  assert.throws(() => constCompareOp(t, TOKEN.EQL, i), /Bool/);
+  assert.throws(() => constCompareOp(s, TOKEN.EQL, i), /String/);
+  assert.throws(() => constCompare(i, twoI), /Int or Float/);
 });

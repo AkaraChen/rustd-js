@@ -318,10 +318,7 @@ pub struct ConstBoolValResult {
 #[napi]
 pub fn const_bool_val(v: &GoConstValue) -> ConstBoolValResult {
     match (v.kind.as_str(), v.bool_val) {
-        ("Bool", Some(b)) => ConstBoolValResult {
-            value: b,
-            ok: true,
-        },
+        ("Bool", Some(b)) => ConstBoolValResult { value: b, ok: true },
         ("Unknown", _) => ConstBoolValResult {
             value: false,
             ok: true,
@@ -431,6 +428,83 @@ pub fn const_compare(x: &GoConstValue, y: &GoConstValue) -> Result<i32> {
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
     })
+}
+
+fn is_numeric_or_unknown(v: &GoConstValue) -> bool {
+    matches!(v.kind.as_str(), "Int" | "Float" | "Complex" | "Unknown")
+}
+
+/// Go `vtoc` for Compare: numeric keeps re and imag Int 0; Unknown becomes
+/// `complexVal{unknown, 0}` (not `makeComplex`, which would collapse to Unknown).
+fn vtoc_compare_parts(v: &GoConstValue) -> Result<(GoConstValue, GoConstValue)> {
+    match v.kind.as_str() {
+        "Complex" => Ok((real_part(v)?, imag_part(v)?)),
+        "Int" | "Float" => Ok((clone_value(v), make_int(num_bigint::BigInt::from(0)))),
+        "Unknown" => Ok((make_unknown(), make_int(num_bigint::BigInt::from(0)))),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp Complex operands must be Int, Float, Complex, or Unknown",
+        )),
+    }
+}
+
+fn compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<bool> {
+    if op != token::EQL && op != token::NEQ {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp op must be EQL or NEQ",
+        ));
+    }
+    if x.kind == "String" || y.kind == "String" {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp String stays later",
+        ));
+    }
+    if x.kind == "Bool" || y.kind == "Bool" {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp Bool EQL/NEQ is dumped as MakeBool in the Bool slice",
+        ));
+    }
+    if x.kind == "Complex" || y.kind == "Complex" {
+        if !is_numeric_or_unknown(x) || !is_numeric_or_unknown(y) {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constCompareOp Complex operands must be Int, Float, Complex, or Unknown",
+            ));
+        }
+        let (xr, xi) = vtoc_compare_parts(x)?;
+        let (yr, yi) = vtoc_compare_parts(y)?;
+        let re = compare_op(&xr, token::EQL, &yr)?;
+        let im = compare_op(&xi, token::EQL, &yi)?;
+        return Ok(if op == token::EQL {
+            re && im
+        } else {
+            !re || !im
+        });
+    }
+    if x.kind == "Unknown" || y.kind == "Unknown" {
+        return Ok(false);
+    }
+    if is_num_kind(x) && is_num_kind(y) {
+        let xr = as_rat(x, "x")?;
+        let yr = as_rat(y, "y")?;
+        let eq = xr == yr;
+        return Ok(if op == token::EQL { eq } else { !eq });
+    }
+    Err(Error::new(
+        Status::InvalidArg,
+        "gotool: constCompareOp operands must be Int, Float, Complex, or Unknown",
+    ))
+}
+
+/// Go `MakeBool(Compare(x, op, y))` for EQL/NEQ.
+/// Complex uses component EQL after `match`/`vtoc`. Unknown vs non-Complex is false.
+/// Unknown vs Complex follows Go: `vtoc(unknown)` then component Compare (NEQ can be true).
+#[napi]
+pub fn const_compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<GoConstValue> {
+    Ok(make_bool(compare_op(x, op, y)?))
 }
 
 /// Go `Sign`. Unknown is 1. Bool/String panic in Go → throw.
@@ -744,21 +818,23 @@ pub fn const_binary_op(op: i32, x: &GoConstValue, y: &GoConstValue) -> Result<Go
 }
 
 fn as_prec(prec: i64) -> Result<u32> {
-    u32::try_from(prec).map_err(|_| {
-        Error::new(
-            Status::InvalidArg,
-            "gotool: constUnaryOp prec must be an integer in 0..1000000",
-        )
-    }).and_then(|p| {
-        if p > 1_000_000 {
-            Err(Error::new(
+    u32::try_from(prec)
+        .map_err(|_| {
+            Error::new(
                 Status::InvalidArg,
                 "gotool: constUnaryOp prec must be an integer in 0..1000000",
-            ))
-        } else {
-            Ok(p)
-        }
-    })
+            )
+        })
+        .and_then(|p| {
+            if p > 1_000_000 {
+                Err(Error::new(
+                    Status::InvalidArg,
+                    "gotool: constUnaryOp prec must be an integer in 0..1000000",
+                ))
+            } else {
+                Ok(p)
+            }
+        })
 }
 
 fn as_shift_count(s: &BigInt) -> Result<u32> {
@@ -1092,9 +1168,9 @@ fn apply_exp2_exp5(
     exp5: i64,
 ) -> Option<GoConstValue> {
     if mant.sign() == Sign::NoSign {
-        return Some(make_float(BigRational::from_integer(num_bigint::BigInt::from(
-            0,
-        ))));
+        return Some(make_float(BigRational::from_integer(
+            num_bigint::BigInt::from(0),
+        )));
     }
     let bits = i64::try_from(mant.bits()).unwrap_or(i64::MAX);
     let log2 = approx_log2(bits, exp2, exp5);
@@ -1102,9 +1178,9 @@ fn apply_exp2_exp5(
         return None;
     }
     if log2 < BIG_MIN_EXP {
-        return Some(make_float(BigRational::from_integer(num_bigint::BigInt::from(
-            0,
-        ))));
+        return Some(make_float(BigRational::from_integer(
+            num_bigint::BigInt::from(0),
+        )));
     }
     if log2.unsigned_abs() >= SMALL_FLOAT_EXP as u64 && log2 != 0 {
         return None;
@@ -1268,7 +1344,13 @@ fn unquote(lit: &str) -> Option<Vec<u8>> {
             if end != inb.len() {
                 return None;
             }
-            Some(inb[1..end - 1].iter().copied().filter(|&b| b != b'\r').collect())
+            Some(
+                inb[1..end - 1]
+                    .iter()
+                    .copied()
+                    .filter(|&b| b != b'\r')
+                    .collect(),
+            )
         }
         b'"' | b'\'' => {
             let prefix = &inb[..end];

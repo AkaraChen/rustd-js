@@ -2121,3 +2121,174 @@ func verifyConstantComplexUnary(r io.Reader) {
 	}
 	fmt.Printf("Go verified %d gotool constant-complex-unary cases\n", len(packet.Cases))
 }
+
+type ConstCCmpCase struct {
+	ID        string `json:"id"`
+	Op        string `json:"op"`
+	OpTok     int    `json:"opTok"`
+	FormX     string `json:"formX"`
+	XX        string `json:"xx"`
+	XY        string `json:"xy"`
+	FormY     string `json:"formY"`
+	YX        string `json:"yx"`
+	YY        string `json:"yy"`
+	Kind      string `json:"kind"`
+	Exact     string `json:"exact"`
+	BoolVal   bool   `json:"boolVal"`
+	BoolValOk bool   `json:"boolValOk"`
+}
+
+type ConstCCmpPacket struct {
+	Schema  int             `json:"schema"`
+	Package string          `json:"package"`
+	Go      string          `json:"go"`
+	Slice   string          `json:"slice"`
+	Cases   []ConstCCmpCase `json:"cases"`
+}
+
+func makeCplxCmp(s cplxSrc) (constant.Value, error) {
+	switch s.form {
+	case "imag", "int", "quo", "unknown":
+		return makeCplx(s)
+	case "sum":
+		return makeCplxUnary(s)
+	default:
+		return nil, fmt.Errorf("unknown complex compare src form %q", s.form)
+	}
+}
+
+func evalComplexCompare(a, b cplxSrc, op token.Token) (c ConstCCmpCase, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	vx, err := makeCplxCmp(a)
+	if err != nil {
+		return ConstCCmpCase{}, err
+	}
+	vy, err := makeCplxCmp(b)
+	if err != nil {
+		return ConstCCmpCase{}, err
+	}
+	v := constant.MakeBool(constant.Compare(vx, op, vy))
+	c = ConstCCmpCase{
+		OpTok: int(op),
+		FormX: a.form,
+		XX:    a.x,
+		XY:    a.y,
+		FormY: b.form,
+		YX:    b.x,
+		YY:    b.y,
+		Kind:  v.Kind().String(),
+		Exact: v.ExactString(),
+	}
+	c.BoolVal, c.BoolValOk = boolValOK(v)
+	return c, nil
+}
+
+func complexCompareOps() []struct {
+	name string
+	tok  token.Token
+} {
+	return []struct {
+		name string
+		tok  token.Token
+	}{
+		{"EQL", token.EQL},
+		{"NEQ", token.NEQ},
+	}
+}
+
+// Go Compare on Complex is bool EQL/NEQ after match/vtoc, dumped as MakeBool.
+// imag/int/quo/unknown plus malformed IMAG and mixed re+im (sum).
+func complexCompareCorpus() []cplxSrc {
+	return []cplxSrc{
+		{"imag", "0i", "0"},
+		{"imag", "1i", "0"},
+		{"imag", "-1i", "0"},
+		{"imag", "2i", "0"},
+		{"imag", "1.5i", "0"},
+		{"int", "0", "0"},
+		{"int", "1", "0"},
+		{"quo", "1", "2"},
+		{"unknown", "0", "0"},
+		{"imag", "1ii", "0"},
+		{"imag", "i", "0"},
+		{"imag", "xyz", "0"},
+		{"sum", "1", "1i"},
+		{"sum", "0", "0i"},
+		{"sum", "-1", "1i"},
+	}
+}
+
+func dumpConstantComplexCompare(w io.Writer) {
+	packet := ConstCCmpPacket{
+		Schema:  1,
+		Package: "gotool",
+		Go:      "go1.24.13",
+		Slice:   "constant-complex-compare",
+	}
+	corpus := complexCompareCorpus()
+	for _, op := range complexCompareOps() {
+		for i, a := range corpus {
+			for j, b := range corpus {
+				c, err := evalComplexCompare(a, b, op.tok)
+				if err != nil {
+					fail(err)
+				}
+				c.ID = fmt.Sprintf("go-ccmp-%s-%d-%d", op.name, i, j)
+				c.Op = op.name
+				packet.Cases = append(packet.Cases, c)
+			}
+		}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(packet); err != nil {
+		fail(err)
+	}
+}
+
+func verifyConstantComplexCompare(r io.Reader) {
+	dec := json.NewDecoder(io.LimitReader(r, 32<<20))
+	dec.DisallowUnknownFields()
+	var packet ConstCCmpPacket
+	if err := dec.Decode(&packet); err != nil {
+		fail(err)
+	}
+	var extra interface{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		fail(fmt.Errorf("expected a single JSON packet"))
+	}
+	if packet.Schema != 1 || packet.Package != "gotool" || packet.Slice != "constant-complex-compare" || len(packet.Cases) == 0 {
+		fail(fmt.Errorf("invalid constant-complex-compare packet header or empty cases"))
+	}
+	tokOf := map[string]token.Token{}
+	for _, op := range complexCompareOps() {
+		tokOf[op.name] = op.tok
+	}
+	for i, c := range packet.Cases {
+		op, ok := tokOf[c.Op]
+		if !ok {
+			fail(fmt.Errorf("case %d id=%s: unknown op %q", i, c.ID, c.Op))
+		}
+		if c.OpTok != int(op) {
+			fail(fmt.Errorf("case %d id=%s: opTok %d != Go %s %d", i, c.ID, c.OpTok, c.Op, int(op)))
+		}
+		got, err := evalComplexCompare(
+			cplxSrc{c.FormX, c.XX, c.XY},
+			cplxSrc{c.FormY, c.YX, c.YY},
+			op,
+		)
+		if err != nil {
+			fail(fmt.Errorf("case %d id=%s: %w", i, c.ID, err))
+		}
+		if got.Kind != c.Kind || got.Exact != c.Exact || got.BoolVal != c.BoolVal || got.BoolValOk != c.BoolValOk {
+			fail(fmt.Errorf("mismatch case %d id=%s op=%s: go kind=%s exact=%s boolVal=%v ok=%v got kind=%s exact=%s boolVal=%v ok=%v",
+				i, c.ID, c.Op, got.Kind, got.Exact, got.BoolVal, got.BoolValOk,
+				c.Kind, c.Exact, c.BoolVal, c.BoolValOk))
+		}
+	}
+	fmt.Printf("Go verified %d gotool constant-complex-compare cases\n", len(packet.Cases))
+}
