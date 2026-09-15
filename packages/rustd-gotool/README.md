@@ -191,10 +191,13 @@ astFprint({ write: (c) => chunks.push(Buffer.from(c)) }, fset, ast);
   wrapping **bytes** (`"a"` and `` `a` `` are Int 97) and ignores leftover tail
   (`'ab'` / `'a'x` are Int 97). Unquoted 2-byte UTF-8 (`π` / `é` / `¥`) strips
   both bytes and is Unknown; unquoted 3+/4-byte (`中` / `€` / `😀`) leaves an
-  invalid UTF-8 inner byte and is Int 65533 (`U+FFFD`). Unclosed `'中` is also
-  U+FFFD. Quoted `"中"` / `"€"` / `` `😀` `` keep the rune. Combining
-  `'e\u0301'` takes only the first rune (Int 101). `aa` (empty inner), `'''`
-  (inner is `'`), and JS-style `'\u{41}'` are Unknown.
+  invalid UTF-8 inner byte and is Int 65533 (`U+FFFD`). ASCII-padded UTF-8
+  (` 中 ` / ` π ` / ` € ` / ` 😀 `) keeps the inner rune because the stripped
+  bytes are spaces. Unclosed `'中` / `'😀` / `'¥` is also U+FFFD; unclosed
+  ASCII `"a` / `` `a `` is Unknown. STRING-style `"\x41"` / `"\'"` / `` `\n` ``
+  still UnquoteChar with quote `'`. Combining `'e\u0301'` takes only the first
+  rune (Int 101). `aa` (empty inner), `'''` (inner is `'`), uppercase `'\X41'`,
+  and JS-style `'\u{41}'` are Unknown.
   Unicode noncharacters (`'\uFFFE'`) are valid runes. STRING uses `strconv.Unquote` (leftover is Unknown:
   `'ab'` as STRING is Unknown; `''` is the empty String). IMAG requires a trailing
   `i` and parses the prefix as a
