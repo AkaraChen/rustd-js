@@ -72,3 +72,9 @@ clean consumers and checks the published parent dependencies and CJS/ESM loading
 
 The full **Native packages** workflow remains the artifact acceptance check;
 the manual diagnostic workflows do not replace any of its gates.
+
+### SMTP STARTTLS and unicode test memory
+
+Windows cannot adopt a Winsock SOCKET through Node’s Unix-style `net.Socket({ fd })`. SMTP uses a Node-owned TCP stream on Windows from initial connection through TLS upgrade. The stream reader detaches its listeners before transferring ownership to TLS; native DATA dot-stuffing and every Go byte comparison remain in place. Unix keeps the native TCP transport. See the failed Windows job in run 34954842280 for the original `ERR_INVALID_FD_TYPE`.
+
+The unicode test’s recode helper now copies each encoded rune immediately into a bounded output buffer instead of retaining one typed array per rune. It still visits every input rune and uses the same native decode/encode calls and byte/checksum assertions. This avoids the large retained object graph observed when the local test process was killed with SIGKILL.
