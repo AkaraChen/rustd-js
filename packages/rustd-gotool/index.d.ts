@@ -26,10 +26,11 @@ export function constFloat64Val(v: GoConstValue): [number, boolean];
 export function constCompare(x: GoConstValue, y: GoConstValue): number;
 /**
  * Go `MakeBool(Compare(x, op, y))`.
- * Numeric/Complex: EQL/NEQ. String: EQL/NEQ/LSS/LEQ/GTR/GEQ (byte-wise Go string `<`).
+ * Numeric/Complex/Bool: EQL/NEQ. String: EQL/NEQ/LSS/LEQ/GTR/GEQ (byte-wise Go string `<`).
  * Complex (and mixed Int/Float/Unknown) uses component EQL after `match`/`vtoc`.
  * Unknown vs non-Complex is false; Unknown vs Complex can be NEQ true.
- * Unknown vs String is false. Mixed String vs Int/Bool/Complex throw. Bool still throws.
+ * Unknown vs String or Bool is false. Mixed String vs Int/Bool/Complex throw.
+ * Mixed Bool vs Int/Float/Complex throw (Go `match` would duplicate the Bool).
  */
 export function constCompareOp(x: GoConstValue, op: number, y: GoConstValue): GoConstValue;
 export function constSign(v: GoConstValue): number;

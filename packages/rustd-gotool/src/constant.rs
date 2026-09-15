@@ -504,16 +504,33 @@ fn compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<bool> {
     if x.kind == "Unknown" && y.kind == "Unknown" && string_cmp_op(op) {
         return Ok(false);
     }
+    // Go `match` then `unknownVal` returns false for every op, including LSS.
+    // Mixed Bool vs Int: Go `match0` falls through to `return x, x` so
+    // `true == 1` is true. Mixed Bool vs Complex `vtoc`-wraps. We reject both.
+    if x.kind == "Bool" || y.kind == "Bool" {
+        if x.kind == "Unknown" || y.kind == "Unknown" {
+            return Ok(false);
+        }
+        if op != token::EQL && op != token::NEQ {
+            return Err(Error::new(
+                Status::InvalidArg,
+                "gotool: constCompareOp op must be EQL or NEQ",
+            ));
+        }
+        if x.kind == "Bool" && y.kind == "Bool" {
+            let xb = x.bool_val.unwrap_or(false);
+            let yb = y.bool_val.unwrap_or(false);
+            return Ok(if op == token::EQL { xb == yb } else { xb != yb });
+        }
+        return Err(Error::new(
+            Status::InvalidArg,
+            "gotool: constCompareOp mixed Bool",
+        ));
+    }
     if op != token::EQL && op != token::NEQ {
         return Err(Error::new(
             Status::InvalidArg,
             "gotool: constCompareOp op must be EQL or NEQ",
-        ));
-    }
-    if x.kind == "Bool" || y.kind == "Bool" {
-        return Err(Error::new(
-            Status::InvalidArg,
-            "gotool: constCompareOp Bool EQL/NEQ is dumped as MakeBool in the Bool slice",
         ));
     }
     if x.kind == "Complex" || y.kind == "Complex" {
@@ -549,10 +566,11 @@ fn compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<bool> {
 }
 
 /// Go `MakeBool(Compare(x, op, y))`.
-/// Numeric/Complex: EQL/NEQ. String: EQL/NEQ/LSS/LEQ/GTR/GEQ (byte-wise).
+/// Numeric/Complex/Bool: EQL/NEQ. String: EQL/NEQ/LSS/LEQ/GTR/GEQ (byte-wise).
 /// Complex uses component EQL after `match`/`vtoc`. Unknown vs non-Complex is false.
 /// Unknown vs Complex follows Go: `vtoc(unknown)` then component Compare (NEQ can be true).
-/// Unknown vs String is false. Mixed String vs Int/Bool/Complex throws.
+/// Unknown vs String or Bool is false. Mixed String vs Int/Bool/Complex throws.
+/// Mixed Bool vs Int/Float/Complex throws (Go `match` would duplicate the Bool).
 #[napi]
 pub fn const_compare_op(x: &GoConstValue, op: i32, y: &GoConstValue) -> Result<GoConstValue> {
     Ok(make_bool(compare_op(x, op, y)?))

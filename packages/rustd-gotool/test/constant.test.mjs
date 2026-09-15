@@ -1088,14 +1088,7 @@ function evaluateBool(c) {
   else if (c.form === 'land') r = constBinaryOp(TOKEN.LAND, x, boolSrc(c.y));
   else if (c.form === 'lor') r = constBinaryOp(TOKEN.LOR, x, boolSrc(c.y));
   else if (c.form === 'eql' || c.form === 'neq') {
-    const y = boolSrc(c.y);
-    // Go Compare(unknown, EQL|NEQ, _) is false (unknownVal short-circuit), then MakeBool.
-    if (x.kind === 'Unknown' || y.kind === 'Unknown') r = constMakeBool(false);
-    else {
-      const [bx] = constBoolVal(x);
-      const [by] = constBoolVal(y);
-      r = constMakeBool(c.form === 'eql' ? bx === by : bx !== by);
-    }
+    r = constCompareOp(x, TOKEN[c.op], boolSrc(c.y));
   } else throw new Error(`unknown form ${c.form}`);
   const [boolVal, boolValOk] = constBoolVal(r);
   return { ...c, kind: r.kind, exact: r.toString(), boolVal, boolValOk };
@@ -1132,8 +1125,12 @@ test('JS Bool extras → native computes → Go verifies; corruptions fail', () 
     ['lor', 'false', 'false'],
     ['eql', 'true', 'true'],
     ['neq', 'true', 'false'],
+    ['eql', 'false', 'false'],
+    ['neq', 'false', 'true'],
     ['eql', 'unknown', 'false'],
     ['neq', 'unknown', 'true'],
+    ['eql', 'unknown', 'unknown'],
+    ['neq', 'unknown', 'unknown'],
     ['land', 'unknown', 'true'],
     ['lor', 'unknown', 'unknown'],
   ];
@@ -1148,7 +1145,7 @@ test('JS Bool extras → native computes → Go verifies; corruptions fail', () 
   const packet = { schema: 1, package: 'gotool', go: 'js', slice: 'constant-bool', cases };
   const verified = go(['-verify-constant-bool'], JSON.stringify(packet));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 12 gotool constant-bool cases/);
+  assert.match(verified.stdout, /Go verified 16 gotool constant-bool cases/);
   const broken = structuredClone(packet);
   broken.cases[1].exact = 'not-a-bool';
   const rejected = go(['-verify-constant-bool'], JSON.stringify(broken));
@@ -1495,7 +1492,7 @@ test('constCompareOp Complex EQL/NEQ vs Go; LSS/Bool/mixed String throw; constCo
   const s = constMakeFromLiteral('"a"', TOKEN.STRING, 0);
   assert.throws(() => constCompareOp(i, TOKEN.LSS, twoI), /EQL or NEQ/);
   assert.throws(() => constCompareOp(i, TOKEN.ADD, twoI), /EQL or NEQ/);
-  assert.throws(() => constCompareOp(t, TOKEN.EQL, i), /Bool/);
+  assert.throws(() => constCompareOp(t, TOKEN.EQL, i), /mixed Bool/);
   assert.throws(() => constCompareOp(s, TOKEN.EQL, i), /mixed String/);
   assert.throws(() => constCompare(i, twoI), /Int or Float/);
 });
@@ -1567,6 +1564,37 @@ test('JS String Compare extras → native computes → Go verifies; corruptions 
   assert.notEqual(go(['-verify-constant-string-compare'], JSON.stringify({
     schema: 1, package: 'gotool', go: 'js', slice: 'constant-string-compare', cases: [],
   })).status, 0);
+});
+
+test('constCompareOp Bool EQL/NEQ vs Go; mixed/LSS throw; Unknown LSS is false; constCompare stays numeric', () => {
+  const t = constMakeBool(true);
+  const f = constMakeBool(false);
+  const unk = constBinaryOp(TOKEN.QUO, constMakeInt64(1n), constMakeInt64(0n));
+  const one = constMakeInt64(1n);
+  const i = constMakeFromLiteral('1i', TOKEN.IMAG, 0);
+  const s = constMakeFromLiteral('"a"', TOKEN.STRING, 0);
+  const ch = constMakeFromLiteral("'a'", TOKEN.CHAR, 0);
+  assert.equal(unk.kind, 'Unknown');
+  assert.equal(constCompareOp(t, TOKEN.EQL, t).toString(), 'true');
+  assert.equal(constCompareOp(t, TOKEN.EQL, f).toString(), 'false');
+  assert.equal(constCompareOp(t, TOKEN.NEQ, f).toString(), 'true');
+  assert.equal(constCompareOp(t, TOKEN.NEQ, t).toString(), 'false');
+  assert.equal(constCompareOp(f, TOKEN.EQL, f).toString(), 'true');
+  assert.equal(constCompareOp(t, TOKEN.EQL, unk).toString(), 'false');
+  assert.equal(constCompareOp(unk, TOKEN.NEQ, t).toString(), 'false');
+  assert.equal(constCompareOp(unk, TOKEN.EQL, unk).toString(), 'false');
+  assert.equal(constCompareOp(unk, TOKEN.NEQ, unk).toString(), 'false');
+  // Go unknownVal short-circuits every op, including LSS, to false.
+  assert.equal(constCompareOp(unk, TOKEN.LSS, t).toString(), 'false');
+  assert.equal(constCompareOp(t, TOKEN.LSS, unk).toString(), 'false');
+  assert.throws(() => constCompareOp(t, TOKEN.LSS, f), /EQL or NEQ/);
+  assert.throws(() => constCompareOp(t, TOKEN.ADD, f), /EQL or NEQ/);
+  assert.throws(() => constCompareOp(t, TOKEN.EQL, one), /mixed Bool/);
+  assert.throws(() => constCompareOp(t, TOKEN.EQL, i), /mixed Bool/);
+  assert.throws(() => constCompareOp(t, TOKEN.EQL, ch), /mixed Bool/);
+  assert.throws(() => constCompareOp(one, TOKEN.EQL, t), /mixed Bool/);
+  assert.throws(() => constCompareOp(s, TOKEN.EQL, t), /mixed String/);
+  assert.throws(() => constCompare(t, f), /Int or Float/);
 });
 
 test('constCompareOp String EQL/NEQ/order vs Go; mixed/ADD throw; constCompare stays numeric', () => {
