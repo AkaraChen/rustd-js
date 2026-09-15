@@ -88,7 +88,9 @@ hold file descriptors.
   StructuralError and arbitrary OID arcs stay aligned.
 - XML mapping uses an explicit `XmlSchema` (`kind` discriminant) instead of
   Go struct tags. `tag` / `path` still accept Go-style `name,attr` and
-  `a>b>c` strings. Repeated child elements become arrays.
+  `a>b>c` strings. `,cdata` is a `kind: 'chardata'` field with `tag: ',cdata'`
+  (no extra schema kind): marshal wraps text in `<![CDATA[...]]>` and splits
+  on `]]>` the same way as Go `emitCDATA`. Repeated child elements become arrays.
 - `CharsetReader` runs in JavaScript (`TextDecoder` by default) and feeds
   UTF-8 into the native parser. The native tokenizer does not switch readers
   mid-stream.

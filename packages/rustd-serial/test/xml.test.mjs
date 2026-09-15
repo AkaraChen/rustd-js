@@ -47,6 +47,20 @@ const decodeSchemas = {
     kind: 'element',
     children: [{ name: 'inner', kind: 'any', type: 'string' }],
   },
+  cdata: {
+    name: 'c',
+    kind: 'element',
+    children: [{ name: 'body', kind: 'chardata', type: 'string', tag: ',cdata' }],
+  },
+  cdatamix: {
+    name: 'mixc',
+    kind: 'element',
+    children: [
+      { name: 'a', kind: 'element', type: 'string' },
+      { name: 'body', kind: 'chardata', type: 'string', tag: ',cdata' },
+      { name: 'b', kind: 'element', type: 'string' },
+    ],
+  },
   path: {
     name: 'doc',
     kind: 'element',
@@ -241,12 +255,14 @@ test('JS-generated XML verifies against Go', () => {
     { id: 'js-comment', kind: 'comment', xmlHex: hex(xmlMarshal({ msg: 'hi-' }, decodeSchemas.comment)) },
     { id: 'js-inner', kind: 'inner', xmlHex: hex(xmlMarshal({ inner: '<x>1</x><y>2</y>' }, decodeSchemas.inner)) },
     { id: 'js-mix', kind: 'mix', xmlHex: hex(xmlMarshal({ a: '1', msg: 'c', inner: '<z/>', b: '2' }, decodeSchemas.mix)) },
+    { id: 'js-cdata', kind: 'cdata', xmlHex: hex(xmlMarshal({ body: '1<2&3>' }, decodeSchemas.cdata)) },
+    { id: 'js-cdatamix', kind: 'cdatamix', xmlHex: hex(xmlMarshal({ a: '1', body: 'x<y', b: '2' }, decodeSchemas.cdatamix)) },
   ];
   const verified = go(['-pkg', 'serial-xml', '-verify'], JSON.stringify({
     schema: 1, package: 'serial-xml', people, decodes,
   }));
   assert.equal(verified.status, 0, verified.stderr);
-  assert.match(verified.stdout, /Go verified 12 serial-xml encode cases/);
+  assert.match(verified.stdout, /Go verified 14 serial-xml encode cases/);
 });
 
 test('xmllint parses native marshal output', () => {
