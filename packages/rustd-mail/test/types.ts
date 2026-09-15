@@ -24,6 +24,9 @@ void sendMail('127.0.0.1:25', auth, 'a@b.com', ['b@c.com'], 'Subject: x\r\n\r\nH
 void SmtpClient.dial('127.0.0.1:25').then(async (c) => {
   await c.hello();
   await c.startTls({ serverName: '127.0.0.1' });
+  await c.verify('alice@example.com');
+  await c.reset();
+  await c.noop();
   await c.mail('a@b.com');
   await c.rcpt('b@c.com');
   const w: SmtpDataWriter = await c.data();

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -175,6 +176,10 @@ func msgCRLF(s string) []byte {
 }
 
 func main() {
+	clientID := flag.String("client", "", "run one Go net/smtp case against -addr (no dump)")
+	addrFlag := flag.String("addr", "", "SMTP server address for -client")
+	flag.Parse()
+
 	dotMsg := "From: user@gmail.com\nTo: golang-nuts@googlegroups.com\nSubject: Hooray for Go\n\nLine 1\n.Leading dot line .\nGoodbye."
 	sendMsg := "From: test@example.com\nTo: other@example.com\nSubject: SendMail test\n\nSendMail is working for me.\n"
 	lfMsg := "From: a@b.com\nTo: c@d.com\n\nhello\n.world\nmixed\r\nline\n"
@@ -475,6 +480,94 @@ func main() {
 			},
 		},
 		{
+			id:     "client-auth-cram-md5",
+			kind:   "client",
+			banner: "220 localhost",
+			replies: []string{
+				"250-localhost\n250 AUTH CRAM-MD5",
+				"334 PDEyMzQ1Ni4xMzIyODc2OTE0QHRlc3RzZXJ2ZXI+",
+				"235 Accepted",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Auth(smtp.CRAMMD5Auth("user", "pass")); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-vrfy-rset-noop",
+			kind:   "client",
+			banner: "220 localhost",
+			replies: []string{
+				"250 localhost",
+				"250 alice",
+				"250 reset",
+				"250 ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Verify("alice@example.com"); err != nil {
+					return err
+				}
+				if err := c.Reset(); err != nil {
+					return err
+				}
+				if err := c.Noop(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
+			id:     "client-smtputf8-mail",
+			kind:   "client",
+			banner: "220 localhost",
+			replies: []string{
+				"250-localhost\n250-8BITMIME\n250 SMTPUTF8",
+				"250 Sender ok",
+				"250 Receiver ok",
+				"354 Go ahead",
+				"250 Data ok",
+				"221 Goodbye",
+			},
+			fn: func(addr string) error {
+				c, err := smtp.Dial(addr)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				if err := c.Mail("a@b.com"); err != nil {
+					return err
+				}
+				if err := c.Rcpt("c@d.com"); err != nil {
+					return err
+				}
+				w, err := c.Data()
+				if err != nil {
+					return err
+				}
+				if _, err := w.Write(msgCRLF(sendMsg)); err != nil {
+					return err
+				}
+				if err := w.Close(); err != nil {
+					return err
+				}
+				return c.Quit()
+			},
+		},
+		{
 			id:      "sendMail-inject-rcpt",
 			kind:    "validate",
 			banner:  "",
@@ -483,6 +576,24 @@ func main() {
 				return smtp.SendMail("127.0.0.1:1", nil, "a@b.com", []string{"b@c.com>\nDATA\n"}, []byte("x"))
 			},
 		},
+	}
+
+	if *clientID != "" {
+		if *addrFlag == "" {
+			fmt.Fprintln(os.Stderr, "-client requires -addr")
+			os.Exit(2)
+		}
+		for _, spec := range specs {
+			if spec.id == *clientID {
+				if err := spec.fn(*addrFlag); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				return
+			}
+		}
+		fmt.Fprintf(os.Stderr, "unknown smtp case %s\n", *clientID)
+		os.Exit(2)
 	}
 
 	var cases []Case
